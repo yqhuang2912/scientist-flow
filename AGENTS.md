@@ -13,3 +13,6 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - Never create branches, worktrees, or commit automatically. Only do so when the user explicitly ask for that specific action in the current request.
 - Leave changes uncommitted in the working tree on the current branch and let the user decide when and how to commit.
 
+## Node
+
+- Make sure to use `fnm env --use-on-cd | Out-String | Invoke-Expression; fnm use 22` to ensure the correct Node.js version is used.
