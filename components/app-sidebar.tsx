@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { nanoid } from "nanoid"
 import { BotIcon, PlusIcon, SearchIcon, UsersIcon } from "lucide-react"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 
 import { BotDialog } from "@/components/bot-dialog"
 import { ChatAvatar } from "@/components/chat-avatar"
@@ -45,6 +45,7 @@ const searchButtonClasses =
   "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base font-normal transition-colors outline-none file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm dark:bg-input/30 dark:disabled:bg-input/80 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40"
 
 export function AppSidebar({ chats }: { chats: SidebarChat[] }) {
+  const pathname = usePathname()
   const router = useRouter()
   const [botDialogOpen, setBotDialogOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -153,6 +154,7 @@ export function AppSidebar({ chats }: { chats: SidebarChat[] }) {
                   <SidebarMenuItem key={chat.id}>
                     <SidebarMenuButton
                       render={<button type="button" />}
+                      isActive={pathname === `/chats/${chat.id}`}
                       className={cn(
                         "h-auto min-h-10 p-1 group-data-[collapsible=icon]:min-h-0! group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:p-0!",
                         chat.lastMessagePreview ? "items-start" : "items-center"
