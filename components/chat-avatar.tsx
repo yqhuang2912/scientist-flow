@@ -12,12 +12,14 @@ interface ChatAvatarProps {
   seed: string
   animated?: boolean
   className?: string
+  alt?: string
 }
 
 export function ChatAvatar({
   seed,
   animated = false,
   className,
+  alt,
 }: ChatAvatarProps) {
   const avatar = new Avatar(clayStyle, {
     seed,
@@ -27,7 +29,7 @@ export function ChatAvatar({
   return (
     <Image
       src={avatar.toDataUri()}
-      alt={`${seed} avatar`}
+      alt={alt ?? `${seed} avatar`}
       width={32}
       height={32}
       className={cn("size-8", className)}

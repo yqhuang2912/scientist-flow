@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { nanoid } from "nanoid"
+import { useRouter } from "next/navigation"
 import { useForm } from "react-hook-form"
 import { PlusIcon, ShuffleIcon } from "lucide-react"
 
@@ -63,10 +64,19 @@ const defaultInstructions = botPresets[0].instructions
 
 interface BotDialogProps {
   initialAvatarSeed: string
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  showTrigger?: boolean
 }
 
-export function BotDialog({ initialAvatarSeed }: BotDialogProps) {
-  const [open, setOpen] = useState(false)
+export function BotDialog({
+  initialAvatarSeed,
+  open: openProp,
+  onOpenChange,
+  showTrigger = true,
+}: BotDialogProps) {
+  const router = useRouter()
+  const [internalOpen, setInternalOpen] = useState(false)
   const [avatarSeed, setAvatarSeed] = useState(initialAvatarSeed)
   const [serverError, setServerError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
@@ -79,6 +89,18 @@ export function BotDialog({ initialAvatarSeed }: BotDialogProps) {
       instructions: defaultInstructions,
     },
   })
+  const open = openProp ?? internalOpen
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (openProp === undefined) {
+      setInternalOpen(nextOpen)
+    }
+
+    onOpenChange?.(nextOpen)
+    if (!nextOpen) {
+      setServerError(null)
+    }
+  }
 
   function shuffleAvatar() {
     const nextSeed = nanoid()
@@ -122,28 +144,23 @@ export function BotDialog({ initialAvatarSeed }: BotDialogProps) {
         job: botPresets[0].job,
         instructions: defaultInstructions,
       })
-      setOpen(false)
+      handleOpenChange(false)
+      router.refresh()
     })
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(nextOpen) => {
-        setOpen(nextOpen)
-        if (!nextOpen) {
-          setServerError(null)
-        }
-      }}
-    >
-      <DialogTrigger
-        render={
-          <Button variant="secondary" size="sm" className="rounded-md px-3" />
-        }
-      >
-        <PlusIcon data-icon="inline-start" />
-        Create a new bot
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      {showTrigger && (
+        <DialogTrigger
+          render={
+            <Button variant="secondary" size="sm" className="rounded-md px-3" />
+          }
+        >
+          <PlusIcon data-icon="inline-start" />
+          Create a new bot
+        </DialogTrigger>
+      )}
       <DialogContent className="dark max-w-[calc(100%-2rem)] gap-0 overflow-hidden p-4 pb-0 sm:max-w-2xl">
         <DialogHeader className="gap-1">
           <DialogTitle>New bot</DialogTitle>
