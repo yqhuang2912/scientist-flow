@@ -23,6 +23,17 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - Never use migrations: do not run `drizzle-kit generate` or `drizzle-kit migrate`, and do not create migration files or a `drizzle/` folder.
 - This is a development project. There is no backwards compactibility and the data is worthless. Prefer data loss: never backfill, migrate, or preserve existing rows, and never spend effort on keeping old data working. Every schema change means a clean slate.
 
+## Forms
+
+- Use `react-hook-form` with `zodResolver` and a shared Zod schema. Add `@hookform/resolvers`, `react-hook-form`, and `zod` when a form needs them.
+- Generate database insert validation with `createInsertSchema` from `drizzle-zod` next to the Drizzle table schema. Refine required text fields with `.trim().min(1, ...)` so empty strings are rejected on the server as well as in the browser.
+- Validate again inside every server action before writing to Neon. Treat client validation as user feedback, not as a database safety boundary.
+- Compose forms with the Base UI shadcn `FieldGroup` and `Field` primitives. Put `data-invalid` on invalid fields, `aria-invalid` on their controls, and render errors with `FieldError`.
+- Keep dialog footers outside the `<form>` when the footer is a visual panel. Give the form an `id` and connect its submit button with `form="..."` so the footer does not affect form layout.
+- `DialogFooter` has a default negative bottom margin. Override it with `mb-0` when the footer must retain bottom padding, and use `overflow-hidden` on the dialog content when its rounded footer should stay inside the panel.
+- When dialog content needs more room, override the dialog's default `sm:max-w-sm` with an explicit `sm:max-w-*` class. Keep important supporting text on one line at the supported breakpoint with `sm:whitespace-nowrap`.
+- Use `useTransition` for server-action submission state, disable submit/cancel controls while pending, and show a user-facing error when the action fails.
+
 ## DiceBear
 
 Use DiceBear 10. Documentation: https://www.dicebear.com/llms.txt

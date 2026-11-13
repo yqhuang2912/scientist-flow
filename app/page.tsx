@@ -1,5 +1,4 @@
 import { nanoid } from "nanoid"
-import { Plus } from "lucide-react"
 
 import {
   Empty,
@@ -9,7 +8,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
-import { Button } from "@/components/ui/button"
+import { BotDialog } from "@/components/bot-dialog"
 import { ChatAvatar } from "@/components/chat-avatar"
 
 export const dynamic = "force-dynamic"
@@ -33,10 +32,7 @@ export default function Page() {
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent className="w-auto max-w-none">
-          <Button variant="secondary" size="sm" className="rounded-md px-3">
-            <Plus data-icon="inline-start" />
-            Create a new bot
-          </Button>
+          <BotDialog initialAvatarSeed={avatarSeed} />
         </EmptyContent>
       </Empty>
     </main>

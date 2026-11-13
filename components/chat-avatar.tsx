@@ -1,3 +1,5 @@
+"use client"
+
 import Image from "next/image"
 import { Avatar, Style } from "@dicebear/core"
 import clay from "@dicebear/styles/clay.json"
