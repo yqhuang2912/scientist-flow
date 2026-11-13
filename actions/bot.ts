@@ -1,10 +1,17 @@
 "use server"
 
+import { nanoid } from "nanoid"
+
 import { db } from "@/lib/db"
-import { bots, insertBotSchema } from "@/db/schema"
+import { bots, chatMembers, chats, insertBotSchema } from "@/db/schema"
 
 type CreateBotResult =
-  | { success: true; bot: typeof bots.$inferSelect }
+  | {
+      success: true
+      bot: typeof bots.$inferSelect
+      chat: typeof chats.$inferSelect
+      chatMember: typeof chatMembers.$inferSelect
+    }
   | { success: false; error: string }
 
 export async function createBot(input: unknown): Promise<CreateBotResult> {
@@ -18,13 +25,29 @@ export async function createBot(input: unknown): Promise<CreateBotResult> {
   }
 
   try {
-    const [bot] = await db.insert(bots).values(parsed.data).returning()
+    const botId = nanoid()
+    const chatId = nanoid()
+    const [botRows, chatRows, chatMemberRows] = await db.batch([
+      db
+        .insert(bots)
+        .values({ ...parsed.data, id: botId })
+        .returning(),
+      db
+        .insert(chats)
+        .values({ id: chatId, kind: "direct", name: null })
+        .returning(),
+      db.insert(chatMembers).values({ chatId, botId }).returning(),
+    ])
 
-    if (!bot) {
+    const bot = botRows[0]
+    const chat = chatRows[0]
+    const chatMember = chatMemberRows[0]
+
+    if (!bot || !chat || !chatMember) {
       return { success: false, error: "The bot could not be created." }
     }
 
-    return { success: true, bot }
+    return { success: true, bot, chat, chatMember }
   } catch (error) {
     console.error("Failed to create bot", error)
     return { success: false, error: "The bot could not be created." }
