@@ -2,6 +2,18 @@
 
 This is a Next.js template with shadcn/ui.
 
+## Drizzle ORM with Neon
+
+The database client is available from `@/lib/db`. Runtime queries use the pooled `DATABASE_URL`; Drizzle Kit uses the direct `DATABASE_URL_UNPOOLED` connection for schema operations.
+
+Copy `.env.example` to `.env.local` and replace both placeholders with connection strings from Neon.
+
+```bash
+npm run db:push
+```
+
+The starter schema includes a `todos` table; add more tables to `db/schema.ts` before pushing schema changes.
+
 ## Adding components
 
 To add components to your app, run the following command:

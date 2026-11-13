@@ -16,3 +16,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 ## Node
 
 - Make sure to use `fnm env --use-on-cd | Out-String | Invoke-Expression; fnm use 22` to ensure the correct Node.js version is used.
+
+## Database
+
+- Apply schema changes only with `npm run db:push` (`drizzle-kit push`)
+- Never use migrations: do not run `drizzle-kit generate` or `drizzle-kit migrate`, and do not create migration files or a `drizzle/` folder.
+- This is a development project. There is no backwards compactibility and the data is worthless. Prefer data loss: never backfill, migrate, or preserve existing rows, and never spend effort on keeping old data working. Every schema change means a clean slate.
