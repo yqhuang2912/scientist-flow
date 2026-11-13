@@ -70,7 +70,7 @@ export async function getUserChats(): Promise<SidebarChat[]> {
     chatMap.set(row.chatId, {
       id: row.chatId,
       name: row.chatName ?? bot?.name ?? "Untitled chat",
-      lastMessagePreview: row.lastMessagePreview ?? "No messages yet",
+      lastMessagePreview: row.lastMessagePreview ?? "",
       lastMessageAtLabel: formatDistanceToNow(row.lastMessageAt, {
         addSuffix: false,
       }),

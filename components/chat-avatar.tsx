@@ -2,11 +2,11 @@
 
 import Image from "next/image"
 import { Avatar, Style } from "@dicebear/core"
-import clay from "@dicebear/styles/clay.json"
+import gaze from "@dicebear/styles/gaze.json"
 
 import { cn } from "@/lib/utils"
 
-const clayStyle = new Style(clay)
+const gazeStyle = new Style(gaze)
 
 interface ChatAvatarProps {
   seed: string
@@ -21,7 +21,7 @@ export function ChatAvatar({
   className,
   alt,
 }: ChatAvatarProps) {
-  const avatar = new Avatar(clayStyle, {
+  const avatar = new Avatar(gazeStyle, {
     seed,
     animationVariant: animated ? "fast" : "none",
   })

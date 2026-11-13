@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation"
 import { BotDialog } from "@/components/bot-dialog"
 import { ChatAvatar } from "@/components/chat-avatar"
 import type { SidebarChat } from "@/queries/bots"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
   Command,
@@ -36,6 +37,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarRail,
 } from "@/components/ui/sidebar"
 import { Kbd, KbdGroup } from "@/components/ui/kbd"
 
@@ -60,7 +62,7 @@ export function AppSidebar({ chats }: { chats: SidebarChat[] }) {
         event.repeat ||
         (!event.metaKey && !event.ctrlKey) ||
         event.altKey ||
-        event.key.toLowerCase() !== "x"
+        event.key.toLowerCase() !== "k"
       ) {
         return
       }
@@ -86,17 +88,19 @@ export function AppSidebar({ chats }: { chats: SidebarChat[] }) {
 
   return (
     <>
-      <Sidebar className="group-data-[side=left]:border-r-0">
+      <Sidebar collapsible="icon" className="group-data-[side=left]:border-r-0">
         <SidebarHeader>
-          <SidebarMenu>
-            <SidebarMenuItem className="flex justify-end">
+          <SidebarMenu className="gap-2">
+            <SidebarMenuItem className="flex justify-end group-data-[collapsible=icon]:justify-center">
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
-                    <SidebarMenuButton
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
                       aria-label="Create"
-                      size="lg"
-                      className="size-10 justify-center p-0"
+                      className="group-data-[collapsible=icon]:rounded-md group-data-[collapsible=icon]:border-transparent! group-data-[collapsible=icon]:bg-transparent! group-data-[collapsible=icon]:text-sidebar-foreground group-data-[collapsible=icon]:hover:bg-sidebar-accent! group-data-[collapsible=icon]:hover:text-sidebar-accent-foreground!"
                     />
                   }
                 >
@@ -125,45 +129,53 @@ export function AppSidebar({ chats }: { chats: SidebarChat[] }) {
               <Button
                 type="button"
                 variant="ghost"
-                className={`${searchButtonClasses} justify-start gap-2 text-muted-foreground hover:text-foreground`}
+                className={`${searchButtonClasses} justify-start gap-2 text-muted-foreground group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:rounded-md group-data-[collapsible=icon]:border-transparent! group-data-[collapsible=icon]:bg-transparent! group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:text-sidebar-foreground hover:text-foreground group-data-[collapsible=icon]:hover:bg-sidebar-accent! group-data-[collapsible=icon]:hover:text-sidebar-accent-foreground!`}
                 onClick={() => setSearchOpen(true)}
               >
                 <SearchIcon data-icon="inline-start" />
-                <span>Search chats</span>
-                <KbdGroup className="ml-auto">
+                <span className="group-data-[collapsible=icon]:hidden">
+                  Search chats
+                </span>
+                <KbdGroup className="ml-auto gap-0.5 group-data-[collapsible=icon]:hidden">
                   <Kbd>⌘</Kbd>
-                  <Kbd>X</Kbd>
+                  <Kbd>K</Kbd>
                 </KbdGroup>
               </Button>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarHeader>
         <SidebarContent>
-          <SidebarGroup>
+          <SidebarGroup className="group-data-[collapsible=icon]:pt-0">
             <SidebarGroupLabel>Chats</SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
+              <SidebarMenu className="group-data-[collapsible=icon]:gap-2">
                 {chats.map((chat) => (
                   <SidebarMenuItem key={chat.id}>
                     <SidebarMenuButton
                       render={<button type="button" />}
-                      className="h-auto min-h-12 items-start p-2"
+                      className={cn(
+                        "h-auto min-h-10 p-1 group-data-[collapsible=icon]:min-h-0! group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:p-0!",
+                        chat.lastMessagePreview ? "items-start" : "items-center"
+                      )}
                       onClick={() => handleChatSelect(chat.id)}
                     >
                       <ChatAvatar
                         seed={chat.bot?.avatar ?? chat.id}
+                        animated
                         alt={`${chat.name} avatar`}
-                        className="size-10 shrink-0 rounded-xl"
+                        className="size-9 shrink-0 rounded-xl group-data-[collapsible=icon]:size-8"
                       />
-                      <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-                        <span className="w-full truncate font-medium">
+                      <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5 group-data-[collapsible=icon]:hidden">
+                        <span className="w-full truncate text-xs font-medium">
                           {chat.name}
                         </span>
-                        <span className="w-full truncate text-xs text-sidebar-foreground/70">
-                          {chat.lastMessagePreview}
-                        </span>
+                        {chat.lastMessagePreview && (
+                          <span className="w-full truncate text-xs text-sidebar-foreground/70">
+                            {chat.lastMessagePreview}
+                          </span>
+                        )}
                       </span>
-                      <time className="shrink-0 text-xs text-sidebar-foreground/70">
+                      <time className="shrink-0 text-[10px] text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">
                         {chat.lastMessageAtLabel}
                       </time>
                     </SidebarMenuButton>
@@ -173,6 +185,7 @@ export function AppSidebar({ chats }: { chats: SidebarChat[] }) {
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
+        <SidebarRail />
       </Sidebar>
       <BotDialog
         initialAvatarSeed={avatarSeed}
@@ -200,14 +213,17 @@ export function AppSidebar({ chats }: { chats: SidebarChat[] }) {
                 >
                   <ChatAvatar
                     seed={chat.bot?.avatar ?? chat.id}
+                    animated
                     alt={`${chat.name} avatar`}
                     className="size-8 rounded-lg"
                   />
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="truncate font-medium">{chat.name}</span>
-                    <span className="truncate text-xs text-muted-foreground">
-                      {chat.lastMessagePreview}
-                    </span>
+                    {chat.lastMessagePreview && (
+                      <span className="truncate text-xs text-muted-foreground">
+                        {chat.lastMessagePreview}
+                      </span>
+                    )}
                   </span>
                   <CommandShortcut>{chat.lastMessageAtLabel}</CommandShortcut>
                 </CommandItem>
