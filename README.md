@@ -12,7 +12,7 @@ Copy `.env.example` to `.env.local` and replace both placeholders with connectio
 npm run db:push
 ```
 
-The starter schema includes a `todos` table; add more tables to `db/schema.ts` before pushing schema changes.
+The starter schema includes a `bots` table; add more tables to `db/schema.ts` before pushing schema changes.
 
 ## Adding components
 
