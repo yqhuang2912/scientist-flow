@@ -81,8 +81,3 @@ export async function getUserChats(): Promise<SidebarChat[]> {
 export async function getBots(): Promise<BotSummary[]> {
   return db.select().from(bots).orderBy(asc(bots.createdAt))
 }
-
-export async function getBotById(botId: string): Promise<BotSummary | null> {
-  const rows = await db.select().from(bots).where(eq(bots.id, botId)).limit(1)
-  return rows[0] ?? null
-}

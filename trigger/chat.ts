@@ -2,7 +2,7 @@ import { openrouter } from "@openrouter/ai-sdk-provider"
 import { chat, defaultStorage } from "@trigger.dev/sdk/ai"
 import { z } from "zod"
 
-import { getBotById } from "@/queries/bots"
+import { getTriggerBotById } from "./bot"
 
 const systemInstructions = `You are Scientist Flow, a concise and helpful AI research assistant.
 
@@ -19,7 +19,9 @@ export const chatAgent = chat.agent({
     botId: z.string().min(1).optional(),
   }),
   run: async ({ messages, clientData, signal, streamText }) => {
-    const bot = clientData?.botId ? await getBotById(clientData.botId) : null
+    const bot = clientData?.botId
+      ? await getTriggerBotById(clientData.botId)
+      : null
     const botInstructions = bot
       ? [
           `Your name is ${bot.name}.`,
