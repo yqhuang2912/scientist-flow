@@ -7,7 +7,9 @@ import { usePathname, useRouter } from "next/navigation"
 
 import { BotDialog } from "@/components/bot-dialog"
 import { ChatAvatar } from "@/components/chat-avatar"
-import type { SidebarChat } from "@/queries/bots"
+import { GroupChatAvatar } from "@/components/group-chat-avatar"
+import { GroupChatDialog } from "@/components/group-chat-dialog"
+import type { BotSummary, SidebarChat } from "@/queries/bots"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
@@ -44,10 +46,17 @@ import { Kbd, KbdGroup } from "@/components/ui/kbd"
 const searchButtonClasses =
   "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base font-normal transition-colors outline-none file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm dark:bg-input/30 dark:disabled:bg-input/80 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40"
 
-export function AppSidebar({ chats }: { chats: SidebarChat[] }) {
+export function AppSidebar({
+  chats,
+  bots,
+}: {
+  chats: SidebarChat[]
+  bots: BotSummary[]
+}) {
   const pathname = usePathname()
   const router = useRouter()
   const [botDialogOpen, setBotDialogOpen] = useState(false)
+  const [groupChatDialogOpen, setGroupChatDialogOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [avatarSeed] = useState(() => nanoid())
 
@@ -118,7 +127,9 @@ export function AppSidebar({ chats }: { chats: SidebarChat[] }) {
                       <BotIcon data-icon="inline-start" />
                       Create new bot
                     </DropdownMenuItem>
-                    <DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setGroupChatDialogOpen(true)}
+                    >
                       <UsersIcon data-icon="inline-start" />
                       Create group chat
                     </DropdownMenuItem>
@@ -161,12 +172,22 @@ export function AppSidebar({ chats }: { chats: SidebarChat[] }) {
                       )}
                       onClick={() => handleChatSelect(chat.id)}
                     >
-                      <ChatAvatar
-                        seed={chat.bot?.avatar ?? chat.id}
-                        animated
-                        alt={`${chat.name} avatar`}
-                        className="size-9 shrink-0 rounded-xl group-data-[collapsible=icon]:size-8"
-                      />
+                      {chat.kind === "group" ? (
+                        <GroupChatAvatar
+                          bots={chat.bots}
+                          fallbackSeed={chat.id}
+                          animated
+                          alt={`${chat.name} avatar`}
+                          className="size-9 shrink-0 rounded-xl group-data-[collapsible=icon]:size-8"
+                        />
+                      ) : (
+                        <ChatAvatar
+                          seed={chat.bot?.avatar ?? chat.id}
+                          animated
+                          alt={`${chat.name} avatar`}
+                          className="size-9 shrink-0 rounded-xl group-data-[collapsible=icon]:size-8"
+                        />
+                      )}
                       <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5 group-data-[collapsible=icon]:hidden">
                         <span className="w-full truncate text-xs font-medium">
                           {chat.name}
@@ -195,6 +216,11 @@ export function AppSidebar({ chats }: { chats: SidebarChat[] }) {
         onOpenChange={setBotDialogOpen}
         showTrigger={false}
       />
+      <GroupChatDialog
+        bots={bots}
+        open={groupChatDialogOpen}
+        onOpenChange={setGroupChatDialogOpen}
+      />
       <CommandDialog
         open={searchOpen}
         onOpenChange={setSearchOpen}
@@ -213,12 +239,22 @@ export function AppSidebar({ chats }: { chats: SidebarChat[] }) {
                   value={`${chat.name} ${chat.lastMessagePreview}`}
                   onSelect={() => handleChatSelect(chat.id)}
                 >
-                  <ChatAvatar
-                    seed={chat.bot?.avatar ?? chat.id}
-                    animated
-                    alt={`${chat.name} avatar`}
-                    className="size-8 rounded-lg"
-                  />
+                  {chat.kind === "group" ? (
+                    <GroupChatAvatar
+                      bots={chat.bots}
+                      fallbackSeed={chat.id}
+                      animated
+                      alt={`${chat.name} avatar`}
+                      className="size-8 rounded-lg"
+                    />
+                  ) : (
+                    <ChatAvatar
+                      seed={chat.bot?.avatar ?? chat.id}
+                      animated
+                      alt={`${chat.name} avatar`}
+                      className="size-8 rounded-lg"
+                    />
+                  )}
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="truncate font-medium">{chat.name}</span>
                     {chat.lastMessagePreview && (

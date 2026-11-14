@@ -6,54 +6,41 @@ import { asc, desc, eq } from "drizzle-orm"
 import { bots, chatMembers, chats } from "@/db/schema"
 import { db } from "@/lib/db"
 
+export type BotSummary = Pick<
+  typeof bots.$inferSelect,
+  "id" | "name" | "avatar" | "job" | "instructions"
+>
+
 export interface SidebarChat {
   id: string
+  kind: "direct" | "group"
   name: string
   lastMessagePreview: string
   lastMessageAtLabel: string
-  bot: {
-    id: string
-    name: string
-    avatar: string
-  } | null
+  bots: Pick<BotSummary, "id" | "name" | "avatar">[]
+  bot: Pick<BotSummary, "id" | "name" | "avatar"> | null
 }
 
 export async function getUserChats(): Promise<SidebarChat[]> {
-  const [firstBotRows, chatRows] = await Promise.all([
-    db
-      .select({
-        id: bots.id,
-        name: bots.name,
-        avatar: bots.avatar,
-      })
-      .from(bots)
-      .orderBy(asc(bots.createdAt))
-      .limit(1),
-    db
-      .select({
-        chatId: chats.id,
-        chatKind: chats.kind,
-        chatName: chats.name,
-        lastMessagePreview: chats.lastMessagePreview,
-        lastMessageAt: chats.lastMessageAt,
-        botId: bots.id,
-        botName: bots.name,
-        botAvatar: bots.avatar,
-      })
-      .from(chats)
-      .leftJoin(chatMembers, eq(chatMembers.chatId, chats.id))
-      .leftJoin(bots, eq(chatMembers.botId, bots.id))
-      .orderBy(desc(chats.lastMessageAt), desc(chatMembers.joinedAt)),
-  ])
+  const chatRows = await db
+    .select({
+      chatId: chats.id,
+      chatKind: chats.kind,
+      chatName: chats.name,
+      lastMessagePreview: chats.lastMessagePreview,
+      lastMessageAt: chats.lastMessageAt,
+      botId: bots.id,
+      botName: bots.name,
+      botAvatar: bots.avatar,
+    })
+    .from(chats)
+    .leftJoin(chatMembers, eq(chatMembers.chatId, chats.id))
+    .leftJoin(bots, eq(chatMembers.botId, bots.id))
+    .orderBy(desc(chats.lastMessageAt), desc(chatMembers.joinedAt))
 
-  const firstBot = firstBotRows[0] ?? null
   const chatMap = new Map<string, SidebarChat>()
 
   for (const row of chatRows) {
-    if (chatMap.has(row.chatId)) {
-      continue
-    }
-
     const memberBot =
       row.botId && row.botName && row.botAvatar
         ? {
@@ -62,21 +49,40 @@ export async function getUserChats(): Promise<SidebarChat[]> {
             avatar: row.botAvatar,
           }
         : null
-    const bot =
-      row.chatKind === "group"
-        ? (firstBot ?? memberBot)
-        : (memberBot ?? firstBot)
 
+    const existingChat = chatMap.get(row.chatId)
+    if (existingChat) {
+      if (
+        memberBot &&
+        !existingChat.bots.some((bot) => bot.id === memberBot.id)
+      ) {
+        existingChat.bots.push(memberBot)
+      }
+      continue
+    }
+
+    const memberBots = memberBot ? [memberBot] : []
     chatMap.set(row.chatId, {
       id: row.chatId,
-      name: row.chatName ?? bot?.name ?? "Untitled chat",
+      kind: row.chatKind,
+      name: row.chatName ?? memberBot?.name ?? "Untitled chat",
       lastMessagePreview: row.lastMessagePreview ?? "",
       lastMessageAtLabel: formatDistanceToNow(row.lastMessageAt, {
         addSuffix: false,
       }),
-      bot,
+      bots: memberBots,
+      bot: memberBot,
     })
   }
 
   return [...chatMap.values()]
+}
+
+export async function getBots(): Promise<BotSummary[]> {
+  return db.select().from(bots).orderBy(asc(bots.createdAt))
+}
+
+export async function getBotById(botId: string): Promise<BotSummary | null> {
+  const rows = await db.select().from(bots).where(eq(bots.id, botId)).limit(1)
+  return rows[0] ?? null
 }

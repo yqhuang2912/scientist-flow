@@ -1,5 +1,8 @@
 import { openrouter } from "@openrouter/ai-sdk-provider"
 import { chat, defaultStorage } from "@trigger.dev/sdk/ai"
+import { z } from "zod"
+
+import { getBotById } from "@/queries/bots"
 
 const systemInstructions = `You are Scientist Flow, a concise and helpful AI research assistant.
 
@@ -12,11 +15,26 @@ You are running in an isolated sandbox scoped to this chat. Treat the sandbox as
 export const chatAgent = chat.agent({
   id: "chat-agent",
   storage: defaultStorage,
-  run: async ({ messages, signal, streamText }) =>
-    streamText({
+  clientDataSchema: z.object({
+    botId: z.string().min(1).optional(),
+  }),
+  run: async ({ messages, clientData, signal, streamText }) => {
+    const bot = clientData?.botId ? await getBotById(clientData.botId) : null
+    const botInstructions = bot
+      ? [
+          `Your name is ${bot.name}.`,
+          `Your job is ${bot.job}.`,
+          bot.instructions ? `How you should work: ${bot.instructions}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n")
+      : "Respond as the selected bot for this chat."
+
+    return streamText({
       model: openrouter("baidu/ernie-5.5-flash-preview:free"),
-      system: systemInstructions,
+      system: `${systemInstructions}\n\n${botInstructions}`,
       messages,
       abortSignal: signal,
-    }),
+    })
+  },
 })

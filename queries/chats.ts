@@ -12,6 +12,13 @@ export interface ChatWithBot {
   lastMessagePreview: string | null
   lastMessageAt: Date
   createdAt: Date
+  bots: {
+    id: string
+    name: string
+    avatar: string
+    job: string
+    instructions: string | null
+  }[]
   bot: {
     id: string
     name: string
@@ -41,12 +48,29 @@ export async function getChat(chatId: string): Promise<ChatWithBot | null> {
     .leftJoin(bots, eq(chatMembers.botId, bots.id))
     .where(eq(chats.id, chatId))
     .orderBy(asc(chatMembers.joinedAt))
-    .limit(1)
-
   const row = rows[0]
   if (!row) {
     return null
   }
+
+  const memberBots = rows.reduce<ChatWithBot["bots"]>((allBots, currentRow) => {
+    if (
+      currentRow.botId &&
+      currentRow.botName &&
+      currentRow.botAvatar &&
+      currentRow.botJob &&
+      !allBots.some((bot) => bot.id === currentRow.botId)
+    ) {
+      allBots.push({
+        id: currentRow.botId,
+        name: currentRow.botName,
+        avatar: currentRow.botAvatar,
+        job: currentRow.botJob,
+        instructions: currentRow.botInstructions,
+      })
+    }
+    return allBots
+  }, [])
 
   return {
     id: row.id,
@@ -55,15 +79,7 @@ export async function getChat(chatId: string): Promise<ChatWithBot | null> {
     lastMessagePreview: row.lastMessagePreview,
     lastMessageAt: row.lastMessageAt,
     createdAt: row.createdAt,
-    bot:
-      row.botId && row.botName && row.botAvatar && row.botJob
-        ? {
-            id: row.botId,
-            name: row.botName,
-            avatar: row.botAvatar,
-            job: row.botJob,
-            instructions: row.botInstructions,
-          }
-        : null,
+    bots: memberBots,
+    bot: memberBots[0] ?? null,
   }
 }

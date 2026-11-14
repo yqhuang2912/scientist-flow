@@ -2,7 +2,11 @@
 
 import { auth } from "@trigger.dev/sdk"
 import { chat, defaultStorage } from "@trigger.dev/sdk/ai"
+import { inArray } from "drizzle-orm"
+import { nanoid } from "nanoid"
 
+import { groupChatFormSchema, bots, chatMembers, chats } from "@/db/schema"
+import { db } from "@/lib/db"
 import { getChat } from "@/queries/chats"
 
 const createChatSession = chat.createStartSessionAction("chat-agent")
@@ -40,4 +44,56 @@ export async function loadChatTranscript(params: {
 }) {
   await assertChatExists(params.chatId)
   return readChatTranscript(params)
+}
+
+type CreateGroupChatResult =
+  | { success: true; chat: typeof chats.$inferSelect }
+  | { success: false; error: string }
+
+export async function createGroupChat(
+  input: unknown
+): Promise<CreateGroupChatResult> {
+  const parsed = groupChatFormSchema.safeParse(input)
+
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Please check the form fields.",
+    }
+  }
+
+  const botIds = [...new Set(parsed.data.botIds)]
+
+  try {
+    const selectedBots = await db
+      .select({ id: bots.id })
+      .from(bots)
+      .where(inArray(bots.id, botIds))
+
+    if (selectedBots.length !== botIds.length) {
+      return { success: false, error: "Select only available bots." }
+    }
+
+    const chatId = nanoid()
+    const [chatRows] = await db.batch([
+      db
+        .insert(chats)
+        .values({ id: chatId, kind: "group", name: parsed.data.name.trim() })
+        .returning(),
+      db
+        .insert(chatMembers)
+        .values(botIds.map((botId) => ({ chatId, botId })))
+        .returning(),
+    ])
+
+    const createdChat = chatRows[0]
+    if (!createdChat) {
+      return { success: false, error: "The group chat could not be created." }
+    }
+
+    return { success: true, chat: createdChat }
+  } catch (error) {
+    console.error("Failed to create group chat", error)
+    return { success: false, error: "The group chat could not be created." }
+  }
 }

@@ -99,4 +99,10 @@ export const botFormSchema = insertBotSchema
     instructions: z.string().trim().optional(),
   })
 
+export const groupChatFormSchema = z.object({
+  name: z.string().trim().min(1, "Name is required"),
+  botIds: z.array(z.string().min(1)).min(1, "Select at least one bot"),
+})
+
 export type BotFormValues = z.infer<typeof botFormSchema>
+export type GroupChatFormValues = z.infer<typeof groupChatFormSchema>
