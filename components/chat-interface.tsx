@@ -71,6 +71,23 @@ function AssistantMessageRow({
   )
 }
 
+function UserBotBadge({ bot }: { bot: ChatBot }) {
+  return (
+    <Badge
+      variant="outline"
+      className="max-w-40 shrink-0 gap-1.5 px-1.5 pr-2 text-xs"
+    >
+      <ChatAvatar
+        seed={bot.avatar}
+        animated
+        alt={`${bot.name} avatar`}
+        className="size-4 rounded-sm"
+      />
+      <span className="min-w-0 truncate">{bot.name}</span>
+    </Badge>
+  )
+}
+
 function MessageParts({
   message,
   isStreaming,
@@ -90,6 +107,9 @@ function MessageParts({
   const userBot = userBotId
     ? bots.find((candidate) => candidate.id === userBotId)
     : null
+  const firstTextPartIndex = message.parts.findIndex(
+    (part) => part.type === "text"
+  )
   const handoffPart = isGroup ? getHandoffPart(message) : null
   const handoffOutput = handoffPart ? getHandoffOutput(handoffPart) : null
 
@@ -171,19 +191,28 @@ function MessageParts({
         </AssistantMessageRow>
       ) : (
         <MessageContent>
-          {userBot && (
-            <Badge variant="outline" className="gap-1.5 px-1.5 pr-2 text-xs">
-              <ChatAvatar
-                seed={userBot.avatar}
-                animated
-                alt={`${userBot.name} avatar`}
-                className="size-4 rounded-sm"
-              />
-              {userBot.name}
-            </Badge>
-          )}
           {message.parts.map((part, index) => {
             if (part.type === "text") {
+              if (userBot && index === firstTextPartIndex) {
+                return (
+                  <div
+                    key={`${message.id}-${index}`}
+                    className="flex min-w-0 items-start gap-1.5"
+                  >
+                    <span aria-hidden className="text-muted-foreground">
+                      @
+                    </span>
+                    <UserBotBadge bot={userBot} />
+                    <MessageResponse
+                      className="min-w-0"
+                      isAnimating={isStreaming}
+                    >
+                      {part.text}
+                    </MessageResponse>
+                  </div>
+                )
+              }
+
               return (
                 <MessageResponse
                   key={`${message.id}-${index}`}
