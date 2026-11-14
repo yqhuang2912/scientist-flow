@@ -4,19 +4,33 @@ import { useState } from "react"
 import { MonitorIcon } from "lucide-react"
 
 import { BotDialog } from "@/components/bot-dialog"
+import { GroupChatDialog } from "@/components/group-chat-dialog"
+import type { BotSummary } from "@/queries/bots"
 import type { ChatWithBot } from "@/queries/chats"
 import { ChatAvatar } from "@/components/chat-avatar"
 import { GroupChatAvatar } from "@/components/group-chat-avatar"
 import { Button } from "@/components/ui/button"
 
-export function ChatHeader({ chat }: { chat: ChatWithBot }) {
+export function ChatHeader({
+  chat,
+  bots,
+}: {
+  chat: ChatWithBot
+  bots: BotSummary[]
+}) {
   const [botDialogOpen, setBotDialogOpen] = useState(false)
+  const [groupChatDialogOpen, setGroupChatDialogOpen] = useState(false)
 
   return (
     <>
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-4 text-foreground">
         {chat.kind === "group" ? (
-          <div className="flex min-w-0 items-center gap-2 px-2 py-1.5">
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-auto min-w-0 justify-start gap-2 px-2 py-1.5"
+            onClick={() => setGroupChatDialogOpen(true)}
+          >
             <GroupChatAvatar
               bots={chat.bots}
               fallbackSeed={chat.id}
@@ -27,7 +41,7 @@ export function ChatHeader({ chat }: { chat: ChatWithBot }) {
             <span className="truncate text-sm font-medium">
               {chat.name ?? "Untitled group chat"}
             </span>
-          </div>
+          </Button>
         ) : (
           <Button
             type="button"
@@ -65,6 +79,14 @@ export function ChatHeader({ chat }: { chat: ChatWithBot }) {
           open={botDialogOpen}
           onOpenChange={setBotDialogOpen}
           showTrigger={false}
+        />
+      )}
+      {chat.kind === "group" && (
+        <GroupChatDialog
+          bots={bots}
+          chat={chat}
+          open={groupChatDialogOpen}
+          onOpenChange={setGroupChatDialogOpen}
         />
       )}
     </>
