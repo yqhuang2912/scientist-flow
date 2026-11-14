@@ -1,7 +1,11 @@
 "use client"
 
 import { useChat } from "@ai-sdk/react"
-import { DefaultChatTransport, type UIMessage } from "ai"
+import {
+  useLoadTranscript,
+  useTriggerChatTransport,
+} from "@trigger.dev/sdk/chat/react"
+import type { UIMessage } from "ai"
 
 import {
   Conversation,
@@ -21,6 +25,12 @@ import {
   PromptInputTextarea,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input"
+import {
+  loadChatTranscript,
+  mintChatAccessToken,
+  startChatSession,
+} from "@/actions/chat"
+import type { chatAgent } from "@/trigger/chat"
 
 function MessageParts({
   message,
@@ -48,10 +58,65 @@ function MessageParts({
 }
 
 export function ChatInterface({ chatId }: { chatId: string }) {
-  const { messages, sendMessage, status, stop } = useChat({
-    id: chatId,
-    transport: new DefaultChatTransport({ api: "/api/chat" }),
+  const transport = useTriggerChatTransport<typeof chatAgent>({
+    task: "chat-agent",
+    accessToken: ({ chatId: sessionChatId }) =>
+      mintChatAccessToken(sessionChatId),
+    startSession: ({ chatId: sessionChatId, clientData }) =>
+      startChatSession({ chatId: sessionChatId, clientData }),
   })
+
+  const {
+    messages: initialMessages,
+    isLoading,
+    error: transcriptError,
+  } = useLoadTranscript(chatId, loadChatTranscript, { transport })
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+        Loading conversation...
+      </div>
+    )
+  }
+
+  if (transcriptError) {
+    return (
+      <div className="flex flex-1 items-center justify-center text-sm text-destructive">
+        Unable to load conversation.
+      </div>
+    )
+  }
+
+  return (
+    <ChatView
+      chatId={chatId}
+      initialMessages={initialMessages}
+      transport={transport}
+    />
+  )
+}
+
+function ChatView({
+  chatId,
+  initialMessages,
+  transport,
+}: {
+  chatId: string
+  initialMessages: UIMessage[]
+  transport: ReturnType<typeof useTriggerChatTransport>
+}) {
+  const { messages, sendMessage, status, stop: stopChat } = useChat({
+    id: chatId,
+    messages: initialMessages,
+    transport,
+    resume: initialMessages.length > 0,
+  })
+
+  function stop() {
+    stopChat()
+    void transport.stopGeneration(chatId)
+  }
 
   async function handleSubmit({ text }: PromptInputMessage) {
     if (!text.trim() || status !== "ready") {
