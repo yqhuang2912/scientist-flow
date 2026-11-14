@@ -11,6 +11,7 @@ import {
   chats,
   insertBotSchema,
 } from "@/db/schema"
+import { createDevPodSandboxId, deleteDevPodSandbox } from "@/lib/devpod"
 
 type CreateBotResult =
   | {
@@ -40,10 +41,11 @@ export async function createBot(input: unknown): Promise<CreateBotResult> {
   try {
     const botId = nanoid()
     const chatId = nanoid()
+    const sandboxId = createDevPodSandboxId(botId)
     const [botRows, chatRows, chatMemberRows] = await db.batch([
       db
         .insert(bots)
-        .values({ ...parsed.data, id: botId })
+        .values({ ...parsed.data, id: botId, sandboxId })
         .returning(),
       db
         .insert(chats)
@@ -112,6 +114,20 @@ export async function deleteBot(botId: string): Promise<DeleteBotResult> {
   }
 
   try {
+    const botRows = await db
+      .select({ sandboxId: bots.sandboxId })
+      .from(bots)
+      .where(eq(bots.id, botId))
+      .limit(1)
+
+    if (!botRows[0]) {
+      return { success: false, error: "The bot could not be deleted." }
+    }
+
+    if (botRows[0].sandboxId) {
+      await deleteDevPodSandbox(botRows[0].sandboxId)
+    }
+
     const directChatRows = await db
       .select({ chatId: chats.id })
       .from(chatMembers)

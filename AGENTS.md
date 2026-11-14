@@ -10,8 +10,11 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## Git
 
-- Never create branches, worktrees, or commit automatically. Only do so when the user explicitly ask for that specific action in the current request.
-- Leave changes uncommitted in the working tree on the current branch and let the user decide when and how to commit.
+- The only permitted branch is `master`. Keep all work on `master` at all times.
+- Never create, checkout, switch to, rename to, or work in any other branch or worktree.
+- If the repository is not currently on `master`, stop and restore work to `master` before editing files.
+- Never create branches, worktrees, or commit automatically. Only do so when the user explicitly asks for that specific action in the current request.
+- Leave changes uncommitted in the working tree on `master` and let the user decide when and how to commit.
 
 ## Node
 
