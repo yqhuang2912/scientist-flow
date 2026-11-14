@@ -2,7 +2,7 @@
 
 import { auth } from "@trigger.dev/sdk"
 import { chat, defaultStorage } from "@trigger.dev/sdk/ai"
-import { inArray } from "drizzle-orm"
+import { eq, inArray } from "drizzle-orm"
 import { nanoid } from "nanoid"
 
 import { groupChatFormSchema, bots, chatMembers, chats } from "@/db/schema"
@@ -44,6 +44,25 @@ export async function loadChatTranscript(params: {
 }) {
   await assertChatExists(params.chatId)
   return readChatTranscript(params)
+}
+
+export async function touchChatActivity(chatId: string): Promise<boolean> {
+  if (typeof chatId !== "string" || !chatId.trim()) {
+    return false
+  }
+
+  try {
+    const rows = await db
+      .update(chats)
+      .set({ lastMessageAt: new Date() })
+      .where(eq(chats.id, chatId))
+      .returning({ id: chats.id })
+
+    return Boolean(rows[0])
+  } catch (error) {
+    console.error("Failed to update chat activity", error)
+    return false
+  }
 }
 
 type CreateGroupChatResult =

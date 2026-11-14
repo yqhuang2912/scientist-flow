@@ -7,6 +7,8 @@ import {
   useTriggerChatTransport,
 } from "@trigger.dev/sdk/chat/react"
 import type { UIMessage } from "ai"
+import { ArrowRightIcon } from "lucide-react"
+import { useRouter } from "next/navigation"
 
 import {
   Conversation,
@@ -36,12 +38,38 @@ import {
   loadChatTranscript,
   mintChatAccessToken,
   startChatSession,
+  touchChatActivity,
 } from "@/actions/chat"
 import type { chatAgent } from "@/trigger/chat"
 import type { ChatWithBot } from "@/queries/chats"
+import { Badge } from "@/components/ui/badge"
 import { ChatAvatar } from "@/components/chat-avatar"
 
 type ChatBot = ChatWithBot["bots"][number]
+
+function AssistantMessageRow({
+  bot,
+  children,
+}: {
+  bot: ChatBot | null | undefined
+  children: React.ReactNode
+}) {
+  return (
+    <div className="grid grid-cols-[1.75rem_minmax(0,1fr)] items-start gap-x-3">
+      {bot ? (
+        <ChatAvatar
+          seed={bot.avatar}
+          animated
+          alt={`${bot.name} avatar`}
+          className="size-7 shrink-0 rounded-lg"
+        />
+      ) : (
+        <div aria-hidden className="size-7" />
+      )}
+      {children}
+    </div>
+  )
+}
 
 function MessageParts({
   message,
@@ -57,31 +85,132 @@ function MessageParts({
   const botId =
     isGroup && message.role === "assistant" ? getMessageBotId(message) : null
   const bot = botId ? bots.find((candidate) => candidate.id === botId) : null
+  const userBotId =
+    isGroup && message.role === "user" ? getMessageBotId(message) : null
+  const userBot = userBotId
+    ? bots.find((candidate) => candidate.id === userBotId)
+    : null
+  const handoffPart = isGroup ? getHandoffPart(message) : null
+  const handoffOutput = handoffPart ? getHandoffOutput(handoffPart) : null
+
+  if (message.role === "assistant" && isGroup && handoffPart) {
+    const sourceBot = handoffOutput?.handedOffFrom?.id
+      ? bots.find(
+          (candidate) => candidate.id === handoffOutput.handedOffFrom?.id
+        )
+      : bot
+    const targetBot = handoffOutput?.handedOffTo.id
+      ? bots.find((candidate) => candidate.id === handoffOutput.handedOffTo.id)
+      : bot
+    const handoffLabel = getHandoffLabel(handoffPart)
+    const textParts = message.parts.filter((part) => part.type === "text")
+
+    return (
+      <Message from={message.role}>
+        {handoffLabel && (
+          <AssistantMessageRow bot={sourceBot}>
+            <MessageContent>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <ArrowRightIcon className="size-4" />
+                {handoffLabel}
+              </div>
+            </MessageContent>
+          </AssistantMessageRow>
+        )}
+        {textParts.length > 0 && (
+          <AssistantMessageRow bot={targetBot}>
+            <MessageContent>
+              {textParts.map((part, index) => (
+                <MessageResponse
+                  key={`${message.id}-handoff-text-${index}`}
+                  isAnimating={isStreaming}
+                >
+                  {part.text}
+                </MessageResponse>
+              ))}
+            </MessageContent>
+          </AssistantMessageRow>
+        )}
+      </Message>
+    )
+  }
 
   return (
     <Message from={message.role}>
-      <div className="flex items-start gap-2">
-        {bot && (
-          <ChatAvatar
-            seed={bot.avatar}
-            animated
-            alt={`${bot.name} avatar`}
-            className="mt-1 size-7 shrink-0 rounded-lg"
-          />
-        )}
+      {message.role === "assistant" && isGroup ? (
+        <AssistantMessageRow bot={bot}>
+          <MessageContent>
+            {message.parts.map((part, index) => {
+              if (part.type === "text") {
+                return (
+                  <MessageResponse
+                    key={`${message.id}-${index}`}
+                    isAnimating={isStreaming}
+                  >
+                    {part.text}
+                  </MessageResponse>
+                )
+              }
+
+              const handoffLabel = getHandoffLabel(part)
+              if (!handoffLabel) {
+                return null
+              }
+
+              return (
+                <div
+                  key={`${message.id}-${index}`}
+                  className="flex items-center gap-2 text-sm text-muted-foreground"
+                >
+                  <ArrowRightIcon className="size-4" />
+                  {handoffLabel}
+                </div>
+              )
+            })}
+          </MessageContent>
+        </AssistantMessageRow>
+      ) : (
         <MessageContent>
-          {message.parts.map((part, index) =>
-            part.type === "text" ? (
-              <MessageResponse
-                key={`${message.id}-${index}`}
-                isAnimating={isStreaming}
-              >
-                {part.text}
-              </MessageResponse>
-            ) : null
+          {userBot && (
+            <Badge variant="outline" className="gap-1.5 px-1.5 pr-2 text-xs">
+              <ChatAvatar
+                seed={userBot.avatar}
+                animated
+                alt={`${userBot.name} avatar`}
+                className="size-4 rounded-sm"
+              />
+              {userBot.name}
+            </Badge>
           )}
+          {message.parts.map((part, index) => {
+            if (part.type === "text") {
+              return (
+                <MessageResponse
+                  key={`${message.id}-${index}`}
+                  isAnimating={isStreaming}
+                >
+                  {part.text}
+                </MessageResponse>
+              )
+            }
+
+            const handoffLabel = getHandoffLabel(part)
+            if (!handoffLabel) {
+              return null
+            }
+
+            return (
+              <div
+                key={`${message.id}-${index}`}
+                className="flex items-center gap-2 text-sm text-muted-foreground"
+              >
+                <ArrowRightIcon className="size-4" />
+                {handoffLabel}
+              </div>
+            )
+          })}
         </MessageContent>
-      </div>
+      )}
     </Message>
   )
 }
@@ -93,6 +222,72 @@ function getMessageBotId(message: UIMessage) {
 
   const botId = (message.metadata as { botId?: unknown }).botId
   return typeof botId === "string" ? botId : null
+}
+
+type HandoffOutput = {
+  success: true
+  handedOffFrom?: {
+    id: string
+  } | null
+  handedOffTo: {
+    id?: string
+    name: string
+  }
+}
+
+type HandoffPart = {
+  type: "tool-handoff"
+  state: string
+  output?: unknown
+}
+
+function isHandoffOutput(value: unknown): value is HandoffOutput {
+  if (!value || typeof value !== "object") {
+    return false
+  }
+
+  const output = value as Partial<HandoffOutput>
+  return (
+    output.success === true &&
+    !!output.handedOffTo &&
+    typeof output.handedOffTo.name === "string"
+  )
+}
+
+function getHandoffPart(message: UIMessage) {
+  const part = message.parts.find((part) => part.type === "tool-handoff")
+  return part ? (part as unknown as HandoffPart) : null
+}
+
+function getHandoffOutput(part: HandoffPart) {
+  if (part.state !== "output-available" || !isHandoffOutput(part.output)) {
+    return null
+  }
+
+  return part.output
+}
+
+function getHandoffLabel(part: unknown) {
+  if (!part || typeof part !== "object" || !("type" in part)) {
+    return null
+  }
+
+  if (part.type !== "tool-handoff") {
+    return null
+  }
+
+  const handoffPart = part as HandoffPart
+
+  if (handoffPart.state === "input-available") {
+    return "Handing off..."
+  }
+
+  const output = getHandoffOutput(handoffPart)
+  if (!output) {
+    return null
+  }
+
+  return `Handed off to ${output.handedOffTo.name}`
 }
 
 export function ChatInterface({
@@ -160,6 +355,7 @@ function ChatView({
   transport: ReturnType<typeof useTriggerChatTransport>
 }) {
   const [selectedBotId, setSelectedBotId] = useState(bots[0]?.id ?? "")
+  const router = useRouter()
   const {
     messages,
     sendMessage,
@@ -182,10 +378,12 @@ function ChatView({
       return
     }
 
-    await sendMessage(
-      { text },
-      { metadata: selectedBotId ? { botId: selectedBotId } : undefined }
-    )
+    await touchChatActivity(chatId)
+    router.refresh()
+
+    const metadata = selectedBotId ? { botId: selectedBotId } : undefined
+
+    await sendMessage({ text, metadata }, metadata ? { metadata } : undefined)
   }
 
   const lastMessageId = messages.at(-1)?.id
