@@ -46,34 +46,63 @@ type ChatBot = ChatWithBot["bots"][number]
 function MessageParts({
   message,
   isStreaming,
+  bots,
+  isGroup,
 }: {
   message: UIMessage
   isStreaming: boolean
+  bots: ChatBot[]
+  isGroup: boolean
 }) {
+  const botId =
+    isGroup && message.role === "assistant" ? getMessageBotId(message) : null
+  const bot = botId ? bots.find((candidate) => candidate.id === botId) : null
+
   return (
     <Message from={message.role}>
-      <MessageContent>
-        {message.parts.map((part, index) =>
-          part.type === "text" ? (
-            <MessageResponse
-              key={`${message.id}-${index}`}
-              isAnimating={isStreaming}
-            >
-              {part.text}
-            </MessageResponse>
-          ) : null
+      <div className="flex items-start gap-2">
+        {bot && (
+          <ChatAvatar
+            seed={bot.avatar}
+            animated
+            alt={`${bot.name} avatar`}
+            className="mt-1 size-7 shrink-0 rounded-lg"
+          />
         )}
-      </MessageContent>
+        <MessageContent>
+          {message.parts.map((part, index) =>
+            part.type === "text" ? (
+              <MessageResponse
+                key={`${message.id}-${index}`}
+                isAnimating={isStreaming}
+              >
+                {part.text}
+              </MessageResponse>
+            ) : null
+          )}
+        </MessageContent>
+      </div>
     </Message>
   )
+}
+
+function getMessageBotId(message: UIMessage) {
+  if (!message.metadata || typeof message.metadata !== "object") {
+    return null
+  }
+
+  const botId = (message.metadata as { botId?: unknown }).botId
+  return typeof botId === "string" ? botId : null
 }
 
 export function ChatInterface({
   chatId,
   bots,
+  isGroup,
 }: {
   chatId: string
   bots: ChatBot[]
+  isGroup: boolean
 }) {
   const transport = useTriggerChatTransport<typeof chatAgent>({
     task: "chat-agent",
@@ -110,6 +139,7 @@ export function ChatInterface({
     <ChatView
       chatId={chatId}
       bots={bots}
+      isGroup={isGroup}
       initialMessages={initialMessages}
       transport={transport}
     />
@@ -119,11 +149,13 @@ export function ChatInterface({
 function ChatView({
   chatId,
   bots,
+  isGroup,
   initialMessages,
   transport,
 }: {
   chatId: string
   bots: ChatBot[]
+  isGroup: boolean
   initialMessages: UIMessage[]
   transport: ReturnType<typeof useTriggerChatTransport>
 }) {
@@ -172,6 +204,8 @@ function ChatView({
               <MessageParts
                 key={message.id}
                 message={message}
+                bots={bots}
+                isGroup={isGroup}
                 isStreaming={
                   status === "streaming" && message.id === lastMessageId
                 }

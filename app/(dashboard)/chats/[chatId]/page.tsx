@@ -19,7 +19,11 @@ export default async function ChatPage({
   return (
     <main className="dark flex min-h-svh flex-1 flex-col bg-background text-foreground">
       <ChatHeader chat={chat} />
-      <ChatInterface chatId={chatId} bots={chat.bots} />
+      <ChatInterface
+        chatId={chatId}
+        bots={chat.bots}
+        isGroup={chat.kind === "group"}
+      />
     </main>
   )
 }

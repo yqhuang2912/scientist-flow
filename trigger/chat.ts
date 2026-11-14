@@ -30,6 +30,12 @@ export const chatAgent = chat.agent({
           .join("\n")
       : "Respond as the selected bot for this chat."
 
+    if (bot) {
+      chat.setUIMessageStreamOptions({
+        messageMetadata: () => ({ botId: bot.id }),
+      })
+    }
+
     return streamText({
       model: openrouter("baidu/ernie-5.5-flash-preview:free"),
       system: `${systemInstructions}\n\n${botInstructions}`,
