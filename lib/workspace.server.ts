@@ -1,7 +1,26 @@
 import "server-only"
 
+import {
+  createFileInWorkspace,
+  inspectFileInWorkspace,
+  deleteFileInWorkspace,
+} from "./workspace-file.server"
+import type { FileDeletionConfirmation } from "./workspace-validation"
+
 import fs from "node:fs/promises"
 import path from "node:path"
+import { getChat } from "@/queries/chats"
+import {
+  createDirectoryInWorkspace,
+  deleteDirectoryInWorkspace,
+  inspectDirectoryInWorkspace,
+  resolveWorkspaceDirectory,
+  WorkspaceDirectoryError,
+} from "@/lib/workspace-directory.server"
+import {
+  workspaceChatIdSchema,
+  type DirectoryDeletionConfirmation,
+} from "@/lib/workspace-validation"
 
 const CONFIG_FILE = path.join(process.cwd(), "workspace.local.json")
 
@@ -28,6 +47,7 @@ export interface WorkspaceLocalFile {
 export interface FsEntry {
   name: string
   isDir: boolean
+  isFile: boolean
   /** Relative path from the task root, using forward slashes. */
   relPath: string
 }
@@ -276,29 +296,117 @@ export async function initialiseWorkspace(chatId: string): Promise<{
 
 const MAX_ENTRIES = 200
 
+// Reuse the same chat lookup as the existing page/actions. This local app has
+// no separate user/session ACL; do not introduce a second access policy here.
+export async function requireWorkspaceBinding(
+  chatId: string
+): Promise<WorkspaceBinding> {
+  workspaceChatIdSchema.parse(chatId)
+  if (!(await getChat(chatId)))
+    throw new WorkspaceDirectoryError(
+      "CHAT_NOT_FOUND",
+      "聊天不存在或不可访问。"
+    )
+  const binding = await getWorkspaceBinding(chatId)
+  if (!binding)
+    throw new WorkspaceDirectoryError(
+      "NOT_INITIALISED",
+      "当前任务尚未初始化工作区。"
+    )
+  return binding
+}
+
+// Serialise writes to the same chat in this server process, including ancestor
+// deletion vs child creation. Other chats and chat streaming remain independent.
+const directoryWrites = new Map<string, Promise<unknown>>()
+async function withDirectoryWrite<T>(
+  chatId: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  workspaceChatIdSchema.parse(chatId)
+  const previous = directoryWrites.get(chatId) ?? Promise.resolve()
+  const next = previous.catch(() => undefined).then(operation)
+  directoryWrites.set(chatId, next)
+  try {
+    return await next
+  } finally {
+    if (directoryWrites.get(chatId) === next) directoryWrites.delete(chatId)
+  }
+}
+
+export async function createWorkspaceDirectory(
+  chatId: string,
+  parentRelativePath: string,
+  name: string
+) {
+  return withDirectoryWrite(chatId, async () => {
+    const binding = await requireWorkspaceBinding(chatId)
+    return createDirectoryInWorkspace(binding.taskDir, parentRelativePath, name)
+  })
+}
+
+export async function inspectWorkspaceDirectoryForDeletion(
+  chatId: string,
+  relativePath: string
+) {
+  const binding = await requireWorkspaceBinding(chatId)
+  return inspectDirectoryInWorkspace(binding.taskDir, relativePath)
+}
+
+export async function deleteWorkspaceDirectory(
+  chatId: string,
+  relativePath: string,
+  confirmation: DirectoryDeletionConfirmation
+) {
+  return withDirectoryWrite(chatId, async () => {
+    const binding = await requireWorkspaceBinding(chatId)
+    return deleteDirectoryInWorkspace(
+      binding.taskDir,
+      relativePath,
+      confirmation
+    )
+  })
+}
+
+export async function createWorkspaceFile(
+  chatId: string,
+  parentRelativePath: string,
+  name: string
+) {
+  return withDirectoryWrite(chatId, async () => {
+    const binding = await requireWorkspaceBinding(chatId)
+    return createFileInWorkspace(binding.taskDir, parentRelativePath, name)
+  })
+}
+
+export async function inspectWorkspaceFileForDeletion(
+  chatId: string,
+  relativePath: string
+) {
+  const binding = await requireWorkspaceBinding(chatId)
+  return inspectFileInWorkspace(binding.taskDir, relativePath)
+}
+
+export async function deleteWorkspaceFile(
+  chatId: string,
+  relativePath: string,
+  confirmation: FileDeletionConfirmation
+) {
+  return withDirectoryWrite(chatId, async () => {
+    const binding = await requireWorkspaceBinding(chatId)
+    return deleteFileInWorkspace(binding.taskDir, relativePath, confirmation)
+  })
+}
+
 export async function listWorkspaceDir(
   chatId: string,
   relPath: string
 ): Promise<{ entries: FsEntry[]; truncated: boolean }> {
-  assertSafeChatId(chatId)
-
-  const file = await readLocalFile()
-  const binding = file.bindings?.[chatId]
-  if (!binding) {
-    throw new Error("Workspace not initialised for this chat.")
-  }
-
-  const taskDir = binding.taskDir
-  const absTarget = resolveRelPath(taskDir, relPath)
-
-  // Safety: confirm absTarget is inside taskDir.
-  assertWithinBoundary(taskDir, absTarget)
-
-  // We do not follow symlinks: use lstat on the target itself.
-  const targetStat = await fs.lstat(absTarget)
-  if (!targetStat.isDirectory()) {
-    throw new Error("Target path is not a directory.")
-  }
+  const binding = await requireWorkspaceBinding(chatId)
+  const { absolute: absTarget, relativePath } = await resolveWorkspaceDirectory(
+    binding.taskDir,
+    relPath
+  )
 
   const names = await fs.readdir(absTarget)
   const entries: FsEntry[] = []
@@ -308,20 +416,19 @@ export async function listWorkspaceDir(
     const childAbs = path.join(absTarget, name)
     // Use lstat so we see the symlink itself, not what it points to.
     let isDir = false
+    let isFile = false
     try {
       const st = await fs.lstat(childAbs)
       // Treat symlinks as files (don't follow them).
-      isDir = st.isDirectory()
+      isDir = st.isDirectory() && !st.isSymbolicLink()
+      isFile = st.isFile() && !st.isSymbolicLink()
     } catch {
       continue
     }
 
-    const childRel =
-      relPath === "" || relPath === "."
-        ? name
-        : `${normaliseRelPath(relPath)}/${name}`
+    const childRel = relativePath === "" ? name : `${relativePath}/${name}`
 
-    entries.push({ name, isDir, relPath: childRel })
+    entries.push({ name, isDir, isFile, relPath: childRel })
   }
 
   // Directories first, then alphabetical.
@@ -342,34 +449,6 @@ function isNodeError(err: unknown): err is NodeJS.ErrnoException {
 function resolveAndNormalise(raw: string): string {
   // path.resolve handles Windows drive letters, UNC, and relative paths.
   return path.resolve(raw)
-}
-
-function normaliseRelPath(rel: string): string {
-  // Normalise to forward slashes, strip leading slash.
-  return rel.replace(/\\/g, "/").replace(/^\/+/, "")
-}
-
-function resolveRelPath(taskDir: string, relPath: string): string {
-  const normalised = normaliseRelPath(relPath)
-  if (normalised === "" || normalised === ".") {
-    return taskDir
-  }
-  // path.join will normalise .. sequences.
-  return path.join(taskDir, normalised)
-}
-
-function assertWithinBoundary(taskDir: string, absTarget: string): void {
-  // Normalise both to lower-case on Windows (case-insensitive FS).
-  const isWindows = process.platform === "win32"
-  const norm = (p: string) =>
-    path.normalize(isWindows ? p.toLowerCase() : p)
-  const base = norm(taskDir) + path.sep
-  const target = norm(absTarget)
-
-  // The target must equal taskDir OR start with taskDir + sep.
-  if (target !== norm(taskDir) && !target.startsWith(base)) {
-    throw new Error("Path traversal detected: access denied.")
-  }
 }
 
 async function assertIsAccessibleDir(absPath: string): Promise<void> {

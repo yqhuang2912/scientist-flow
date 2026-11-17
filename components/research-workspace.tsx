@@ -6,217 +6,105 @@ import {
   FilePlusIcon,
   GitBranchIcon,
   WorkflowIcon,
-  FolderIcon,
-  FolderOpenIcon,
-  FileIcon,
   RefreshCwIcon,
-  ChevronRightIcon,
-  ChevronDownIcon,
   SettingsIcon,
   AlertCircleIcon,
 } from "lucide-react"
-
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { toast } from "@/components/ui/toast"
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import {
+  WorkspaceFileTree,
+  type WorkspaceEntryAction,
+} from "@/components/workspace-file-tree"
+import {
+  CreateWorkspaceEntryDialog,
+  DeleteWorkspaceFolderDialog,
+  DeleteWorkspaceFileDialog,
+} from "@/components/workspace-folder-dialogs"
 import { cn } from "@/lib/utils"
 import {
   getWorkspaceStatusAction,
   initialiseWorkspaceAction,
+  inspectWorkspaceDirectoryForDeletionAction,
+  inspectWorkspaceFileForDeletionAction,
   type WorkspaceStatus,
 } from "@/actions/workspace"
-
-interface FsEntry {
-  name: string
-  isDir: boolean
-  relPath: string
-}
-
-interface TreeNode {
-  entry: FsEntry
-  children: TreeNode[] | null // null = not loaded yet
-  expanded: boolean
-  loading: boolean
-  error: string | null
-  truncated: boolean
-}
+import {
+  findWorkspaceNode,
+  mergeWorkspaceChildren,
+  removeWorkspaceSubtree,
+  selectionAfterDirectoryDeletion,
+  updateWorkspaceNode,
+  WorkspaceDirectoryReads,
+  type WorkspaceTreeNode,
+} from "@/lib/workspace-tree"
+import {
+  isWorkspaceSubtree,
+  workspaceParentPath,
+  type DirectoryDeletionInspection,
+  type FileDeletionInspection,
+  type WorkspaceEntry,
+} from "@/lib/workspace-validation"
 
 interface ResearchWorkspaceProps {
   chatId: string
   onOpenSettings?: () => void
 }
-
-// ─── Tree node helpers ────────────────────────────────────────────────────────
+type Operation = { chatId: string; relativePath: string } & (
+  | { kind: "create" | "inspect" | "create-file" | "inspect-file" }
+  | { kind: "delete"; inspection: DirectoryDeletionInspection }
+  | { kind: "delete-file"; inspection: FileDeletionInspection }
+)
 
 async function fetchChildren(
   chatId: string,
-  relPath: string
-): Promise<{ entries: FsEntry[]; truncated: boolean }> {
-  const url = `/api/workspace/${encodeURIComponent(chatId)}/tree?path=${encodeURIComponent(relPath)}`
-  const res = await fetch(url)
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string }
-    throw new Error(body.error ?? `HTTP ${res.status}`)
+  relative: string
+): Promise<{ entries: WorkspaceEntry[]; truncated: boolean }> {
+  const response = await fetch(
+    `/api/workspace/${encodeURIComponent(chatId)}/tree?path=${encodeURIComponent(relative)}`,
+    { cache: "no-store" }
+  )
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(body.error ?? `HTTP ${response.status}`)
   }
-  return res.json() as Promise<{ entries: FsEntry[]; truncated: boolean }>
+  return response.json()
 }
 
-function buildRootNodes(entries: FsEntry[]): TreeNode[] {
-  return entries.map((e) => ({
-    entry: e,
-    children: null,
-    expanded: false,
-    loading: false,
-    error: null,
-    truncated: false,
+function loadedDirectories(nodes: WorkspaceTreeNode[]): string[] {
+  return nodes.flatMap((node) =>
+    node.children
+      ? [node.entry.relPath, ...loadedDirectories(node.children)]
+      : []
+  )
+}
+
+function clearRelatedLoading(
+  nodes: WorkspaceTreeNode[],
+  relative: string
+): WorkspaceTreeNode[] {
+  return nodes.map((node) => ({
+    ...node,
+    loading:
+      isWorkspaceSubtree(relative, node.entry.relPath) ||
+      isWorkspaceSubtree(node.entry.relPath, relative)
+        ? false
+        : node.loading,
+    children: node.children
+      ? clearRelatedLoading(node.children, relative)
+      : null,
   }))
 }
 
-// Deep-clone unused — removed
-
-function updateNode(
-  nodes: TreeNode[],
-  relPath: string,
-  updater: (n: TreeNode) => TreeNode
-): TreeNode[] {
-  return nodes.map((n) => {
-    if (n.entry.relPath === relPath) {
-      return updater({ ...n })
-    }
-    if (n.children) {
-      return { ...n, children: updateNode(n.children, relPath, updater) }
-    }
-    return n
-  })
-}
-
-// ─── FileTree component ───────────────────────────────────────────────────────
-
-function FileTree({
-  nodes,
-  chatId,
-  selectedRel,
-  onSelect,
-  onToggle,
-  depth,
-}: {
-  nodes: TreeNode[]
-  chatId: string
-  selectedRel: string | null
-  onSelect: (relPath: string) => void
-  onToggle: (relPath: string) => void
-  depth: number
-}) {
-  if (nodes.length === 0) {
-    return (
-      <p
-        className="py-1 text-[11px] text-muted-foreground"
-        style={{ paddingLeft: depth * 12 + 8 }}
-      >
-        Empty
-      </p>
-    )
-  }
-
-  return (
-    <ul role="tree" className="min-w-0">
-      {nodes.map((node) => (
-        <li key={node.entry.relPath} role="treeitem" aria-expanded={node.expanded}>
-          <button
-            type="button"
-            className={cn(
-              "flex w-full min-w-0 items-center gap-1 rounded py-0.5 pr-2 text-left text-xs hover:bg-accent",
-              selectedRel === node.entry.relPath &&
-                "bg-accent text-accent-foreground"
-            )}
-            style={{ paddingLeft: depth * 12 + 4 }}
-            onClick={() => {
-              if (node.entry.isDir) {
-                onToggle(node.entry.relPath)
-              } else {
-                onSelect(node.entry.relPath)
-              }
-            }}
-          >
-            {node.entry.isDir ? (
-              <>
-                <span className="shrink-0 text-muted-foreground">
-                  {node.loading ? (
-                    <Spinner className="size-3" />
-                  ) : node.expanded ? (
-                    <ChevronDownIcon className="size-3" />
-                  ) : (
-                    <ChevronRightIcon className="size-3" />
-                  )}
-                </span>
-                {node.expanded ? (
-                  <FolderOpenIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                ) : (
-                  <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                )}
-              </>
-            ) : (
-              <>
-                <span className="size-3 shrink-0" />
-                <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
-              </>
-            )}
-            <span className="min-w-0 truncate">{node.entry.name}</span>
-          </button>
-
-          {node.error && (
-            <p
-              className="flex items-center gap-1 py-0.5 text-[11px] text-destructive"
-              style={{ paddingLeft: (depth + 1) * 12 + 4 }}
-            >
-              <AlertCircleIcon className="size-3 shrink-0" />
-              {node.error}
-            </p>
-          )}
-
-          {node.expanded && node.children && (
-            <FileTree
-              nodes={node.children}
-              chatId={chatId}
-              selectedRel={selectedRel}
-              onSelect={onSelect}
-              onToggle={onToggle}
-              depth={depth + 1}
-            />
-          )}
-
-          {node.expanded && node.truncated && (
-            <p
-              className="py-0.5 text-[11px] text-muted-foreground"
-              style={{ paddingLeft: (depth + 1) * 12 + 4 }}
-            >
-              Limited to 200 items
-            </p>
-          )}
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-// ─── Main component ───────────────────────────────────────────────────────────
-
-// Outer shell — just passes key so inner remounts cleanly on chatId change
-export function ResearchWorkspace({
-  chatId,
-  onOpenSettings,
-}: ResearchWorkspaceProps) {
-  return (
-    <ResearchWorkspaceInner
-      key={chatId}
-      chatId={chatId}
-      onOpenSettings={onOpenSettings}
-    />
-  )
+// Only this workspace remounts on a chat change; the chat subtree stays intact.
+export function ResearchWorkspace(props: ResearchWorkspaceProps) {
+  return <ResearchWorkspaceInner key={props.chatId} {...props} />
 }
 
 function ResearchWorkspaceInner({
@@ -227,131 +115,347 @@ function ResearchWorkspaceInner({
   const [statusLoading, setStatusLoading] = useState(true)
   const [initPending, startInitTransition] = useTransition()
   const [initError, setInitError] = useState<string | null>(null)
-
-  const [tree, setTree] = useState<TreeNode[]>([])
+  const [tree, setTree] = useState<WorkspaceTreeNode[]>([])
   const [treeLoading, setTreeLoading] = useState(false)
   const [treeError, setTreeError] = useState<string | null>(null)
+  const [rootTruncated, setRootTruncated] = useState(false)
+  const [rootLoaded, setRootLoaded] = useState(false)
   const [selectedRel, setSelectedRel] = useState<string | null>(null)
+  const [operation, setOperation] = useState<Operation | null>(null)
+  const [mutationPending, setMutationPending] = useState(false)
+  const noticeToast = useRef<string | null>(null)
+  const mounted = useRef(true)
+  const reads = useRef(new WorkspaceDirectoryReads())
+  const operationLocked = useRef(false)
+  const mutationPath = useRef<string | null>(null)
+  const locatePath = useRef<string | null>(null)
+  const container = useRef<HTMLDivElement>(null)
 
-  const mountedRef = useRef(true)
   useEffect(() => {
-    mountedRef.current = true
-    return () => { mountedRef.current = false }
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      if (noticeToast.current) toast.close(noticeToast.current)
+    }
   }, [])
+
+  function showNotice(
+    title: string,
+    description?: string,
+    type: "success" | "info" | "error" = "success"
+  ) {
+    if (!mounted.current) return
+    if (noticeToast.current) toast.close(noticeToast.current)
+    noticeToast.current = toast.add({
+      title,
+      description: description ? (
+        <span className="break-all">{description}</span>
+      ) : undefined,
+      type,
+      timeout: type === "error" ? 5000 : 3000,
+    })
+  }
 
   const loadStatus = useCallback(async () => {
     setStatusLoading(true)
-    const s = await getWorkspaceStatusAction(chatId)
-    if (!mountedRef.current) return
-    setStatus(s)
-    setStatusLoading(false)
-  }, [chatId])
-
-  const loadTree = useCallback(async () => {
-    setTreeLoading(true)
-    setTreeError(null)
     try {
-      const { entries, truncated } = await fetchChildren(chatId, "")
-      if (!mountedRef.current) return
-      const nodes = buildRootNodes(entries)
-      setTree(nodes)
-      if (truncated) setTreeError("Root contains more than 200 items.")
-    } catch (err) {
-      if (!mountedRef.current) return
-      setTreeError(err instanceof Error ? err.message : String(err))
+      const next = await getWorkspaceStatusAction(chatId)
+      if (mounted.current) setStatus(next)
+    } catch {
+      if (mounted.current)
+        setStatus({ state: "error", message: "无法读取工作区状态，请重试。" })
     } finally {
-      if (mountedRef.current) setTreeLoading(false)
+      if (mounted.current) setStatusLoading(false)
     }
   }, [chatId])
 
-  // On mount: load status. Inner component remounts on chatId change (key prop).
-  useEffect(() => {
-    // loadStatus is async — setState runs only inside its .then(), not synchronously
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadStatus()
-  }, [loadStatus])
+  const refreshBranch = useCallback(
+    async (relative: string, created?: WorkspaceEntry) => {
+      if (!mounted.current) return
+      const version = reads.current.begin(relative)
+      const current = () =>
+        mounted.current && reads.current.current(relative, version)
+      if (!relative) {
+        setTreeLoading(true)
+        setTreeError(null)
+      } else
+        setTree((previous) =>
+          updateWorkspaceNode(previous, relative, (node) => ({
+            ...node,
+            loading: true,
+            error: null,
+          }))
+        )
+      try {
+        const result = await fetchChildren(chatId, relative)
+        if (!current()) return
+        // Keep the just-created directory visible even beyond the listing cap.
+        const entries =
+          created &&
+          result.truncated &&
+          !result.entries.some((entry) => entry.relPath === created.relPath)
+            ? [...result.entries, created]
+            : result.entries
+        if (!relative) {
+          setTree((previous) => mergeWorkspaceChildren(previous, entries))
+          setRootTruncated(result.truncated)
+          setRootLoaded(true)
+        } else {
+          setTree((previous) =>
+            updateWorkspaceNode(previous, relative, (node) => ({
+              ...node,
+              loading: false,
+              error: null,
+              children: mergeWorkspaceChildren(node.children ?? [], entries),
+              truncated: result.truncated,
+              expanded: created ? true : node.expanded,
+            }))
+          )
+        }
+        if (created) {
+          setSelectedRel(created.relPath)
+          locatePath.current = created.relPath
+        }
+      } catch (error) {
+        if (!current()) return
+        const message =
+          error instanceof Error ? error.message : "无法读取文件夹。"
+        if (!relative) {
+          setTreeError(message)
+          setRootLoaded(false)
+        } else
+          setTree((previous) =>
+            updateWorkspaceNode(previous, relative, (node) => ({
+              ...node,
+              loading: false,
+              error: message,
+            }))
+          )
+      } finally {
+        if (current() && !relative) setTreeLoading(false)
+      }
+    },
+    [chatId]
+  )
 
-  // Load tree when status becomes ready
+  useEffect(() => {
+    // Initial status is an asynchronous external read.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadStatus()
+  }, [loadStatus])
   useEffect(() => {
     if (status?.state === "ready") {
-      // loadTree is async — setState runs only inside its try/catch, not synchronously
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      loadTree()
+      void refreshBranch("")
     }
-  }, [status, loadTree])
-
-  function handleToggle(relPath: string) {
-    const node = findNode(tree, relPath)
-    if (!node) return
-
-    if (node.expanded) {
-      setTree((prev) =>
-        updateNode(prev, relPath, (n) => ({ ...n, expanded: false }))
-      )
-      return
-    }
-
-    if (node.children !== null) {
-      setTree((prev) =>
-        updateNode(prev, relPath, (n) => ({ ...n, expanded: true }))
-      )
-      return
-    }
-
-    // Load children
-    setTree((prev) =>
-      updateNode(prev, relPath, (n) => ({ ...n, loading: true, error: null }))
+  }, [status, refreshBranch])
+  useEffect(() => {
+    if (!locatePath.current || operation) return
+    const element = container.current?.querySelector<HTMLButtonElement>(
+      `[data-workspace-path="${CSS.escape(locatePath.current)}"]`
     )
-    fetchChildren(chatId, relPath)
-      .then(({ entries, truncated }) => {
-        if (!mountedRef.current) return
-        setTree((prev) =>
-          updateNode(prev, relPath, (n) => ({
-            ...n,
-            loading: false,
-            expanded: true,
-            children: buildRootNodes(entries),
-            truncated,
-          }))
-        )
-      })
-      .catch((err) => {
-        if (!mountedRef.current) return
-        setTree((prev) =>
-          updateNode(prev, relPath, (n) => ({
-            ...n,
-            loading: false,
-            error: err instanceof Error ? err.message : String(err),
-          }))
-        )
-      })
+    if (!element) return
+    element.scrollIntoView({ block: "nearest" })
+    element.focus({ preventScroll: true })
+    locatePath.current = null
+  }, [tree, operation])
+
+  function invalidate(relative: string) {
+    reads.current.invalidate(relative)
+    setTreeLoading(false)
+    setTree((previous) => clearRelatedLoading(previous, relative))
+  }
+
+  function handleToggle(relative: string) {
+    const node = findWorkspaceNode(tree, relative)
+    if (!node) return
+    const expanded = !node.expanded
+    setTree((previous) =>
+      updateWorkspaceNode(previous, relative, (value) => ({
+        ...value,
+        expanded,
+      }))
+    )
+    if (expanded && !node.loading && (node.children === null || node.error))
+      void refreshBranch(relative)
+  }
+
+  function handleRefresh() {
+    if (mutationPending) return
+    const paths = loadedDirectories(tree)
+    void refreshBranch("")
+    for (const relative of paths) void refreshBranch(relative)
   }
 
   function handleInitialise() {
     setInitError(null)
     startInitTransition(async () => {
-      const result = await initialiseWorkspaceAction(chatId)
-      if (!result.success) {
-        setInitError(result.error)
-        return
+      try {
+        const result = await initialiseWorkspaceAction(chatId)
+        if (!mounted.current) return
+        if (!result.success) {
+          setInitError(result.error)
+          return
+        }
+        await loadStatus()
+      } catch {
+        if (mounted.current) setInitError("无法初始化工作区，请重试。")
       }
-      await loadStatus()
     })
   }
 
-  function handleRefresh() {
-    setTree([])
-    setSelectedRel(null)
-    loadTree()
+  function closeOperation() {
+    operationLocked.current = false
+    setOperation(null)
+  }
+  function startMutation(relative: string) {
+    mutationPath.current = relative
+    setMutationPending(true)
+    invalidate(relative)
+  }
+  function finishMutation() {
+    if (!mounted.current) return
+    // Any read started before the completed mutation must not restore old nodes.
+    if (mutationPath.current) invalidate(mutationPath.current)
+    mutationPath.current = null
+    setMutationPending(false)
   }
 
-  // ─── Render ──────────────────────────────────────────────────────────────
+  async function handleCreated(target: Operation, entry: WorkspaceEntry) {
+    if (!mounted.current) return
+    finishMutation()
+    closeOperation()
+    showNotice(
+      entry.isDir ? "文件夹已创建" : "文件已创建",
+      `${entry.relPath}${entry.isDir ? "/" : ""}`
+    )
+    setSelectedRel(entry.relPath)
+    if (target.relativePath)
+      setTree((previous) =>
+        updateWorkspaceNode(previous, target.relativePath, (node) => ({
+          ...node,
+          expanded: true,
+        }))
+      )
+    await refreshBranch(target.relativePath, entry)
+  }
+
+  async function handleDeleted(target: Operation, alreadyGone: boolean) {
+    if (!mounted.current) return
+    finishMutation()
+    invalidate(target.relativePath)
+    closeOperation()
+    setTree((previous) => removeWorkspaceSubtree(previous, target.relativePath))
+    setSelectedRel((previous) =>
+      selectionAfterDirectoryDeletion(previous, target.relativePath)
+    )
+    showNotice(
+      `${target.kind.endsWith("-file") ? "文件" : "文件夹"}${alreadyGone ? "已不存在" : "已删除"}`,
+      `${target.relativePath}${target.kind.endsWith("-file") ? "" : "/"}`,
+      alreadyGone ? "info" : "success"
+    )
+    await refreshBranch(workspaceParentPath(target.relativePath))
+  }
+
+  async function reconcileFailedDeletion(target: Operation) {
+    if (!mounted.current) return
+    invalidate(target.relativePath)
+    const node = findWorkspaceNode(tree, target.relativePath)
+    const paths = node?.entry.isDir
+      ? [target.relativePath, ...loadedDirectories(node.children ?? [])]
+      : []
+    await refreshBranch(workspaceParentPath(target.relativePath))
+    if (target.kind === "delete-file") return
+    await Promise.all(paths.map((relative) => refreshBranch(relative)))
+    if (!mounted.current) return
+    setSelectedRel((previous) =>
+      selectionAfterDirectoryDeletion(previous, target.relativePath)
+    )
+  }
+
+  async function handleEntryAction(
+    kind: WorkspaceEntryAction,
+    relativePath: string
+  ) {
+    if (operationLocked.current || mutationPending) return
+    operationLocked.current = true
+    if (noticeToast.current) toast.close(noticeToast.current)
+    const target: Operation = {
+      kind:
+        kind === "delete"
+          ? "inspect"
+          : kind === "delete-file"
+            ? "inspect-file"
+            : kind,
+      chatId,
+      relativePath,
+    }
+    setOperation(target)
+    if (kind === "create" || kind === "create-file") return
+    const label = kind === "delete-file" ? "文件" : "文件夹"
+    try {
+      const result =
+        kind === "delete-file"
+          ? {
+              kind: "delete-file" as const,
+              ...(await inspectWorkspaceFileForDeletionAction(
+                target.chatId,
+                target.relativePath
+              )),
+            }
+          : {
+              kind: "delete" as const,
+              ...(await inspectWorkspaceDirectoryForDeletionAction(
+                target.chatId,
+                target.relativePath
+              )),
+            }
+      if (!mounted.current) return
+      if (result.success) {
+        if (result.kind === "delete")
+          setOperation({
+            ...target,
+            kind: "delete",
+            inspection: result.inspection,
+          })
+        else
+          setOperation({
+            ...target,
+            kind: "delete-file",
+            inspection: result.inspection,
+          })
+      } else if (result.code === "NOT_FOUND") await handleDeleted(target, true)
+      else {
+        closeOperation()
+        showNotice(`无法读取${label}状态`, result.error, "error")
+        await refreshBranch(workspaceParentPath(relativePath))
+      }
+    } catch {
+      if (mounted.current) {
+        closeOperation()
+        showNotice(`无法读取${label}状态`, "请重试。", "error")
+      }
+    }
+  }
 
   const isReady = status?.state === "ready"
+  const unavailableReason = statusLoading
+    ? "正在读取工作区状态"
+    : status?.state === "no-config"
+      ? "尚未配置工作区目录"
+      : status?.state === "not-initialised"
+        ? "当前任务尚未初始化工作区"
+        : status?.state === "error"
+          ? `工作区不可访问：${status.message}`
+          : treeError
+            ? `工作区不可访问：${treeError}`
+            : !rootLoaded
+              ? "正在读取任务根目录"
+              : mutationPending || operation
+                ? "请先完成当前文件操作"
+                : null
 
   return (
-    <div className="flex h-full min-w-0 flex-col">
-      {/* Toolbar */}
+    <div ref={container} className="flex h-full min-w-0 flex-col">
       <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-3">
         <span className="text-sm font-medium text-foreground">Workspace</span>
         <div className="flex items-center gap-0.5">
@@ -363,83 +467,100 @@ function ResearchWorkspaceInner({
                   variant="ghost"
                   size="icon-sm"
                   aria-label="Refresh file tree"
-                  disabled={!isReady || treeLoading}
+                  disabled={!isReady || treeLoading || mutationPending}
                   onClick={handleRefresh}
                 />
               }
             >
-              <RefreshCwIcon className={cn("size-4", treeLoading && "animate-spin")} />
+              <RefreshCwIcon
+                className={cn("size-4", treeLoading && "animate-spin")}
+              />
             </TooltipTrigger>
-            <TooltipContent>Refresh</TooltipContent>
+            <TooltipContent>刷新文件树</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger
               render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="New folder (not available)"
-                  disabled
+                <span
+                  tabIndex={unavailableReason ? 0 : undefined}
+                  aria-label={
+                    unavailableReason
+                      ? `在任务根目录新建文件夹：${unavailableReason}`
+                      : undefined
+                  }
+                  className="inline-flex"
                 />
               }
             >
-              <FolderPlusIcon className="size-4" />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="在任务根目录新建文件夹"
+                disabled={!!unavailableReason}
+                onClick={() => void handleEntryAction("create", "")}
+              >
+                <FolderPlusIcon />
+              </Button>
             </TooltipTrigger>
-            <TooltipContent>New folder — not yet available</TooltipContent>
+            <TooltipContent>
+              在任务根目录新建文件夹
+              {unavailableReason && `（${unavailableReason}）`}
+            </TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger
               render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="New file (not available)"
-                  disabled
+                <span
+                  className="inline-flex"
+                  tabIndex={unavailableReason ? 0 : undefined}
+                  aria-label={
+                    unavailableReason
+                      ? `在任务根目录新建文件：${unavailableReason}`
+                      : undefined
+                  }
                 />
               }
             >
-              <FilePlusIcon className="size-4" />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="在任务根目录新建文件"
+                disabled={!!unavailableReason}
+                onClick={() => void handleEntryAction("create-file", "")}
+              >
+                <FilePlusIcon />
+              </Button>
             </TooltipTrigger>
-            <TooltipContent>New file — not yet available</TooltipContent>
+            <TooltipContent>
+              在任务根目录新建文件
+              {unavailableReason && `（${unavailableReason}）`}
+            </TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Git (not available)"
-                  disabled
-                />
-              }
-            >
-              <GitBranchIcon className="size-4" />
-            </TooltipTrigger>
-            <TooltipContent>Git — not yet available</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Research flow (not available)"
-                  disabled
-                />
-              }
-            >
-              <WorkflowIcon className="size-4" />
-            </TooltipTrigger>
-            <TooltipContent>Research flow — not yet available</TooltipContent>
-          </Tooltip>
+          {[
+            { icon: GitBranchIcon, label: "Git" },
+            { icon: WorkflowIcon, label: "Research flow" },
+          ].map(({ icon: Icon, label }) => (
+            <Tooltip key={label}>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`${label} (not available)`}
+                    disabled
+                  />
+                }
+              >
+                <Icon />
+              </TooltipTrigger>
+              <TooltipContent>{label} — not yet available</TooltipContent>
+            </Tooltip>
+          ))}
         </div>
       </div>
-
-      {/* Body */}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
         {statusLoading && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -447,7 +568,6 @@ function ResearchWorkspaceInner({
             Loading workspace…
           </div>
         )}
-
         {!statusLoading && status?.state === "no-config" && (
           <div className="flex flex-col gap-2">
             <p className="text-xs text-muted-foreground">
@@ -455,125 +575,155 @@ function ResearchWorkspaceInner({
             </p>
             {onOpenSettings && (
               <Button
-                type="button"
                 variant="outline"
                 size="sm"
-                className="w-fit gap-1.5"
+                className="w-fit"
                 onClick={onOpenSettings}
               >
-                <SettingsIcon className="size-3.5" />
+                <SettingsIcon data-icon="inline-start" />
                 Set workspace directory
               </Button>
             )}
           </div>
         )}
-
         {!statusLoading && status?.state === "not-initialised" && (
           <div className="flex flex-col gap-2">
             <p className="text-xs text-muted-foreground">
               Workspace not yet initialised for this task.
             </p>
-            <p className="text-[11px] text-muted-foreground/70">
-              Root: <span className="font-mono">{status.rootDir}</span>
+            <p className="text-[11px] break-all text-muted-foreground/70">
+              Root: {status.rootDir}
             </p>
             {initError && (
-              <p className="flex items-center gap-1 text-xs text-destructive">
-                <AlertCircleIcon className="size-3.5 shrink-0" />
+              <p role="alert" className="text-xs text-destructive">
                 {initError}
               </p>
             )}
             <Button
-              type="button"
               variant="outline"
               size="sm"
               className="w-fit"
               disabled={initPending}
               onClick={handleInitialise}
             >
-              {initPending && <Spinner className="size-3" data-icon="inline-start" />}
-              Initialise workspace
+              {initPending && <Spinner data-icon="inline-start" />}Initialise
+              workspace
             </Button>
           </div>
         )}
-
         {!statusLoading && status?.state === "error" && (
           <div className="flex flex-col gap-2">
-            <p className="flex items-center gap-1 text-xs text-destructive">
-              <AlertCircleIcon className="size-3.5 shrink-0" />
+            <p role="alert" className="text-xs text-destructive">
               {status.message}
             </p>
             <Button
-              type="button"
               variant="outline"
               size="sm"
               className="w-fit"
-              onClick={loadStatus}
+              onClick={() => void loadStatus()}
             >
-              Retry
+              重试
             </Button>
           </div>
         )}
-
-        {!statusLoading && status?.state === "ready" && (
+        {!statusLoading && isReady && (
           <div className="flex min-h-0 flex-col gap-1">
-            <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            <p className="mb-1 text-[10px] font-medium tracking-wide text-muted-foreground">
               {chatId}
             </p>
+            {(operation?.kind === "inspect" ||
+              operation?.kind === "inspect-file") && (
+              <p
+                role="status"
+                className="flex items-center gap-2 text-xs text-muted-foreground"
+              >
+                <Spinner className="size-3" />
+                {operation.kind === "inspect-file"
+                  ? "正在读取文件状态…"
+                  : "正在读取文件夹状态…"}
+              </p>
+            )}
             {treeLoading && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <div
+                role="status"
+                className="flex items-center gap-2 text-xs text-muted-foreground"
+              >
                 <Spinner className="size-3" />
                 Loading…
               </div>
             )}
             {treeError && (
               <div className="flex flex-col gap-2">
-                <p className="flex items-center gap-1 text-xs text-destructive">
+                <p
+                  role="alert"
+                  className="flex items-center gap-1 text-xs text-destructive"
+                >
                   <AlertCircleIcon className="size-3.5 shrink-0" />
                   {treeError}
                 </p>
                 <Button
-                  type="button"
                   variant="outline"
                   size="sm"
                   className="w-fit"
                   onClick={handleRefresh}
                 >
-                  Retry
+                  重试
                 </Button>
               </div>
             )}
-            {!treeLoading && !treeError && (
-              <FileTree
-                nodes={tree}
-                chatId={chatId}
-                selectedRel={selectedRel}
-                onSelect={setSelectedRel}
-                onToggle={handleToggle}
-                depth={0}
-              />
-            )}
-            {selectedRel && (
-              <div className="mt-2 rounded border border-border bg-muted/40 p-2">
-                <p className="text-[11px] text-muted-foreground">Selected</p>
-                <p className="break-all font-mono text-xs">{selectedRel}</p>
-              </div>
+            <WorkspaceFileTree
+              nodes={tree}
+              selectedRel={selectedRel}
+              onSelect={setSelectedRel}
+              onToggle={handleToggle}
+              onRetry={(relative) => void refreshBranch(relative)}
+              onEntryAction={(kind, relative) =>
+                void handleEntryAction(kind, relative)
+              }
+              actionsDisabled={
+                mutationPending || !!operation || !!treeError || !rootLoaded
+              }
+            />
+            {rootTruncated && (
+              <p className="py-1 text-[11px] text-muted-foreground">
+                根目录列表已截断：仅显示前 200 项及本次新建项。
+              </p>
             )}
           </div>
         )}
       </div>
+      {(operation?.kind === "create" || operation?.kind === "create-file") && (
+        <CreateWorkspaceEntryDialog
+          kind={operation.kind === "create-file" ? "file" : "directory"}
+          target={operation}
+          onClose={closeOperation}
+          onStart={startMutation}
+          onCreated={(entry) => void handleCreated(operation, entry)}
+          onSettled={finishMutation}
+        />
+      )}
+      {operation?.kind === "delete-file" && (
+        <DeleteWorkspaceFileDialog
+          target={operation}
+          initialInspection={operation.inspection}
+          onClose={closeOperation}
+          onStart={startMutation}
+          onDeleted={(gone) => void handleDeleted(operation, gone)}
+          onReconcile={() => reconcileFailedDeletion(operation)}
+          onSettled={finishMutation}
+        />
+      )}
+      {operation?.kind === "delete" && (
+        <DeleteWorkspaceFolderDialog
+          target={operation}
+          initialInspection={operation.inspection}
+          onClose={closeOperation}
+          onStart={startMutation}
+          onDeleted={(gone) => void handleDeleted(operation, gone)}
+          onReconcile={() => reconcileFailedDeletion(operation)}
+          onSettled={finishMutation}
+        />
+      )}
     </div>
   )
-}
-
-// ─── Tree search helper ───────────────────────────────────────────────────────
-
-function findNode(nodes: TreeNode[], relPath: string): TreeNode | null {
-  for (const n of nodes) {
-    if (n.entry.relPath === relPath) return n
-    if (n.children) {
-      const found = findNode(n.children, relPath)
-      if (found) return found
-    }
-  }
-  return null
 }

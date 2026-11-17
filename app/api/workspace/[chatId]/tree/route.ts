@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { listWorkspaceDir } from "@/lib/workspace.server"
+import { directoryError } from "@/lib/workspace-directory.server"
 
 export async function GET(
   request: NextRequest,
@@ -11,17 +12,14 @@ export async function GET(
 
   try {
     const result = await listWorkspaceDir(chatId, relPath)
-    return NextResponse.json(result)
+    return NextResponse.json(result, {
+      headers: { "Cache-Control": "no-store" },
+    })
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    // Distinguish not-found/not-initialised from unexpected errors
-    const status =
-      message.includes("not initialised") ||
-      message.includes("does not exist") ||
-      message.includes("Path traversal")
-        ? 400
-        : 500
-    // Never expose stack or internal paths — just the sanitised message
-    return NextResponse.json({ error: message }, { status })
+    const failure = directoryError(err)
+    return NextResponse.json(failure, {
+      status: failure.code === "IO_ERROR" ? 500 : 400,
+      headers: { "Cache-Control": "no-store" },
+    })
   }
 }
