@@ -5,10 +5,11 @@ import { z } from "zod"
 
 import { getTriggerChatContext, type TriggerBot } from "./bot"
 import {
-  attributeBotMessages,
+  prepareBotModelHistory,
   botInstructions,
   resolveReplyBot,
 } from "../lib/chat-bot-context"
+import { botTextTransform } from "../lib/chat-bot-text"
 
 const systemInstructions = `You are a bot in Scientist Flow. Use the current bot identity specified below.
 
@@ -188,14 +189,17 @@ export const chatAgent = chat.agent({
     return streamText({
       model: openrouter("baidu/ernie-5.5-flash-preview:free"),
       system,
+      // AI SDK 7 requires explicit opt-in for our server-authored attribution.
+      allowSystemInMessages: chatContext.kind === "group",
       messages:
         chatContext.kind === "group"
           ? await convertToModelMessages(
-              attributeBotMessages(chat.history.all(), chatContext.bots),
+              prepareBotModelHistory(chat.history.all(), chatContext.bots),
               { tools: runtimeTools }
             )
           : messages,
       tools: runtimeTools,
+      experimental_transform: botTextTransform(chatContext.bots),
       stopWhen: chatContext?.kind === "group" ? isStepCount(3) : undefined,
       prepareStep: ({ steps }) => {
         const handoff = [...steps]

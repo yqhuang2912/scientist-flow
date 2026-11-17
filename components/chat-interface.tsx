@@ -47,6 +47,7 @@ import { ChatAvatar } from "@/components/chat-avatar"
 import { BotName } from "@/components/bot-name"
 import { compactChatAvatarStyles } from "@/components/ui/compact-styles"
 import { SelectGroup } from "@/components/ui/select"
+import { cleanBotText } from "@/lib/chat-bot-text"
 
 type ChatBot = ChatWithBot["bots"][number]
 
@@ -162,7 +163,7 @@ function MessageParts({
                   key={`${message.id}-handoff-text-${index}`}
                   isAnimating={isStreaming}
                 >
-                  {part.text}
+                  {cleanBotText(part.text, bots, isStreaming)}
                 </MessageResponse>
               ))}
             </MessageContent>
@@ -184,7 +185,7 @@ function MessageParts({
                     key={`${message.id}-${index}`}
                     isAnimating={isStreaming}
                   >
-                    {part.text}
+                    {cleanBotText(part.text, bots, isStreaming)}
                   </MessageResponse>
                 )
               }

@@ -1,4 +1,5 @@
 import type { UIMessage } from "ai"
+import { cleanBotText } from "./chat-bot-text"
 
 export type BotIdentity = {
   id: string
@@ -36,7 +37,7 @@ export function botInstructions(
   const identity = [
     `Your name is ${JSON.stringify(bot.name)}. Your job is ${JSON.stringify(bot.job)}.`,
     "This is your identity for the current response. Historical replies belong to their attributed speakers, even if they introduce themselves differently. Do not adopt their name, job or persona.",
-    "Bracketed speaker and addressee labels in the conversation are internal context only. Never print, imitate or mention those labels. Output only your natural reply to the user.",
+    "Speaker attribution is provided separately as system context. Output only your natural reply; do not prepend speaker labels, role annotations or wrap your answer in brackets.",
     bot.instructions ? `Your working instructions: ${bot.instructions}` : null,
   ]
     .filter(Boolean)
@@ -76,45 +77,58 @@ function handoffIdentity(part: UIMessage["parts"][number]) {
 }
 
 /** Model-only copies. Never rewrite the persisted transcript or visible text. */
-export function attributeBotMessages(
+export function prepareBotModelHistory(
   messages: UIMessage[],
   bots: BotIdentity[]
 ) {
-  return messages.map((message) => {
-    if (message.role !== "assistant" && message.role !== "user") return message
+  return messages.flatMap((message): UIMessage[] => {
+    // Only server-authored attribution may become a system message below.
+    if (message.role === "system")
+      throw new Error("Unexpected system message in chat history.")
+    if (message.role !== "assistant" && message.role !== "user")
+      return [message]
     const firstHandoff = message.parts.map(handoffIdentity).find(Boolean)
-    let speaker = bots.find(
+    const speaker = bots.find(
       (bot) =>
         bot.id ===
         (message.role === "assistant"
           ? (firstHandoff?.handedOffFrom?.id ?? metadataBotId(message))
           : metadataBotId(message))
     )
-    let attributed = false
-
-    return {
-      ...message,
-      parts: message.parts.map((part) => {
-        const handoff = handoffIdentity(part)
-        if (message.role === "assistant" && handoff?.handedOffTo?.id) {
-          speaker = bots.find((bot) => bot.id === handoff.handedOffTo?.id)
-          attributed = false
-        }
-        if (part.type !== "text" || attributed) return part
-        attributed = true
-        const label = speaker
-          ? `${JSON.stringify(speaker.name)} (${JSON.stringify(speaker.job)})`
-          : "an unspecified bot"
-        const attribution =
-          message.role === "assistant"
-            ? `[Historical assistant speaker: ${label}]`
-            : speaker
-              ? `[User addressed: ${label}]`
-              : null
-        return attribution
-          ? { ...part, text: `${attribution}\n${part.text}` }
-          : part
-      }),
-    }
+    const label = speaker
+      ? `${JSON.stringify(speaker.name)} (${JSON.stringify(speaker.job)})`
+      : "an unspecified bot"
+    const target = bots.find((bot) => bot.id === firstHandoff?.handedOffTo?.id)
+    const attribution =
+      message.role === "assistant"
+        ? `The next historical assistant message was written by ${label}.${target ? ` Its handoff tool transfers the reply to ${JSON.stringify(target.name)} (${JSON.stringify(target.job)}).` : ""} This identifies a past speaker, not your current identity or an output format.`
+        : speaker
+          ? `The next user message is addressed to ${label}.`
+          : null
+    const cleaned =
+      message.role === "assistant"
+        ? {
+            ...message,
+            parts: message.parts.map((part) =>
+              part.type === "text"
+                ? { ...part, text: cleanBotText(part.text, bots) }
+                : part
+            ),
+          }
+        : message
+    // System records exist only in the model input. Assistant prose remains
+    // natural text, so the model has no synthetic response format to imitate.
+    return [
+      ...(attribution
+        ? [
+            {
+              id: `${message.id}-speaker-context`,
+              role: "system" as const,
+              parts: [{ type: "text" as const, text: attribution }],
+            },
+          ]
+        : []),
+      cleaned,
+    ]
   })
 }

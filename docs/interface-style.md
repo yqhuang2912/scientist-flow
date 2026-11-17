@@ -64,7 +64,9 @@ Chat messages use a 28 px avatar on both sides: the responding bot on the left,
 and a neutral default user avatar on the right. Direct chats use their bot's
 avatar too. Each message has a separate 28 px identity line aligned with its
 avatar, followed by the body with a 4 px gap. Bot names use 13 px medium text
-and their job uses the shared muted 12 px `BotName` treatment. User messages
+and their job uses the shared muted 12 px `BotName` treatment. Message body text
+on both sides is also 13 px, with relaxed line spacing for paragraphs and lists.
+User messages
 show only `You` in that line until a user profile is available. Keep user
 identity right-aligned and bot identity left-aligned with their content column.
 Addressed bots appear inline as muted `@Name` text, without a

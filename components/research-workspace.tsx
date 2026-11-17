@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from "react"
 import {
   FolderPlusIcon,
+  FolderOpenIcon,
   FilePlusIcon,
   GitBranchIcon,
   WorkflowIcon,
@@ -13,6 +14,14 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { toast } from "@/components/ui/toast"
 import {
   Tooltip,
@@ -620,29 +629,38 @@ function ResearchWorkspaceInner({
           </div>
         )}
         {!statusLoading && status?.state === "not-initialised" && (
-          <div className="flex flex-col gap-2">
-            <p className="text-xs text-muted-foreground">
-              Workspace not yet initialised for this task.
-            </p>
-            <p className="text-[11px] break-all text-muted-foreground/70">
-              Root: {status.rootDir}
-            </p>
-            {initError && (
-              <p role="alert" className="text-xs text-destructive">
-                {initError}
+          <Empty className="px-4 py-8" aria-busy={initPending}>
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <FolderOpenIcon aria-hidden />
+              </EmptyMedia>
+              <EmptyTitle>No workspace yet</EmptyTitle>
+              <EmptyDescription>
+                Create a workspace for this task&apos;s files.
+              </EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <Button
+                size="sm"
+                disabled={initPending}
+                onClick={handleInitialise}
+              >
+                {initPending && <Spinner data-icon="inline-start" />}
+                {initPending ? "Initialising…" : "Initialise workspace"}
+              </Button>
+              <p className="max-w-full text-[11px] leading-relaxed [overflow-wrap:anywhere] text-muted-foreground">
+                Root: {status.rootDir}
               </p>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-fit"
-              disabled={initPending}
-              onClick={handleInitialise}
-            >
-              {initPending && <Spinner data-icon="inline-start" />}Initialise
-              workspace
-            </Button>
-          </div>
+              {initError && (
+                <p
+                  role="alert"
+                  className="text-xs [overflow-wrap:anywhere] text-destructive"
+                >
+                  {initError}
+                </p>
+              )}
+            </EmptyContent>
+          </Empty>
         )}
         {!statusLoading && status?.state === "error" && (
           <div className="flex flex-col gap-2">
