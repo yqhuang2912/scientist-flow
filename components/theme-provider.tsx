@@ -30,7 +30,8 @@ function isTypingTarget(target: EventTarget | null) {
     target.isContentEditable ||
     target.tagName === "INPUT" ||
     target.tagName === "TEXTAREA" ||
-    target.tagName === "SELECT"
+    target.tagName === "SELECT" ||
+    !!target.closest('[role="combobox"], [role="listbox"]')
   )
 }
 

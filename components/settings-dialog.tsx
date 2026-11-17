@@ -1,9 +1,10 @@
 "use client"
 
 import { useState } from "react"
-import { SettingsIcon, UsersIcon } from "lucide-react"
+import { FolderIcon, SettingsIcon, UsersIcon } from "lucide-react"
 
 import { ChatAvatar } from "@/components/chat-avatar"
+import { GeneralSettingsPanel } from "@/components/general-settings-panel"
 import { SettingsNavItem, SettingsShell } from "@/components/settings-shell"
 import { WorkspaceSettingsPanel } from "@/components/workspace-settings-panel"
 import { Button } from "@/components/ui/button"
@@ -22,7 +23,7 @@ import {
 } from "@/components/ui/dialog"
 import type { BotSummary } from "@/queries/bots"
 
-type SettingsTab = "bots" | "workspace"
+type SettingsTab = "general" | "bots" | "workspace"
 
 /**
  * One settings surface for the whole app: a fixed navigation column plus a
@@ -33,7 +34,7 @@ export function SettingsDialog({
   bots,
   open,
   onOpenChange,
-  initialTab = "bots",
+  initialTab = "general",
   onWorkspaceSaved,
   onManageBots,
 }: {
@@ -58,12 +59,19 @@ export function SettingsDialog({
         <DialogHeader className="sr-only">
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
-            Manage bots and the workspace directory.
+            Manage appearance, bots and the workspace directory.
           </DialogDescription>
         </DialogHeader>
         <SettingsShell
           nav={
             <>
+              <SettingsNavItem
+                active={tab === "general"}
+                icon={<SettingsIcon strokeWidth={2} />}
+                onClick={() => setTab("general")}
+              >
+                General
+              </SettingsNavItem>
               <SettingsNavItem
                 active={tab === "bots"}
                 icon={<UsersIcon strokeWidth={2} />}
@@ -73,7 +81,7 @@ export function SettingsDialog({
               </SettingsNavItem>
               <SettingsNavItem
                 active={tab === "workspace"}
-                icon={<SettingsIcon strokeWidth={2} />}
+                icon={<FolderIcon strokeWidth={2} />}
                 onClick={() => setTab("workspace")}
               >
                 Workspace
@@ -81,7 +89,9 @@ export function SettingsDialog({
             </>
           }
         >
-          {tab === "bots" ? (
+          {tab === "general" ? (
+            <GeneralSettingsPanel />
+          ) : tab === "bots" ? (
             <div className="flex flex-col p-4">
               <p className="text-[13px] font-medium">Bots</p>
               <p className="text-[12px] text-muted-foreground">

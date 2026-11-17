@@ -30,7 +30,7 @@ export function SettingsShell({
     >
       <nav
         aria-label="Settings sections"
-        className="flex gap-0.5 border-b p-2 pr-12 sm:flex-col sm:border-r sm:border-b-0 sm:pr-2"
+        className="flex flex-wrap gap-0.5 border-b p-2 pr-12 sm:flex-col sm:flex-nowrap sm:border-r sm:border-b-0 sm:pr-2"
       >
         {nav}
       </nav>
@@ -60,7 +60,7 @@ export function SettingsNavItem({
       className={cn(
         compactItemStyles,
         compactItemStates,
-        "w-full min-w-0 justify-start",
+        "w-auto min-w-0 justify-start sm:w-full",
         !active && "text-muted-foreground"
       )}
     >

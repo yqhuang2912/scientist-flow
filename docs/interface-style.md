@@ -83,6 +83,10 @@ must give its footer `mx-0 mb-0`; avoid carrying the default negative margins
 into an edge-to-edge layout. Form bodies can scroll independently on short
 viewports. Keep destructive confirmation text and cancel-first focus intact.
 Settings switches from a left navigation column to a top row on small screens.
+General is the default section and currently contains only Theme (Light, Dark,
+System). It uses the existing theme provider and saved browser preference. Keep
+the selector at the shared 30 px control height with a muted secondary surface;
+small-screen navigation wraps instead of stretching or overflowing the dialog.
 
 The New task flow uses Task terminology for creation, editing, validation and
 deletion. Its compact dialog has a 16 px task icon, Task name, Bots, and
