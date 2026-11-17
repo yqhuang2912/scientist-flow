@@ -32,7 +32,7 @@ function normaliseAbsolute(value: string) {
   return process.platform === "win32" ? absolute.toLowerCase() : absolute
 }
 
-async function resolveWorkspaceFile(taskDir: string, rawRelative: unknown) {
+export async function resolveWorkspaceFile(taskDir: string, rawRelative: unknown) {
   const relativePath = workspaceFileTargetSchema.parse(rawRelative)
   const parent = await resolveWorkspaceDirectory(
     taskDir,
@@ -42,11 +42,11 @@ async function resolveWorkspaceFile(taskDir: string, rawRelative: unknown) {
   const absolute = path.join(parent.absolute, name)
   const stat = await fs.lstat(absolute, { bigint: true })
   if (stat.isSymbolicLink())
-    throw new WorkspaceDirectoryError("LINK", "不能将符号链接作为文件删除。")
+    throw new WorkspaceDirectoryError("LINK", "Symbolic links cannot be opened or modified.")
   if (!stat.isFile())
     throw new WorkspaceDirectoryError(
       "NOT_FILE",
-      "目标不是普通文件，不能执行文件删除。"
+      "The target is not a regular file."
     )
   if (
     normaliseAbsolute(await fs.realpath(absolute)) !==
@@ -72,7 +72,7 @@ async function resolveWorkspaceFile(taskDir: string, rawRelative: unknown) {
       ].join(":")
     )
     .digest("hex")
-  return { absolute, relativePath, name, identity }
+  return { absolute, relativePath, name, identity, stat }
 }
 
 export async function createFileInWorkspace(

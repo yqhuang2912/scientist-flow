@@ -61,6 +61,24 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { useWorkspaceDocument } from "@/components/workspace-document-provider"
+import type { DocumentTarget } from "@/lib/workspace-document"
+
+function useDocumentDeletion(
+  target: DocumentTarget,
+  submitting: React.RefObject<boolean>
+) {
+  const { session } = useWorkspaceDocument()
+  const { chatId, relativePath } = target
+  useEffect(
+    () => () => {
+      if (!submitting.current)
+        session.finishDeletion({ chatId, relativePath }, false)
+    },
+    [session, chatId, relativePath, submitting]
+  )
+  return session
+}
 
 const creationErrors: Record<string, string> = {
   CONFLICT: "A file or folder with this name already exists.",
@@ -300,6 +318,7 @@ export function DeleteWorkspaceFileDialog({
   const [pending, startTransition] = useTransition()
   const cancelRef = useRef<HTMLButtonElement>(null)
   const life = useDialogLifetime()
+  const documentSession = useDocumentDeletion(target, life.submitting)
 
   async function recheck() {
     await onReconcile()
@@ -329,6 +348,9 @@ export function DeleteWorkspaceFileDialog({
             identity: inspection.identity,
           }
         )
+        if (result.success || result.code === "NOT_FOUND")
+          documentSession.finishDeletion(target, true)
+        else void documentSession.checkExists(target.chatId)
         if (!life.mounted.current) return
         if (result.success || result.code === "NOT_FOUND") {
           completed = true
@@ -339,12 +361,14 @@ export function DeleteWorkspaceFileDialog({
         setInspection(null)
         await recheck()
       } catch {
+        void documentSession.checkExists(target.chatId)
         if (!life.mounted.current) return
         setError("删除请求失败，请重新读取文件状态后确认。")
         setInspection(null)
         await onReconcile()
       } finally {
         life.endSubmit()
+        if (!life.mounted.current) documentSession.finishDeletion(target, false)
         if (life.mounted.current && !completed) onSettled()
       }
     })
@@ -461,6 +485,7 @@ export function DeleteWorkspaceFolderDialog({
   const [pending, startTransition] = useTransition()
   const cancelRef = useRef<HTMLButtonElement>(null)
   const life = useDialogLifetime()
+  const documentSession = useDocumentDeletion(target, life.submitting)
   const toConfirmation = (
     value: DirectoryDeletionInspection
   ): DirectoryDeletionConfirmation =>
@@ -510,6 +535,9 @@ export function DeleteWorkspaceFolderDialog({
           target.relativePath,
           confirmation
         )
+        if (result.success || result.code === "NOT_FOUND")
+          documentSession.finishDeletion(target, true)
+        else void documentSession.checkExists(target.chatId)
         if (!life.mounted.current) return
         if (result.success || result.code === "NOT_FOUND") {
           completed = true
@@ -523,12 +551,14 @@ export function DeleteWorkspaceFolderDialog({
         await onReconcile()
         await recheck()
       } catch {
+        void documentSession.checkExists(target.chatId)
         if (!life.mounted.current) return
         setError("删除请求失败，部分内容可能已删除。请重新读取目录状态后确认。")
         setInspection(null)
         await onReconcile()
       } finally {
         life.endSubmit()
+        if (!life.mounted.current) documentSession.finishDeletion(target, false)
         if (life.mounted.current && !completed) onSettled()
       }
     })

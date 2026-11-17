@@ -10,6 +10,7 @@ import {
   FolderPlusIcon,
   MoreHorizontalIcon,
   Trash2Icon,
+  FolderOpenIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -43,7 +44,7 @@ import { cn } from "@/lib/utils"
 import { type WorkspaceTreeNode } from "@/lib/workspace-tree"
 
 export type WorkspaceEntryAction =
-  "create" | "delete" | "create-file" | "delete-file"
+  "create" | "delete" | "create-file" | "delete-file" | "open"
 
 type TreeProps = {
   nodes: WorkspaceTreeNode[]
@@ -73,6 +74,15 @@ function EntryMenuItems({
   const Separator = context ? ContextMenuSeparator : DropdownMenuSeparator
   return (
     <Group>
+      {!isDir && (
+        <>
+          <Item disabled={disabled} onClick={() => onAction("open")}>
+            <FolderOpenIcon />
+            Open
+          </Item>
+          <Separator />
+        </>
+      )}
       {isDir && (
         <>
           <Item disabled={disabled} onClick={() => onAction("create-file")}>
@@ -126,6 +136,16 @@ function FileTreeRow({
       aria-current={selected ? "true" : undefined}
       aria-busy={node.loading || undefined}
       onClick={onSelect}
+      onDoubleClick={() => {
+        if (node.entry.isFile && !disabled) onAction("open")
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" && node.entry.isFile && !disabled) {
+          event.preventDefault()
+          onSelect()
+          onAction("open")
+        }
+      }}
       className={cn(
         "w-full min-w-0 justify-start font-normal group-hover/tree-row:bg-highlight",
         hasActions && "pr-9",

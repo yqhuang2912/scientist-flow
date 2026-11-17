@@ -38,6 +38,8 @@ import {
   DeleteWorkspaceFileDialog,
 } from "@/components/workspace-folder-dialogs"
 import { cn } from "@/lib/utils"
+import { useWorkspaceDocument } from "@/components/workspace-document-provider"
+import type { DocumentTarget } from "@/lib/workspace-document"
 import {
   getWorkspaceStatusAction,
   initialiseWorkspaceAction,
@@ -124,6 +126,8 @@ function ResearchWorkspaceInner({
   onOpenSettings,
   onBack,
 }: ResearchWorkspaceProps) {
+  const workbench = useWorkspaceDocument()
+  const deletionTarget = useRef<DocumentTarget | null>(null)
   const [status, setStatus] = useState<WorkspaceStatus | null>(null)
   const [statusLoading, setStatusLoading] = useState(true)
   const [initPending, startInitTransition] = useTransition()
@@ -148,9 +152,11 @@ function ResearchWorkspaceInner({
     mounted.current = true
     return () => {
       mounted.current = false
+      if (deletionTarget.current && !mutationPath.current)
+        workbench.session.finishDeletion(deletionTarget.current, false)
       if (noticeToast.current) toast.close(noticeToast.current)
     }
-  }, [])
+  }, [workbench])
 
   function showNotice(
     title: string,
@@ -292,6 +298,7 @@ function ResearchWorkspaceInner({
 
   function handleRefresh() {
     if (mutationPending) return
+    void workbench.session.checkExists(chatId)
     const paths = loadedDirectories(tree)
     void refreshBranch("")
     for (const relative of paths) void refreshBranch(relative)
@@ -315,6 +322,9 @@ function ResearchWorkspaceInner({
   }
 
   function closeOperation() {
+    if (deletionTarget.current)
+      workbench.session.finishDeletion(deletionTarget.current, false)
+    deletionTarget.current = null
     operationLocked.current = false
     setOperation(null)
   }
@@ -351,6 +361,7 @@ function ResearchWorkspaceInner({
   }
 
   async function handleDeleted(target: Operation, alreadyGone: boolean) {
+    workbench.session.finishDeletion(target, true)
     if (!mounted.current) return
     finishMutation()
     invalidate(target.relativePath)
@@ -368,6 +379,7 @@ function ResearchWorkspaceInner({
   }
 
   async function reconcileFailedDeletion(target: Operation) {
+    await workbench.session.checkExists(target.chatId)
     if (!mounted.current) return
     invalidate(target.relativePath)
     const node = findWorkspaceNode(tree, target.relativePath)
@@ -389,10 +401,25 @@ function ResearchWorkspaceInner({
   ) {
     if (operationLocked.current || mutationPending || status?.state !== "ready")
       return
+    if (kind === "open") {
+      const node = findWorkspaceNode(tree, relativePath)
+      if (node?.entry.isFile) void workbench.open({ chatId, relativePath })
+      return
+    }
     operationLocked.current = true
     if (noticeToast.current) toast.close(noticeToast.current)
     if (kind === "create" || kind === "create-file") {
       setOperation({ kind, chatId, relativePath })
+      return
+    }
+    deletionTarget.current = { chatId, relativePath }
+    const allowed = await workbench.session.prepareDeletion({
+      chatId,
+      relativePath,
+    })
+    if (!mounted.current || !allowed) {
+      workbench.session.finishDeletion({ chatId, relativePath }, false)
+      if (mounted.current) closeOperation()
       return
     }
     const target: Operation = {

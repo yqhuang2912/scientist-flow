@@ -323,7 +323,7 @@ export async function requireWorkspaceBinding(
 // Serialise writes to the same chat in this server process, including ancestor
 // deletion vs child creation. Other chats and chat streaming remain independent.
 const directoryWrites = new Map<string, Promise<unknown>>()
-async function withDirectoryWrite<T>(
+export async function withDirectoryWrite<T>(
   chatId: string,
   operation: () => Promise<T>
 ): Promise<T> {

@@ -1,0 +1,117 @@
+import { workspaceFileTargetSchema } from "./workspace-validation"
+
+export type WorkspaceOpenPolicy =
+  | { kind: "internal-text"; markdown: boolean }
+  | { kind: "external" }
+  | { kind: "blocked" | "unsupported"; reason: string }
+
+// Ordered, shared by the tree entry point and every server-side read/open/save.
+export const BLOCKED_WORKSPACE_REGIONS = ["data", "outputs/checkpoints"]
+export const BLOCKED_FILE_EXTENSIONS = [
+  ".csv",
+  ".tsv",
+  ".parquet",
+  ".arrow",
+  ".feather",
+  ".npy",
+  ".npz",
+  ".h5",
+  ".hdf5",
+  ".hdf",
+  ".dcm",
+  ".dicom",
+  ".nii",
+  ".nii.gz",
+  ".pt",
+  ".pth",
+  ".ckpt",
+  ".safetensors",
+  ".onnx",
+  ".gguf",
+  ".ggml",
+]
+const TEXT_EXTENSIONS = [
+  ".md",
+  ".markdown",
+  ".txt",
+  ".py",
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".json",
+  ".jsonc",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".css",
+  ".scss",
+  ".html",
+  ".htm",
+  ".tex",
+  ".bib",
+  ".xml",
+  ".ini",
+  ".cfg",
+  ".conf",
+  ".sh",
+  ".r",
+  ".rs",
+  ".go",
+  ".java",
+  ".c",
+  ".h",
+  ".cpp",
+  ".hpp",
+  ".sql",
+  ".log",
+]
+// SVG / HTML and macro-enabled Office documents are deliberately excluded.
+const EXTERNAL_EXTENSIONS = [
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".bmp",
+  ".tif",
+  ".tiff",
+  ".avif",
+  ".ico",
+  ".pdf",
+  ".doc",
+  ".docx",
+  ".xls",
+  ".xlsx",
+  ".ppt",
+  ".pptx",
+]
+
+export function workspaceOpenPolicy(rawPath: string): WorkspaceOpenPolicy {
+  const parsed = workspaceFileTargetSchema.safeParse(rawPath)
+  if (!parsed.success)
+    return { kind: "blocked", reason: "Invalid workspace file path." }
+  const relative = parsed.data.toLowerCase()
+  if (
+    BLOCKED_WORKSPACE_REGIONS.some(
+      (region) => relative === region || relative.startsWith(`${region}/`)
+    ) ||
+    BLOCKED_FILE_EXTENSIONS.some((extension) => relative.endsWith(extension))
+  ) {
+    return {
+      kind: "blocked",
+      reason: "Dataset and model-weight files cannot be opened here.",
+    }
+  }
+  if (TEXT_EXTENSIONS.some((extension) => relative.endsWith(extension))) {
+    return {
+      kind: "internal-text",
+      markdown: /\.(md|markdown)$/.test(relative),
+    }
+  }
+  if (EXTERNAL_EXTENSIONS.some((extension) => relative.endsWith(extension)))
+    return { kind: "external" }
+  return { kind: "unsupported", reason: "This file format is not supported." }
+}
