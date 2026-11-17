@@ -44,6 +44,7 @@ import type { chatAgent } from "@/trigger/chat"
 import type { ChatWithBot } from "@/queries/chats"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { ChatAvatar } from "@/components/chat-avatar"
+import { BotName } from "@/components/bot-name"
 import { compactChatAvatarStyles } from "@/components/ui/compact-styles"
 import { SelectGroup } from "@/components/ui/select"
 
@@ -63,16 +64,26 @@ function AssistantMessageRow({
       ) : (
         <div aria-hidden className="size-7" />
       )}
-      {children}
+      <div className="flex min-w-0 flex-col gap-1">
+        <div className="flex h-7 min-w-0 items-center text-[13px] leading-5 font-medium">
+          <BotName name={bot?.name ?? "Assistant"} job={bot?.job} />
+        </div>
+        {children}
+      </div>
     </div>
   )
 }
 
 function UserMessageRow({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-w-0 items-start justify-end gap-3">
-      {children}
-      <Avatar className="mt-1 size-7" role="img" aria-label="User avatar">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_1.75rem] items-start gap-x-3">
+      <div className="flex min-w-0 flex-col items-end gap-1">
+        <div className="flex h-7 max-w-full items-center text-[13px] leading-5 font-medium">
+          You
+        </div>
+        {children}
+      </div>
+      <Avatar className="size-7" role="img" aria-label="User avatar">
         <AvatarFallback>
           <UserRoundIcon className="size-4" aria-hidden />
         </AvatarFallback>
