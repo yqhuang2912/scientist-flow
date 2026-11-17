@@ -4,6 +4,7 @@ import { useState } from "react"
 import { PanelRightIcon } from "lucide-react"
 
 import { BotDialog } from "@/components/bot-dialog"
+import { BotName } from "@/components/bot-name"
 import { TaskDialog } from "@/components/task-dialog"
 import type { BotSummary } from "@/queries/bots"
 import type { ChatWithBot } from "@/queries/chats"
@@ -42,7 +43,7 @@ export function ChatHeader({
             <Button
               type="button"
               variant="ghost"
-              className="min-w-0 justify-start"
+              className="min-w-0 shrink justify-start"
               onClick={() => setTaskDialogOpen(true)}
             >
               <GroupChatAvatar
@@ -58,7 +59,7 @@ export function ChatHeader({
             <Button
               type="button"
               variant="ghost"
-              className="min-w-0 justify-start"
+              className="min-w-0 shrink justify-start"
               disabled={!chat.bot}
               onClick={() => setBotDialogOpen(true)}
             >
@@ -68,9 +69,10 @@ export function ChatHeader({
                 alt={`${chat.bot?.name ?? chat.name ?? "Chat"} avatar`}
                 className={compactChatAvatarStyles}
               />
-              <span className="truncate">
-                {chat.name ?? chat.bot?.name ?? "Untitled chat"}
-              </span>
+              <BotName
+                name={chat.name ?? chat.bot?.name ?? "Untitled chat"}
+                job={chat.bot?.job}
+              />
             </Button>
           )}
         </div>

@@ -17,8 +17,8 @@ export interface SidebarChat {
   name: string
   lastMessagePreview: string
   lastMessageAtLabel: string
-  bots: Pick<BotSummary, "id" | "name" | "avatar">[]
-  bot: Pick<BotSummary, "id" | "name" | "avatar"> | null
+  bots: Pick<BotSummary, "id" | "name" | "avatar" | "job">[]
+  bot: Pick<BotSummary, "id" | "name" | "avatar" | "job"> | null
 }
 
 export async function getUserChats(): Promise<SidebarChat[]> {
@@ -32,6 +32,7 @@ export async function getUserChats(): Promise<SidebarChat[]> {
       botId: bots.id,
       botName: bots.name,
       botAvatar: bots.avatar,
+      botJob: bots.job,
     })
     .from(chats)
     .leftJoin(chatMembers, eq(chatMembers.chatId, chats.id))
@@ -47,6 +48,7 @@ export async function getUserChats(): Promise<SidebarChat[]> {
             id: row.botId,
             name: row.botName,
             avatar: row.botAvatar,
+            job: row.botJob ?? "",
           }
         : null
 

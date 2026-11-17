@@ -12,6 +12,7 @@ import {
 import { usePathname, useRouter } from "next/navigation"
 
 import { BotDialog } from "@/components/bot-dialog"
+import { BotName } from "@/components/bot-name"
 import { ChatAvatar } from "@/components/chat-avatar"
 import { compactChatAvatarStyles } from "@/components/ui/compact-styles"
 import { GroupChatAvatar } from "@/components/group-chat-avatar"
@@ -325,6 +326,9 @@ export function AppSidebar({
                 <CommandItem
                   key={chat.id}
                   value={`${chat.name} ${chat.lastMessagePreview}`}
+                  keywords={
+                    chat.kind === "direct" && chat.bot ? [chat.bot.job] : []
+                  }
                   onSelect={() => handleChatSelect(chat.id)}
                 >
                   {chat.kind === "group" ? (
@@ -344,16 +348,19 @@ export function AppSidebar({
                     />
                   )}
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className="truncate text-[13px] font-medium">
-                      {chat.name}
-                    </span>
+                    <BotName
+                      name={chat.name}
+                      job={chat.kind === "direct" ? chat.bot?.job : null}
+                    />
                     {chat.lastMessagePreview && (
                       <span className="truncate text-xs text-muted-foreground">
                         {chat.lastMessagePreview}
                       </span>
                     )}
                   </span>
-                  <CommandShortcut>{chat.lastMessageAtLabel}</CommandShortcut>
+                  <CommandShortcut className="shrink-0 whitespace-nowrap">
+                    {chat.lastMessageAtLabel}
+                  </CommandShortcut>
                 </CommandItem>
               ))}
             </CommandGroup>

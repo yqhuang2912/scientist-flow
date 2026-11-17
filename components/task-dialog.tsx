@@ -14,6 +14,7 @@ import { ListTodoIcon, Trash2Icon } from "lucide-react"
 
 import { createTask, deleteTask, updateTask } from "@/actions/chat"
 import { ChatAvatar } from "@/components/chat-avatar"
+import { BotName } from "@/components/bot-name"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -218,9 +219,11 @@ export function TaskDialog({
                             alt={`${bot.name} avatar`}
                             className={compactChatAvatarStyles}
                           />
-                          <span className="min-w-0 flex-1 truncate">
-                            {bot.name}
-                          </span>
+                          <BotName
+                            name={bot.name}
+                            job={bot.job}
+                            className="flex-1"
+                          />
                           <Checkbox
                             className="after:inset-0"
                             disabled={isPending}

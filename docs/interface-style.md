@@ -48,6 +48,10 @@ The bot editor keeps its larger 40 px avatar preview.
 Readable message text, code, and full-size bot portraits keep their own content
 scale. Secondary descriptions use 12 px normal-weight
 text; metadata uses 11 px. Multiline rows may grow rather than clipping content.
+Bot names in the chat header, task picker and chat search use `BotName`: the job
+follows the name on the same baseline in muted 12 px text. Keep the row height,
+truncate long descriptions, and expose the full identity on hover. Task titles
+remain task titles; they do not inherit a member bot's job.
 
 The neutral light palette is approximately white `#ffffff`, ink `#0a0a0a`,
 muted surface `#f5f5f5`, secondary text `#737373`, and border `#e5e5e5`.
