@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { MonitorIcon } from "lucide-react"
+import { PanelRightIcon } from "lucide-react"
 
 import { BotDialog } from "@/components/bot-dialog"
 import { GroupChatDialog } from "@/components/group-chat-dialog"
@@ -10,13 +10,23 @@ import type { ChatWithBot } from "@/queries/chats"
 import { ChatAvatar } from "@/components/chat-avatar"
 import { GroupChatAvatar } from "@/components/group-chat-avatar"
 import { Button } from "@/components/ui/button"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
 
 export function ChatHeader({
   chat,
   bots,
+  workspaceOpen,
+  onWorkspaceOpenChange,
 }: {
   chat: ChatWithBot
   bots: BotSummary[]
+  workspaceOpen?: boolean
+  onWorkspaceOpenChange?: (open: boolean) => void
 }) {
   const [botDialogOpen, setBotDialogOpen] = useState(false)
   const [groupChatDialogOpen, setGroupChatDialogOpen] = useState(false)
@@ -61,17 +71,32 @@ export function ChatHeader({
             </span>
           </Button>
         )}
-        {chat.kind === "direct" && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Desktop app"
-          >
-            <MonitorIcon />
-          </Button>
+
+        {onWorkspaceOpenChange && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={workspaceOpen ? "Close workspace" : "Open workspace"}
+                  onClick={() => onWorkspaceOpenChange(!workspaceOpen)}
+                  className={cn(
+                    workspaceOpen && "bg-accent text-accent-foreground"
+                  )}
+                />
+              }
+            >
+              <PanelRightIcon className="size-4" />
+            </TooltipTrigger>
+            <TooltipContent>
+              {workspaceOpen ? "Close workspace" : "Open workspace"}
+            </TooltipContent>
+          </Tooltip>
         )}
       </header>
+
       {chat.kind === "direct" && chat.bot && (
         <BotDialog
           bot={chat.bot}

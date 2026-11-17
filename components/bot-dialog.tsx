@@ -221,7 +221,7 @@ export function BotDialog({
           Create a new bot
         </DialogTrigger>
       )}
-      <DialogContent className="dark max-w-[calc(100%-2rem)] gap-0 overflow-hidden p-4 pb-0 sm:max-w-2xl">
+      <DialogContent className="max-w-[calc(100%-2rem)] gap-0 overflow-hidden p-4 pb-0 sm:max-w-2xl">
         <DialogHeader className="gap-1">
           <DialogTitle>{isEditing ? "Edit bot" : "New bot"}</DialogTitle>
           <DialogDescription>
@@ -343,7 +343,7 @@ export function BotDialog({
                 <Trash2Icon data-icon="inline-start" />
                 Delete bot
               </AlertDialogTrigger>
-              <AlertDialogContent className="dark">
+              <AlertDialogContent>
                 <AlertDialogHeader>
                   <AlertDialogTitle>Delete {bot.name}?</AlertDialogTitle>
                   <AlertDialogDescription>

@@ -131,7 +131,7 @@ export function GroupChatDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="dark max-w-[calc(100%-2rem)] gap-0 overflow-hidden p-4 pb-0 sm:max-w-lg">
+      <DialogContent className="max-w-[calc(100%-2rem)] gap-0 overflow-hidden p-4 pb-0 sm:max-w-lg">
         <DialogHeader className="gap-1">
           <DialogTitle>
             {isEditing ? "Edit group chat" : "New group chat"}
@@ -238,7 +238,7 @@ export function GroupChatDialog({
                 <Trash2Icon data-icon="inline-start" />
                 Delete group
               </AlertDialogTrigger>
-              <AlertDialogContent className="dark">
+              <AlertDialogContent>
                 <AlertDialogHeader>
                   <AlertDialogTitle>Delete {chat.name}?</AlertDialogTitle>
                   <AlertDialogDescription>

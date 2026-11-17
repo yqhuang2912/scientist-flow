@@ -38,6 +38,9 @@ pnpm-debug.log*
 # Firecrawl outputs
 .firecrawl/
 
+# Local machine config (workspace root path, not for version control)
+workspace.local.json
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

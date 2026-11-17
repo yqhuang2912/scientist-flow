@@ -13,6 +13,34 @@
       "skillPath": "skills/use-ai-sdk/SKILL.md",
       "computedHash": "59cd2dc82c5458f2819992fc3d27204ed16edfc9170870c6f8f04c44bac17772"
     },
+    "langchain-agent-monitoring": {
+      "source": "langchain-ai/langchain-skills",
+      "commit": "8883a4a278b5e68d85f0d4a988d84accd246c7f0",
+      "sourceType": "github",
+      "skillPath": "skills/langchain-agent-monitoring/SKILL.md",
+      "computedHash": "388520ea49a649fffb28e11ad18f5566acbbc49c929b794fd9588e1f0b9dd30b"
+    },
+    "langchain-agent-tracing": {
+      "source": "langchain-ai/langchain-skills",
+      "commit": "8883a4a278b5e68d85f0d4a988d84accd246c7f0",
+      "sourceType": "github",
+      "skillPath": "skills/langchain-agent-tracing/SKILL.md",
+      "computedHash": "358bc61029933171d6c8844a2b5a3873bbac5d4b2a2e2bd8f4ffeabb66ddd703"
+    },
+    "langchain-build-agent": {
+      "source": "langchain-ai/langchain-skills",
+      "commit": "8883a4a278b5e68d85f0d4a988d84accd246c7f0",
+      "sourceType": "github",
+      "skillPath": "skills/langchain-build-agent/SKILL.md",
+      "computedHash": "7632682b9610a2f51285554b5c0477d621ddafa5e7780ea7177b9ae17380ec6b"
+    },
+    "langchain-eval-engineering": {
+      "source": "langchain-ai/langchain-skills",
+      "commit": "8883a4a278b5e68d85f0d4a988d84accd246c7f0",
+      "sourceType": "github",
+      "skillPath": "skills/langchain-eval-engineering/SKILL.md",
+      "computedHash": "04520c46216489586faf3f8cc48fee8097fb8187edda69bca600363de493f373"
+    },
     "migrate-ai-sdk-v6-to-v7": {
       "source": "vercel/ai",
       "sourceType": "github",

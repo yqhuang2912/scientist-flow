@@ -17,7 +17,7 @@ export default function Page() {
   const avatarSeed = nanoid()
 
   return (
-    <main className="dark flex min-h-svh items-center justify-center bg-background px-6 py-12 text-foreground">
+    <main className="flex min-h-svh items-center justify-center bg-background px-6 py-12 text-foreground">
       <Empty className="max-w-xl border-0 bg-transparent p-0">
         <EmptyHeader className="max-w-md gap-3">
           <EmptyMedia className="mb-1">

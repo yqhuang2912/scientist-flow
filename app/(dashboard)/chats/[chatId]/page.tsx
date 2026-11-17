@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation"
 
-import { ChatInterface } from "@/components/chat-interface"
-import { ChatHeader } from "@/components/chat-header"
+import { ChatPageClient } from "@/components/chat-page-client"
 import { getBots } from "@/queries/bots"
 import { getChat } from "@/queries/chats"
 
@@ -18,13 +17,8 @@ export default async function ChatPage({
   }
 
   return (
-    <main className="dark flex min-h-svh flex-1 flex-col bg-background text-foreground">
-      <ChatHeader chat={chat} bots={bots} />
-      <ChatInterface
-        chatId={chatId}
-        bots={chat.bots}
-        isGroup={chat.kind === "group"}
-      />
+    <main className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
+      <ChatPageClient chat={chat} bots={bots} />
     </main>
   )
 }
