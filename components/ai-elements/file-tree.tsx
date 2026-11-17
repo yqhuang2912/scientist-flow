@@ -6,6 +6,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { compactItemStyles } from "@/components/ui/compact-styles";
 import {
   ChevronRightIcon,
   FileIcon,
@@ -166,12 +167,14 @@ export const FileTreeFolder = ({
         <div
           className={cn("", className)}
           role="treeitem"
+          aria-selected={isSelected}
           tabIndex={0}
           {...props}
         >
           <div
             className={cn(
-              "flex w-full items-center gap-1 rounded px-2 py-1 text-left transition-colors hover:bg-muted/50",
+              compactItemStyles,
+              "flex w-full items-center text-left transition-colors hover:bg-highlight focus-within:bg-highlight",
               isSelected && "bg-muted"
             )}
           >
@@ -182,22 +185,22 @@ export const FileTreeFolder = ({
                                         )}
                                       /></CollapsibleTrigger>
             <button
-              className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 border-none bg-transparent p-0 text-left"
+              className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 border-none bg-transparent p-0 text-left"
               onClick={handleSelect}
               type="button"
             >
               <FileTreeIcon>
                 {isExpanded ? (
-                  <FolderOpenIcon className="size-4 text-blue-500" />
+                  <FolderOpenIcon className="size-4 text-file-folder" />
                 ) : (
-                  <FolderIcon className="size-4 text-blue-500" />
+                  <FolderIcon className="size-4 text-file-folder" />
                 )}
               </FileTreeIcon>
               <FileTreeName>{name}</FileTreeName>
             </button>
           </div>
           <CollapsibleContent>
-            <div className="ml-4 border-l pl-2">{children}</div>
+            <div className="ml-4 flex flex-col gap-0.5 border-l pl-2">{children}</div>
           </CollapsibleContent>
         </div>
       </Collapsible>
@@ -251,13 +254,15 @@ export const FileTreeFile = ({
     <FileTreeFileContext.Provider value={fileContextValue}>
       <div
         className={cn(
-          "flex cursor-pointer items-center gap-1 rounded px-2 py-1 transition-colors hover:bg-muted/50",
+          compactItemStyles,
+          "flex cursor-pointer items-center transition-colors hover:bg-highlight focus-visible:ring-2 focus-visible:ring-ring",
           isSelected && "bg-muted",
           className
         )}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
         role="treeitem"
+        aria-selected={isSelected}
         tabIndex={0}
         {...props}
       >

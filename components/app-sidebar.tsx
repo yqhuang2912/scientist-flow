@@ -6,16 +6,17 @@ import {
   PlusIcon,
   SearchIcon,
   SettingsIcon,
-  UsersIcon,
-  DiamondIcon,
   PanelLeftIcon,
+  DiamondIcon,
 } from "lucide-react"
 import { usePathname, useRouter } from "next/navigation"
 
 import { BotDialog } from "@/components/bot-dialog"
 import { ChatAvatar } from "@/components/chat-avatar"
+import { compactChatAvatarStyles } from "@/components/ui/compact-styles"
 import { GroupChatAvatar } from "@/components/group-chat-avatar"
-import { GroupChatDialog } from "@/components/group-chat-dialog"
+import { TaskDialog } from "@/components/task-dialog"
+import { SettingsDialog } from "@/components/settings-dialog"
 import type { BotSummary, SidebarChat } from "@/queries/bots"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -29,13 +30,6 @@ import {
   CommandList,
   CommandShortcut,
 } from "@/components/ui/command"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import {
   Sidebar,
   SidebarContent,
@@ -56,7 +50,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { WorkspaceSettingsDialog } from "@/components/workspace-settings-dialog"
 
 function isMac() {
   if (typeof navigator === "undefined") return false
@@ -70,37 +63,40 @@ function BrandHeader() {
   return (
     <div
       className={cn(
-        "flex h-14 shrink-0 items-center border-b border-sidebar-border px-3",
+        "flex h-11 shrink-0 items-center px-2.5",
         collapsed ? "justify-center" : "justify-between"
       )}
     >
       {!collapsed && (
-        <div className="flex items-center gap-2 min-w-0">
-          <DiamondIcon className="size-4 shrink-0 text-foreground" strokeWidth={1.5} />
+        <div className="flex min-w-0 items-center gap-1.5">
+          <DiamondIcon
+            className="size-4 shrink-0 text-foreground"
+            strokeWidth={2}
+          />
           <span className="truncate text-sm font-semibold tracking-tight">
             ScientistFlow
           </span>
         </div>
       )}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Toggle sidebar"
-                onClick={toggleSidebar}
-                className="shrink-0"
-              />
-            }
-          >
-            <PanelLeftIcon className="size-4" />
-          </TooltipTrigger>
-          <TooltipContent side="right">
-            {collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          </TooltipContent>
-        </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Toggle sidebar"
+              onClick={toggleSidebar}
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+            />
+          }
+        >
+          <PanelLeftIcon />
+        </TooltipTrigger>
+        <TooltipContent side="right">
+          {collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        </TooltipContent>
+      </Tooltip>
     </div>
   )
 }
@@ -116,10 +112,9 @@ export function AppSidebar({
   const router = useRouter()
   const { setOpenMobile } = useSidebar()
   const [botDialogOpen, setBotDialogOpen] = useState(false)
-  const [groupChatDialogOpen, setGroupChatDialogOpen] = useState(false)
+  const [taskDialogOpen, setTaskDialogOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [membersOpen, setMembersOpen] = useState(false)
-  const [workspaceSettingsOpen, setWorkspaceSettingsOpen] = useState(false)
   const [avatarSeed] = useState(() => nanoid())
   const [mac] = useState(() => isMac())
 
@@ -166,19 +161,19 @@ export function AppSidebar({
         {/* Brand row — rendered outside SidebarHeader to control height */}
         <BrandHeader />
 
-        <SidebarHeader className="gap-1 px-2 pt-2 pb-1">
+        <SidebarHeader className="gap-0.5 px-2 pb-1">
           {/* New Chat */}
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
                 render={<button type="button" />}
-                className="h-9 gap-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0"
-                onClick={() => setGroupChatDialogOpen(true)}
-                tooltip="New chat"
+                className="group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:px-0"
+                onClick={() => setTaskDialogOpen(true)}
+                tooltip="New task"
               >
-                <PlusIcon className="size-4 shrink-0" />
-                <span className="group-data-[collapsible=icon]:hidden">
-                  New Chat
+                <PlusIcon data-icon="inline-start" />
+                <span className="truncate group-data-[collapsible=icon]:hidden">
+                  New task
                 </span>
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -189,13 +184,13 @@ export function AppSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 render={<button type="button" />}
-                className="h-9 gap-2 text-muted-foreground group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0"
+                className="text-sidebar-foreground group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:px-0"
                 onClick={() => setSearchOpen(true)}
-                tooltip="Search chats"
+                tooltip="Search"
               >
-                <SearchIcon className="size-4 shrink-0" />
-                <span className="group-data-[collapsible=icon]:hidden flex-1 text-left">
-                  Search chats
+                <SearchIcon data-icon="inline-start" />
+                <span className="flex-1 truncate text-left group-data-[collapsible=icon]:hidden">
+                  Search
                 </span>
                 <KbdGroup className="ml-auto gap-0 group-data-[collapsible=icon]:hidden">
                   <Kbd>{mac ? "⌘" : "Ctrl"}</Kbd>
@@ -207,22 +202,23 @@ export function AppSidebar({
         </SidebarHeader>
 
         <SidebarContent>
-          <SidebarGroup className="group-data-[collapsible=icon]:pt-0">
-            <SidebarGroupLabel className="group-data-[collapsible=icon]:hidden">
+          <SidebarGroup className="gap-0 px-2 pt-1 group-data-[collapsible=icon]:pt-0">
+            <SidebarGroupLabel className="h-7.5 gap-1 rounded-xl px-2.5 text-[11px] font-medium text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">
               Recents
             </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu className="group-data-[collapsible=icon]:gap-2">
+              <SidebarMenu className="gap-0.5">
                 {chats.map((chat) => (
                   <SidebarMenuItem key={chat.id}>
                     <SidebarMenuButton
                       render={<button type="button" />}
                       isActive={pathname === `/chats/${chat.id}`}
                       className={cn(
-                        "h-auto min-h-10 p-1.5 group-data-[collapsible=icon]:min-h-0! group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:p-0!",
+                        "h-auto min-h-7.5 text-sidebar-foreground group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:p-0!",
+                        "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground",
                         chat.lastMessagePreview
                           ? "items-start"
-                          : "items-center"
+                          : "min-h-7.5 items-center"
                       )}
                       onClick={() => handleChatSelect(chat.id)}
                       tooltip={chat.name}
@@ -233,27 +229,29 @@ export function AppSidebar({
                           fallbackSeed={chat.id}
                           animated
                           alt={`${chat.name} avatar`}
-                          className="size-8 shrink-0 rounded-lg group-data-[collapsible=icon]:size-8"
+                          className={compactChatAvatarStyles}
                         />
                       ) : (
                         <ChatAvatar
                           seed={chat.bot?.avatar ?? chat.id}
                           animated
                           alt={`${chat.name} avatar`}
-                          className="size-8 shrink-0 rounded-lg group-data-[collapsible=icon]:size-8"
+                          className={compactChatAvatarStyles}
                         />
                       )}
-                      <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5 group-data-[collapsible=icon]:hidden">
-                        <span className="w-full truncate text-xs font-medium">
+                      <span className="flex min-w-0 flex-1 flex-col gap-0 group-data-[collapsible=icon]:hidden">
+                        <span className="w-full truncate text-[13px] leading-5 font-medium">
                           {chat.name}
                         </span>
                         {chat.lastMessagePreview && (
-                          <span className="w-full truncate text-[11px] text-sidebar-foreground/60">
-                            {chat.lastMessagePreview}
+                          <span className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
+                            <span className="min-w-0 truncate">
+                              {chat.lastMessagePreview}
+                            </span>
                           </span>
                         )}
                       </span>
-                      <time className="shrink-0 text-[10px] text-sidebar-foreground/50 group-data-[collapsible=icon]:hidden">
+                      <time className="shrink-0 text-[11px] font-normal text-muted-foreground group-data-[collapsible=icon]:hidden">
                         {chat.lastMessageAtLabel}
                       </time>
                     </SidebarMenuButton>
@@ -269,12 +267,12 @@ export function AppSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 render={<button type="button" />}
-                className="h-9 gap-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0"
+                className="text-sidebar-foreground group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:px-0"
                 onClick={() => setMembersOpen(true)}
                 tooltip="Settings"
               >
-                <SettingsIcon className="size-4 shrink-0" />
-                <span className="group-data-[collapsible=icon]:hidden">
+                <SettingsIcon data-icon="inline-start" />
+                <span className="truncate group-data-[collapsible=icon]:hidden">
                   Settings
                 </span>
               </SidebarMenuButton>
@@ -292,49 +290,23 @@ export function AppSidebar({
         onOpenChange={setBotDialogOpen}
         showTrigger={false}
       />
-      <GroupChatDialog
+      <TaskDialog
+        key={taskDialogOpen ? "new-task-open" : "new-task-closed"}
         bots={bots}
-        open={groupChatDialogOpen}
-        onOpenChange={setGroupChatDialogOpen}
+        open={taskDialogOpen}
+        onOpenChange={setTaskDialogOpen}
       />
 
-      {/* Settings dialog — Members + Workspace entries */}
-      <Dialog open={membersOpen} onOpenChange={setMembersOpen}>
-        <DialogContent className="max-w-xs gap-3 p-5">
-          <DialogHeader>
-            <DialogTitle className="text-sm">Settings</DialogTitle>
-            <DialogDescription className="text-xs">
-              Manage bots and workspace settings.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              className="h-9 w-full justify-start gap-2 px-2 text-sm"
-              onClick={() => {
-                setMembersOpen(false)
-                setBotDialogOpen(true)
-              }}
-            >
-              <UsersIcon className="size-4 shrink-0" />
-              Members &amp; Bots
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              className="h-9 w-full justify-start gap-2 px-2 text-sm"
-              onClick={() => {
-                setMembersOpen(false)
-                setWorkspaceSettingsOpen(true)
-              }}
-            >
-              <SettingsIcon className="size-4 shrink-0" />
-              Workspace directory
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Settings — one dialog, panes switch in place */}
+      <SettingsDialog
+        bots={bots}
+        open={membersOpen}
+        onOpenChange={setMembersOpen}
+        onManageBots={() => {
+          setMembersOpen(false)
+          setBotDialogOpen(true)
+        }}
+      />
 
       {/* Search command palette */}
       <CommandDialog
@@ -361,18 +333,20 @@ export function AppSidebar({
                       fallbackSeed={chat.id}
                       animated
                       alt={`${chat.name} avatar`}
-                      className="size-8 rounded-lg"
+                      className={compactChatAvatarStyles}
                     />
                   ) : (
                     <ChatAvatar
                       seed={chat.bot?.avatar ?? chat.id}
                       animated
                       alt={`${chat.name} avatar`}
-                      className="size-8 rounded-lg"
+                      className={compactChatAvatarStyles}
                     />
                   )}
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className="truncate font-medium">{chat.name}</span>
+                    <span className="truncate text-[13px] font-medium">
+                      {chat.name}
+                    </span>
                     {chat.lastMessagePreview && (
                       <span className="truncate text-xs text-muted-foreground">
                         {chat.lastMessagePreview}
@@ -386,10 +360,6 @@ export function AppSidebar({
           </CommandList>
         </Command>
       </CommandDialog>
-      <WorkspaceSettingsDialog
-        open={workspaceSettingsOpen}
-        onOpenChange={setWorkspaceSettingsOpen}
-      />
     </>
   )
 }

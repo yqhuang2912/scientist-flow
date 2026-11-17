@@ -5,7 +5,7 @@ import { useState } from "react"
 import { ChatHeader } from "@/components/chat-header"
 import { ChatInterface } from "@/components/chat-interface"
 import { ChatWorkspaceLayout } from "@/components/chat-workspace-layout"
-import { WorkspaceSettingsDialog } from "@/components/workspace-settings-dialog"
+import { SettingsDialog } from "@/components/settings-dialog"
 import type { BotSummary } from "@/queries/bots"
 import type { ChatWithBot } from "@/queries/chats"
 
@@ -41,10 +41,12 @@ export function ChatPageClient({ chat, bots }: ChatPageClientProps) {
           isGroup={chat.kind === "group"}
         />
       </ChatWorkspaceLayout>
-      <WorkspaceSettingsDialog
+      <SettingsDialog
+        bots={bots}
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
-        onSaved={() => setWorkspaceKey((k) => k + 1)}
+        initialTab="workspace"
+        onWorkspaceSaved={() => setWorkspaceKey((k) => k + 1)}
       />
     </>
   )

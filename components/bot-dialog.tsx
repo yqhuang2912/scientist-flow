@@ -213,16 +213,14 @@ export function BotDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       {showTrigger && !isEditing && (
         <DialogTrigger
-          render={
-            <Button variant="secondary" size="sm" className="rounded-md px-3" />
-          }
+          render={<Button variant="secondary" size="sm" className="px-3" />}
         >
           <PlusIcon data-icon="inline-start" />
           Create a new bot
         </DialogTrigger>
       )}
-      <DialogContent className="max-w-[calc(100%-2rem)] gap-0 overflow-hidden p-4 pb-0 sm:max-w-2xl">
-        <DialogHeader className="gap-1">
+      <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-2xl">
+        <DialogHeader className="gap-1.5 px-4 pt-4 pr-12">
           <DialogTitle>{isEditing ? "Edit bot" : "New bot"}</DialogTitle>
           <DialogDescription>
             {isEditing
@@ -236,7 +234,7 @@ export function BotDialog({
                 type="button"
                 variant="outline"
                 size="sm"
-                className="rounded-full"
+
                 onClick={() => applyPreset(preset)}
               >
                 {preset.label}
@@ -247,14 +245,14 @@ export function BotDialog({
 
         <form
           id="bot-form"
-          className="flex flex-col gap-4 pt-5 pb-4"
+          className="flex max-h-[60dvh] flex-col gap-4 overflow-y-auto px-4 pt-4 pb-4"
           onSubmit={form.handleSubmit(onSubmit)}
         >
           <div className="flex items-center gap-3">
             <ChatAvatar
               seed={avatarSeed}
               animated
-              className="size-10 rounded-lg"
+              className="size-10 rounded-md"
             />
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
               <FieldTitle>Face</FieldTitle>
@@ -318,7 +316,7 @@ export function BotDialog({
             </p>
           )}
         </form>
-        <DialogFooter className="mt-0 mb-0 flex-row justify-end">
+        <DialogFooter className="mx-0 mt-0 mb-0 flex-row flex-wrap justify-end">
           {isEditing && bot && (
             <AlertDialog
               open={deleteDialogOpen}

@@ -4,10 +4,11 @@ import { useState } from "react"
 import { PanelRightIcon } from "lucide-react"
 
 import { BotDialog } from "@/components/bot-dialog"
-import { GroupChatDialog } from "@/components/group-chat-dialog"
+import { TaskDialog } from "@/components/task-dialog"
 import type { BotSummary } from "@/queries/bots"
 import type { ChatWithBot } from "@/queries/chats"
 import { ChatAvatar } from "@/components/chat-avatar"
+import { compactChatAvatarStyles } from "@/components/ui/compact-styles"
 import { GroupChatAvatar } from "@/components/group-chat-avatar"
 import { Button } from "@/components/ui/button"
 import { SidebarTrigger } from "@/components/ui/sidebar"
@@ -30,7 +31,7 @@ export function ChatHeader({
   onWorkspaceOpenChange?: (open: boolean) => void
 }) {
   const [botDialogOpen, setBotDialogOpen] = useState(false)
-  const [groupChatDialogOpen, setGroupChatDialogOpen] = useState(false)
+  const [taskDialogOpen, setTaskDialogOpen] = useState(false)
 
   return (
     <>
@@ -41,25 +42,23 @@ export function ChatHeader({
             <Button
               type="button"
               variant="ghost"
-              className="h-auto min-w-0 justify-start gap-2 px-2 py-1.5"
-              onClick={() => setGroupChatDialogOpen(true)}
+              className="min-w-0 justify-start"
+              onClick={() => setTaskDialogOpen(true)}
             >
               <GroupChatAvatar
                 bots={chat.bots}
                 fallbackSeed={chat.id}
                 animated
-                alt={`${chat.name ?? "Group chat"} avatar`}
-                className="size-8 rounded-lg"
+                alt={`${chat.name ?? "Task"} avatar`}
+                className={compactChatAvatarStyles}
               />
-              <span className="truncate text-sm font-medium">
-                {chat.name ?? "Untitled group chat"}
-              </span>
+              <span className="truncate">{chat.name ?? "Untitled task"}</span>
             </Button>
           ) : (
             <Button
               type="button"
               variant="ghost"
-              className="h-auto min-w-0 justify-start gap-2 px-2 py-1.5"
+              className="min-w-0 justify-start"
               disabled={!chat.bot}
               onClick={() => setBotDialogOpen(true)}
             >
@@ -67,9 +66,9 @@ export function ChatHeader({
                 seed={chat.bot?.avatar ?? chat.id}
                 animated
                 alt={`${chat.bot?.name ?? chat.name ?? "Chat"} avatar`}
-                className="size-8 rounded-lg"
+                className={compactChatAvatarStyles}
               />
-              <span className="truncate text-sm font-medium">
+              <span className="truncate">
                 {chat.name ?? chat.bot?.name ?? "Untitled chat"}
               </span>
             </Button>
@@ -97,7 +96,7 @@ export function ChatHeader({
                 />
               }
             >
-              <PanelRightIcon className="size-4" />
+              <PanelRightIcon />
             </TooltipTrigger>
             <TooltipContent>
               {workspaceOpen ? "Close workspace" : "Open workspace"}
@@ -116,11 +115,12 @@ export function ChatHeader({
         />
       )}
       {chat.kind === "group" && (
-        <GroupChatDialog
+        <TaskDialog
+          key={`${chat.id}-${taskDialogOpen ? "open" : "closed"}`}
           bots={bots}
           chat={chat}
-          open={groupChatDialogOpen}
-          onOpenChange={setGroupChatDialogOpen}
+          open={taskDialogOpen}
+          onOpenChange={setTaskDialogOpen}
         />
       )}
     </>

@@ -5,6 +5,7 @@ import { Avatar, Style } from "@dicebear/core"
 import gaze from "@dicebear/styles/gaze.json"
 
 import { cn } from "@/lib/utils"
+import { chatAvatarStyles } from "@/components/ui/compact-styles"
 
 const gazeStyle = new Style(gaze)
 
@@ -30,9 +31,9 @@ export function ChatAvatar({
     <Image
       src={avatar.toDataUri()}
       alt={alt ?? `${seed} avatar`}
-      width={32}
-      height={32}
-      className={cn("size-8", className)}
+      width={28}
+      height={28}
+      className={cn(chatAvatarStyles, className)}
       unoptimized
     />
   )

@@ -20,6 +20,7 @@ import {
   resolveWorkspaceDirectory,
 } from "@/lib/workspace-directory.server"
 import {
+  workspaceRootFormSchema,
   workspaceChatIdSchema,
   workspaceRelativePathSchema,
   workspaceDirectoryTargetSchema,
@@ -59,11 +60,12 @@ export async function saveWorkspaceConfigAction(rootDir: string): Promise<
     }
   | { success: false; error: string }
 > {
-  if (typeof rootDir !== "string" || !rootDir.trim()) {
-    return { success: false, error: "Root directory path is required." }
+  const parsed = workspaceRootFormSchema.safeParse({ rootDir })
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0].message }
   }
   try {
-    await saveWorkspaceConfig(rootDir.trim())
+    await saveWorkspaceConfig(parsed.data.rootDir)
     return { success: true }
   } catch (err) {
     return {
@@ -80,11 +82,12 @@ export async function checkDirEmptyAction(dirPath: string): Promise<
     }
   | { success: false; error: string }
 > {
-  if (typeof dirPath !== "string" || !dirPath.trim()) {
-    return { success: false, error: "Directory path is required." }
+  const parsed = workspaceRootFormSchema.safeParse({ rootDir: dirPath })
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0].message }
   }
   try {
-    const isEmpty = await checkDirEmpty(dirPath.trim())
+    const isEmpty = await checkDirEmpty(parsed.data.rootDir)
     return { success: true, isEmpty }
   } catch (err) {
     return {
@@ -103,11 +106,12 @@ export async function migrateWorkspaceRootAction(newRootDir: string): Promise<
     }
   | { success: false; error: string }
 > {
-  if (typeof newRootDir !== "string" || !newRootDir.trim()) {
-    return { success: false, error: "Root directory path is required." }
+  const parsed = workspaceRootFormSchema.safeParse({ rootDir: newRootDir })
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0].message }
   }
   try {
-    const result = await migrateWorkspaceRoot(newRootDir.trim())
+    const result = await migrateWorkspaceRoot(parsed.data.rootDir)
     return { success: true, ...result }
   } catch (err) {
     return {

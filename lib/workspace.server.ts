@@ -9,6 +9,10 @@ import type { FileDeletionConfirmation } from "./workspace-validation"
 
 import fs from "node:fs/promises"
 import path from "node:path"
+import {
+  assertEmptyWorkspaceRoot,
+  isWorkspaceRootEmpty,
+} from "./workspace-root.server"
 import { getChat } from "@/queries/chats"
 import {
   createDirectoryInWorkspace,
@@ -99,6 +103,7 @@ export async function saveWorkspaceConfig(rootDir: string): Promise<void> {
   const resolved = resolveAndNormalise(rootDir)
   await assertIsAccessibleDir(resolved)
   const file = await readLocalFile()
+  await assertEmptyWorkspaceRoot(resolved)
   await writeLocalFile({ ...file, config: { rootDir: resolved } })
 }
 
@@ -106,8 +111,7 @@ export async function saveWorkspaceConfig(rootDir: string): Promise<void> {
 export async function checkDirEmpty(absPath: string): Promise<boolean> {
   const resolved = resolveAndNormalise(absPath)
   await assertIsAccessibleDir(resolved)
-  const entries = await fs.readdir(resolved)
-  return entries.length === 0
+  return isWorkspaceRootEmpty(resolved)
 }
 
 /**
@@ -118,8 +122,8 @@ export async function checkDirEmpty(absPath: string): Promise<boolean> {
  *   2. Update the binding's taskDir in the config file.
  *
  * The operation is NOT atomic across chats — if it fails mid-way, the config
- * file is updated with whatever was successfully moved, so a retry won't
- * re-move already-migrated directories.
+ * file is updated with whatever was successfully moved. A new destination
+ * must be empty before any task directory is moved.
  */
 export async function migrateWorkspaceRoot(newRootDir: string): Promise<{
   moved: string[]
@@ -130,7 +134,7 @@ export async function migrateWorkspaceRoot(newRootDir: string): Promise<{
   await assertIsAccessibleDir(newRoot)
 
   const file = await readLocalFile()
-  const oldRoot = file.config?.rootDir
+  await assertEmptyWorkspaceRoot(newRoot)
 
   const moved: string[] = []
   const skipped: string[] = []

@@ -921,7 +921,7 @@ export const PromptInput = ({
         ref={formRef}
         {...props}
       >
-        <InputGroup className="overflow-hidden">{children}</InputGroup>
+        <InputGroup className="overflow-hidden rounded-3xl border-border bg-chat-input py-1 shadow-sm">{children}</InputGroup>
       </form>
     </>
   );
@@ -1275,7 +1275,7 @@ export const PromptInputSelectTrigger = ({
   <SelectTrigger
     className={cn(
       "border-none bg-transparent font-medium text-muted-foreground shadow-none transition-colors",
-      "hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground",
+      "hover:bg-highlight hover:text-foreground aria-expanded:bg-highlight aria-expanded:text-foreground",
       className
     )}
     {...props}

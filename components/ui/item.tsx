@@ -5,16 +5,17 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
 
 import { Separator } from "@/components/ui/separator"
+import {
+  compactItemStyles,
+  compactListStyles,
+} from "@/components/ui/compact-styles"
 
 function ItemGroup({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       role="list"
       data-slot="item-group"
-      className={cn(
-        "group/item-group flex w-full flex-col gap-4 has-data-[size=sm]:gap-2.5 has-data-[size=xs]:gap-2",
-        className
-      )}
+      className={cn(compactListStyles, "group/item-group w-full", className)}
       {...props}
     />
   )
@@ -35,7 +36,10 @@ function ItemSeparator({
 }
 
 const itemVariants = cva(
-  "group/item flex w-full flex-wrap items-center rounded-lg border text-sm transition-colors duration-100 outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 [a]:transition-colors [a]:hover:bg-muted",
+  cn(
+    compactItemStyles,
+    "group/item flex w-full flex-wrap items-center border border-transparent transition-colors duration-100 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 motion-reduce:transition-none [&:is(a,button)]:hover:bg-highlight"
+  ),
   {
     variants: {
       variant: {
@@ -44,9 +48,9 @@ const itemVariants = cva(
         muted: "border-transparent bg-muted/50",
       },
       size: {
-        default: "gap-2.5 px-3 py-2.5",
-        sm: "gap-2.5 px-3 py-2.5",
-        xs: "gap-2 px-2.5 py-2 in-data-[slot=dropdown-menu-content]:p-0",
+        default: "",
+        sm: "",
+        xs: "in-data-[slot=dropdown-menu-content]:p-0",
       },
     },
     defaultVariants: {
@@ -117,7 +121,7 @@ function ItemContent({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="item-content"
       className={cn(
-        "flex flex-1 flex-col gap-1 group-data-[size=xs]/item:gap-0 [&+[data-slot=item-content]]:flex-none",
+        "flex min-w-0 flex-1 flex-col gap-0.5 group-data-[size=xs]/item:gap-0 [&+[data-slot=item-content]]:flex-none",
         className
       )}
       {...props}
@@ -130,7 +134,7 @@ function ItemTitle({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="item-title"
       className={cn(
-        "line-clamp-1 flex w-fit items-center gap-2 text-sm leading-snug font-medium underline-offset-4",
+        "line-clamp-1 flex w-fit items-center gap-2 text-[13px] leading-snug font-medium underline-offset-4",
         className
       )}
       {...props}
@@ -143,7 +147,7 @@ function ItemDescription({ className, ...props }: React.ComponentProps<"p">) {
     <p
       data-slot="item-description"
       className={cn(
-        "line-clamp-2 text-left text-sm leading-normal font-normal text-muted-foreground group-data-[size=xs]/item:text-xs [&>a]:underline [&>a]:underline-offset-4 [&>a:hover]:text-primary",
+        "line-clamp-2 text-left text-[12px] leading-relaxed font-normal text-muted-foreground group-data-[size=xs]/item:text-xs [&>a]:underline [&>a]:underline-offset-4 [&>a:hover]:text-primary",
         className
       )}
       {...props}

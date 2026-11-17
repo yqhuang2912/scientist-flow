@@ -1,12 +1,19 @@
 import { z } from "zod"
 
+export const workspaceRootFormSchema = z.object({
+  rootDir: z.string().trim().min(1, "Root directory path is required."),
+})
+
+export const WORKSPACE_ROOT_NOT_EMPTY = "Directory is not empty."
+
 // Never trim or sanitise a name: preserve exactly what the user entered.
 export const workspaceEntryNameSchema = z.string().superRefine((name, ctx) => {
   let message: string | undefined
-  if (!name.trim()) message = "请输入名称。"
-  else if (name === "." || name === "..") message = "名称不能是 . 或 ..。"
+  if (!name.trim()) message = "Enter a name."
+  else if (name === "." || name === "..")
+    message = 'Name cannot be "." or "..".'
   else if (/[<>:"/\\|?*]/u.test(name))
-    message = '名称不能包含路径分隔符或 Windows 非法字符：< > : " / \\ | ? *。'
+    message = 'Name cannot contain < > : " / \\ | ? *.'
   else if (
     Array.from(name).some(
       (char) =>
@@ -14,15 +21,17 @@ export const workspaceEntryNameSchema = z.string().superRefine((name, ctx) => {
         (char.charCodeAt(0) >= 127 && char.charCodeAt(0) <= 159)
     )
   )
-    message = "名称不能包含控制字符。"
-  else if (/[ .]$/u.test(name)) message = "名称不能以空格或点结尾。"
+    message = "Name cannot contain control characters."
+  else if (/[ .]$/u.test(name))
+    message = "Name cannot end with a space or period."
   else if (
     /^(?:CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³]|CONIN\$|CONOUT\$) *(?:\.|$)/iu.test(
       name
     )
   )
-    message = "不能使用 Windows 保留名称（包括带扩展名的保留名称）。"
-  else if (name.length > 255) message = "名称不能超过 255 个字符。"
+    message =
+      "This name is reserved by Windows, including with a file extension."
+  else if (name.length > 255) message = "Name must be 255 characters or fewer."
   if (message) ctx.addIssue({ code: "custom", message })
 })
 

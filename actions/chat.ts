@@ -5,7 +5,7 @@ import { chat, defaultStorage } from "@trigger.dev/sdk/ai"
 import { and, eq, inArray } from "drizzle-orm"
 import { nanoid } from "nanoid"
 
-import { groupChatFormSchema, bots, chatMembers, chats } from "@/db/schema"
+import { taskFormSchema, bots, chatMembers, chats } from "@/db/schema"
 import { db } from "@/lib/db"
 import { getChat } from "@/queries/chats"
 
@@ -65,21 +65,18 @@ export async function touchChatActivity(chatId: string): Promise<boolean> {
   }
 }
 
-type CreateGroupChatResult =
+type CreateTaskResult =
   | { success: true; chat: typeof chats.$inferSelect }
   | { success: false; error: string }
 
-type UpdateGroupChatResult =
+type UpdateTaskResult =
   | { success: true; chat: typeof chats.$inferSelect }
   | { success: false; error: string }
 
-type DeleteGroupChatResult =
-  { success: true } | { success: false; error: string }
+type DeleteTaskResult = { success: true } | { success: false; error: string }
 
-export async function createGroupChat(
-  input: unknown
-): Promise<CreateGroupChatResult> {
-  const parsed = groupChatFormSchema.safeParse(input)
+export async function createTask(input: unknown): Promise<CreateTaskResult> {
+  const parsed = taskFormSchema.safeParse(input)
 
   if (!parsed.success) {
     return {
@@ -114,25 +111,25 @@ export async function createGroupChat(
 
     const createdChat = chatRows[0]
     if (!createdChat) {
-      return { success: false, error: "The group chat could not be created." }
+      return { success: false, error: "The task could not be created." }
     }
 
     return { success: true, chat: createdChat }
   } catch (error) {
-    console.error("Failed to create group chat", error)
-    return { success: false, error: "The group chat could not be created." }
+    console.error("Failed to create task", error)
+    return { success: false, error: "The task could not be created." }
   }
 }
 
-export async function updateGroupChat(
+export async function updateTask(
   chatId: string,
   input: unknown
-): Promise<UpdateGroupChatResult> {
+): Promise<UpdateTaskResult> {
   if (typeof chatId !== "string" || !chatId.trim()) {
-    return { success: false, error: "The group chat could not be updated." }
+    return { success: false, error: "The task could not be updated." }
   }
 
-  const parsed = groupChatFormSchema.safeParse(input)
+  const parsed = taskFormSchema.safeParse(input)
 
   if (!parsed.success) {
     return {
@@ -151,7 +148,7 @@ export async function updateGroupChat(
       .limit(1)
 
     if (existingChat[0]?.kind !== "group") {
-      return { success: false, error: "The group chat could not be updated." }
+      return { success: false, error: "The task could not be updated." }
     }
 
     const selectedBots = await db
@@ -178,21 +175,19 @@ export async function updateGroupChat(
 
     const updatedChat = chatRows[0]
     if (!updatedChat) {
-      return { success: false, error: "The group chat could not be updated." }
+      return { success: false, error: "The task could not be updated." }
     }
 
     return { success: true, chat: updatedChat }
   } catch (error) {
-    console.error("Failed to update group chat", error)
-    return { success: false, error: "The group chat could not be updated." }
+    console.error("Failed to update task", error)
+    return { success: false, error: "The task could not be updated." }
   }
 }
 
-export async function deleteGroupChat(
-  chatId: string
-): Promise<DeleteGroupChatResult> {
+export async function deleteTask(chatId: string): Promise<DeleteTaskResult> {
   if (typeof chatId !== "string" || !chatId.trim()) {
-    return { success: false, error: "The group chat could not be deleted." }
+    return { success: false, error: "The task could not be deleted." }
   }
 
   try {
@@ -202,12 +197,12 @@ export async function deleteGroupChat(
       .returning({ id: chats.id })
 
     if (!deletedChats[0]) {
-      return { success: false, error: "The group chat could not be deleted." }
+      return { success: false, error: "The task could not be deleted." }
     }
 
     return { success: true }
   } catch (error) {
-    console.error("Failed to delete group chat", error)
-    return { success: false, error: "The group chat could not be deleted." }
+    console.error("Failed to delete task", error)
+    return { success: false, error: "The task could not be deleted." }
   }
 }

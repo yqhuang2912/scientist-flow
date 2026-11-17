@@ -2,6 +2,7 @@
 
 import { ChatAvatar } from "@/components/chat-avatar"
 import { cn } from "@/lib/utils"
+import { chatAvatarStyles } from "@/components/ui/compact-styles"
 
 type GroupChatBot = {
   id: string
@@ -22,7 +23,7 @@ export function GroupChatAvatar({
   fallbackSeed = "group-chat",
   animated = false,
   className,
-  alt = "Group chat avatar",
+  alt = "Task avatar",
 }: GroupChatAvatarProps) {
   const visibleBots = bots.slice(0, 3)
   const remainingCount = Math.max(0, bots.length - visibleBots.length)
@@ -33,7 +34,7 @@ export function GroupChatAvatar({
         seed={fallbackSeed}
         animated={animated}
         alt={alt}
-        className={cn("size-8 rounded-lg", className)}
+        className={className}
       />
     )
   }
@@ -45,7 +46,8 @@ export function GroupChatAvatar({
       role="img"
       aria-label={alt}
       className={cn(
-        "relative isolate aspect-square size-8 overflow-hidden rounded-lg",
+        "relative isolate aspect-square overflow-hidden",
+        chatAvatarStyles,
         className
       )}
     >

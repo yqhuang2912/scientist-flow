@@ -59,7 +59,8 @@ interface ResearchWorkspaceProps {
   onBack?: () => void
 }
 type Operation = { chatId: string; relativePath: string } & (
-  | { kind: "create" | "inspect" | "create-file" | "inspect-file" }
+  | { kind: "create" | "create-file" }
+  | { kind: "inspect" | "inspect-file" }
   | { kind: "delete"; inspection: DirectoryDeletionInspection }
   | { kind: "delete-file"; inspection: FileDeletionInspection }
 )
@@ -326,7 +327,7 @@ function ResearchWorkspaceInner({
     finishMutation()
     closeOperation()
     showNotice(
-      entry.isDir ? "文件夹已创建" : "文件已创建",
+      entry.isDir ? "Folder created" : "File created",
       `${entry.relPath}${entry.isDir ? "/" : ""}`
     )
     setSelectedRel(entry.relPath)
@@ -377,21 +378,20 @@ function ResearchWorkspaceInner({
     kind: WorkspaceEntryAction,
     relativePath: string
   ) {
-    if (operationLocked.current || mutationPending) return
+    if (operationLocked.current || mutationPending || status?.state !== "ready")
+      return
     operationLocked.current = true
     if (noticeToast.current) toast.close(noticeToast.current)
+    if (kind === "create" || kind === "create-file") {
+      setOperation({ kind, chatId, relativePath })
+      return
+    }
     const target: Operation = {
-      kind:
-        kind === "delete"
-          ? "inspect"
-          : kind === "delete-file"
-            ? "inspect-file"
-            : kind,
+      kind: kind === "delete" ? "inspect" : "inspect-file",
       chatId,
       relativePath,
     }
     setOperation(target)
-    if (kind === "create" || kind === "create-file") return
     const label = kind === "delete-file" ? "文件" : "文件夹"
     try {
       const result =
@@ -440,19 +440,19 @@ function ResearchWorkspaceInner({
 
   const isReady = status?.state === "ready"
   const unavailableReason = statusLoading
-    ? "正在读取工作区状态"
+    ? "Loading workspace status"
     : status?.state === "no-config"
-      ? "尚未配置工作区目录"
+      ? "No workspace directory configured"
       : status?.state === "not-initialised"
-        ? "当前任务尚未初始化工作区"
+        ? "This task's workspace has not been initialized"
         : status?.state === "error"
-          ? `工作区不可访问：${status.message}`
+          ? "Workspace is inaccessible"
           : treeError
-            ? `工作区不可访问：${treeError}`
+            ? "Workspace is inaccessible"
             : !rootLoaded
-              ? "正在读取任务根目录"
+              ? "Loading the task root directory"
               : mutationPending || operation
-                ? "请先完成当前文件操作"
+                ? "Finish the current file operation first"
                 : null
 
   return (
@@ -477,13 +477,13 @@ function ResearchWorkspaceInner({
               <TooltipContent>返回聊天</TooltipContent>
             </Tooltip>
           )}
-          <div className="flex min-w-0 flex-col gap-0.5">
+          <div className="flex min-w-0 flex-col gap-0">
             <span className="text-sm leading-5 font-medium text-foreground">
               Workspace
             </span>
             {!statusLoading && isReady && (
               <p
-                className="truncate text-[10px] leading-tight text-muted-foreground"
+                className="truncate text-[11px] leading-tight text-muted-foreground"
                 title={chatId}
               >
                 {chatId}
@@ -518,7 +518,7 @@ function ResearchWorkspaceInner({
                   tabIndex={unavailableReason ? 0 : undefined}
                   aria-label={
                     unavailableReason
-                      ? `在任务根目录新建文件夹：${unavailableReason}`
+                      ? `New folder in task root: ${unavailableReason}`
                       : undefined
                   }
                   className="inline-flex"
@@ -529,7 +529,7 @@ function ResearchWorkspaceInner({
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                aria-label="在任务根目录新建文件夹"
+                aria-label="New folder in task root"
                 disabled={!!unavailableReason}
                 onClick={() => void handleEntryAction("create", "")}
               >
@@ -537,8 +537,8 @@ function ResearchWorkspaceInner({
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              在任务根目录新建文件夹
-              {unavailableReason && `（${unavailableReason}）`}
+              New folder in task root
+              {unavailableReason && ` (${unavailableReason})`}
             </TooltipContent>
           </Tooltip>
           <Tooltip>
@@ -549,7 +549,7 @@ function ResearchWorkspaceInner({
                   tabIndex={unavailableReason ? 0 : undefined}
                   aria-label={
                     unavailableReason
-                      ? `在任务根目录新建文件：${unavailableReason}`
+                      ? `New file in task root: ${unavailableReason}`
                       : undefined
                   }
                 />
@@ -559,7 +559,7 @@ function ResearchWorkspaceInner({
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                aria-label="在任务根目录新建文件"
+                aria-label="New file in task root"
                 disabled={!!unavailableReason}
                 onClick={() => void handleEntryAction("create-file", "")}
               >
@@ -567,8 +567,8 @@ function ResearchWorkspaceInner({
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              在任务根目录新建文件
-              {unavailableReason && `（${unavailableReason}）`}
+              New file in task root
+              {unavailableReason && ` (${unavailableReason})`}
             </TooltipContent>
           </Tooltip>
           {[

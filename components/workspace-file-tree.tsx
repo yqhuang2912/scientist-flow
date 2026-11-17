@@ -2,13 +2,16 @@
 
 import { useState } from "react"
 import {
+  compactItemStyles,
+  compactItemTypography,
+  compactItemStates,
+  compactListStyles,
+} from "@/components/ui/compact-styles"
+import {
   AlertCircleIcon,
   ChevronDownIcon,
   ChevronRightIcon,
-  FileIcon,
   FilePlusIcon,
-  FolderIcon,
-  FolderOpenIcon,
   FolderPlusIcon,
   MoreHorizontalIcon,
   Trash2Icon,
@@ -38,6 +41,7 @@ import {
 } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
 import { type WorkspaceTreeNode } from "@/lib/workspace-tree"
+import { WorkspaceEntryIcon } from "@/components/workspace-entry-icon"
 
 export type WorkspaceEntryAction =
   "create" | "delete" | "create-file" | "delete-file"
@@ -71,21 +75,13 @@ function EntryMenuItems({
     <Group>
       {isDir && (
         <>
-          <Item
-            className="gap-2 px-2 py-2"
-            disabled={disabled}
-            onClick={() => onAction("create-file")}
-          >
+          <Item disabled={disabled} onClick={() => onAction("create-file")}>
             <FilePlusIcon />
-            新建文件
+            New file
           </Item>
-          <Item
-            className="gap-2 px-2 py-2"
-            disabled={disabled}
-            onClick={() => onAction("create")}
-          >
+          <Item disabled={disabled} onClick={() => onAction("create")}>
             <FolderPlusIcon />
-            新建子文件夹
+            New folder
           </Item>
           <Separator />
         </>
@@ -93,7 +89,6 @@ function EntryMenuItems({
       <Item
         disabled={disabled}
         variant="destructive"
-        className="gap-2 px-2 py-2"
         onClick={() => onAction(isDir ? "delete" : "delete-file")}
       >
         <Trash2Icon />
@@ -105,7 +100,6 @@ function EntryMenuItems({
 
 function FileTreeRow({
   node,
-  depth,
   selected,
   disabled,
   onSelect,
@@ -113,7 +107,6 @@ function FileTreeRow({
   onAction,
 }: {
   node: WorkspaceTreeNode
-  depth: number
   selected: boolean
   disabled: boolean
   onSelect: () => void
@@ -126,10 +119,12 @@ function FileTreeRow({
   const actionLabel = node.entry.isDir ? "文件夹操作" : "文件操作"
   const row = (
     <div
+      data-active={selected || undefined}
       className={cn(
-        "group/row flex min-w-0 items-center rounded ring-ring ring-inset focus-within:bg-accent hover:bg-accent has-[[data-workspace-path]:focus-visible]:ring-2",
-        (selected || dropdownOpen || contextOpen) &&
-          "bg-accent text-accent-foreground"
+        compactItemTypography,
+        compactItemStates,
+        "group/tree-row relative flex min-w-0 items-center rounded-xl ring-ring ring-inset focus-within:bg-highlight has-[[data-workspace-path]:focus-visible]:ring-2",
+        (dropdownOpen || contextOpen) && "bg-highlight text-foreground"
       )}
     >
       <button
@@ -137,32 +132,29 @@ function FileTreeRow({
         data-workspace-path={node.entry.relPath}
         aria-label={node.entry.name}
         aria-expanded={node.entry.isDir ? node.expanded : undefined}
-        className="flex min-w-0 flex-1 items-center gap-1 rounded py-1 pr-1 text-left text-xs outline-none"
-        style={{ paddingLeft: depth * 12 + 4 }}
+        className={cn(
+          compactItemStyles,
+          "relative flex h-7.5 min-w-0 flex-1 items-center pr-1 text-left outline-none"
+        )}
         onClick={() => {
           onSelect()
           if (node.entry.isDir) onToggle()
         }}
       >
-        <span className="size-3 shrink-0 text-muted-foreground">
+        <span
+          aria-hidden="true"
+          className="absolute -left-3.5 flex size-3 items-center justify-center text-muted-foreground [&_svg]:size-3"
+        >
           {node.entry.isDir &&
             (node.loading ? (
-              <Spinner className="size-3" />
+              <Spinner />
             ) : node.expanded ? (
-              <ChevronDownIcon className="size-3" />
+              <ChevronDownIcon />
             ) : (
-              <ChevronRightIcon className="size-3" />
+              <ChevronRightIcon />
             ))}
         </span>
-        {node.entry.isDir ? (
-          node.expanded ? (
-            <FolderOpenIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          ) : (
-            <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          )
-        ) : (
-          <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        )}
+        <WorkspaceEntryIcon entry={node.entry} expanded={node.expanded} />
         <span className="min-w-0 truncate" title={node.entry.name}>
           {node.entry.name}
         </span>
@@ -179,7 +171,8 @@ function FileTreeRow({
                   disabled={disabled}
                   aria-label={`${node.entry.name} 的${actionLabel}`}
                   className={cn(
-                    "mr-0.5 shrink-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100",
+                    "mr-1 shrink-0 text-muted-foreground",
+                    "group-focus-within/tree-row:opacity-100 group-hover/tree-row:opacity-100",
                     !dropdownOpen &&
                       !contextOpen &&
                       "[@media(hover:hover)_and_(pointer:fine)]:opacity-0"
@@ -233,18 +226,22 @@ export function WorkspaceFileTree({
     <ul
       role={depth === 0 ? "tree" : "group"}
       aria-label={depth === 0 ? "任务文件树" : undefined}
-      className="min-w-0"
+      className={cn(
+        compactListStyles,
+        "min-w-0",
+        depth === 0 ? "pl-4" : "ml-4 border-l border-border/80 pl-1"
+      )}
     >
       {nodes.map((node) => (
         <li
           key={node.entry.relPath}
           role="treeitem"
+          className="flex min-w-0 flex-col gap-0.5"
           aria-selected={selectedRel === node.entry.relPath}
           aria-expanded={node.entry.isDir ? node.expanded : undefined}
         >
           <FileTreeRow
             node={node}
-            depth={depth}
             selected={selectedRel === node.entry.relPath}
             disabled={actionsDisabled}
             onSelect={() => onSelect(node.entry.relPath)}
@@ -252,10 +249,7 @@ export function WorkspaceFileTree({
             onAction={(action) => onEntryAction(action, node.entry.relPath)}
           />
           {node.error && (
-            <div
-              className="flex items-center gap-1 py-1 text-[11px] text-destructive"
-              style={{ paddingLeft: (depth + 1) * 12 + 4 }}
-            >
+            <div className="flex items-center gap-1 py-1 text-[11px] text-destructive">
               <AlertCircleIcon className="size-3 shrink-0" />
               <span>{node.error}</span>
               <Button
@@ -280,10 +274,7 @@ export function WorkspaceFileTree({
             />
           )}
           {node.expanded && node.truncated && (
-            <p
-              className="py-1 text-[11px] text-muted-foreground"
-              style={{ paddingLeft: (depth + 1) * 12 + 4 }}
-            >
+            <p className="py-1 text-[11px] text-muted-foreground">
               列表已截断：仅显示前 200 项及本次新建项。
             </p>
           )}

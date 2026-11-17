@@ -1,6 +1,7 @@
 "use client"
 
 import {
+  Fragment,
   useEffect,
   useRef,
   useState,
@@ -11,12 +12,9 @@ import { useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import {
   FolderIcon,
-  FolderPlusIcon,
-  FilePlusIcon,
   FileIcon,
   Trash2Icon,
   TriangleAlertIcon,
-  CornerDownRightIcon,
 } from "lucide-react"
 import {
   createWorkspaceDirectoryAction,
@@ -63,6 +61,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+
+const creationErrors: Record<string, string> = {
+  CONFLICT: "A file or folder with this name already exists.",
+  NOT_FOUND: "The destination folder no longer exists.",
+  INACCESSIBLE: "Cannot access this folder. Check permissions and try again.",
+  INVALID: "The name or path is invalid or too long.",
+  UNSAFE_PATH: "The destination must be inside this task's workspace.",
+  LINK: "Cannot create items through a symbolic link or junction.",
+  NOT_DIRECTORY: "The destination is not a folder.",
+  CHANGED: "The destination has changed. Reopen this dialog and try again.",
+}
 
 function useDialogLifetime() {
   const mounted = useRef(true)
@@ -128,7 +137,10 @@ export function CreateWorkspaceEntryDialog({
   const life = useDialogLifetime()
   const inputRef = useRef<HTMLInputElement>(null)
   const isFile = kind === "file"
-  const CreateIcon = isFile ? FilePlusIcon : FolderPlusIcon
+  const parentDirectory = target.relativePath
+    ? `root: ${target.relativePath}/`
+    : "root: /"
+  const EntryIcon = isFile ? FileIcon : FolderIcon
   const form = useForm<{ name: string }>({
     resolver: zodResolver(
       isFile ? createWorkspaceFileSchema : createWorkspaceDirectorySchema
@@ -156,10 +168,16 @@ export function CreateWorkspaceEntryDialog({
         if (result.success) {
           completed = true
           onCreated(result.entry)
-        } else setError(result.error)
+        } else
+          setError(
+            creationErrors[result.code] ??
+              "Could not create this item. Refresh the workspace and try again."
+          )
       } catch {
         if (life.mounted.current)
-          setError("创建请求失败，请刷新确认磁盘状态后重试。")
+          setError(
+            "The request failed. Refresh the workspace to check its status before retrying."
+          )
       } finally {
         life.endSubmit()
         if (life.mounted.current && !completed) onSettled()
@@ -174,105 +192,74 @@ export function CreateWorkspaceEntryDialog({
       }}
     >
       <DialogContent
-        className="max-h-[calc(100dvh-2rem)] gap-0 overflow-x-hidden overflow-y-auto p-0 sm:max-w-lg"
+        className="max-h-[calc(100dvh-2rem)] gap-0 overflow-x-hidden overflow-y-auto p-0 sm:max-w-md"
         showCloseButton={false}
         initialFocus={inputRef}
       >
-        <DialogHeader className="gap-3 px-6 pt-6 pb-5">
-          <div className="flex items-center gap-3">
-            <CreateIcon
-              className="size-5 text-muted-foreground"
-              aria-hidden="true"
-            />
-            <DialogTitle>{isFile ? "新建文件" : "新建文件夹"}</DialogTitle>
+        <DialogHeader className="gap-1 px-4 pt-4">
+          <div className="flex items-center gap-2">
+            <EntryIcon className="size-4 shrink-0" aria-hidden="true" />
+            <DialogTitle>{isFile ? "New file" : "New folder"}</DialogTitle>
           </div>
-          <DialogDescription>
-            {isFile
-              ? "创建一个空文件，用于研究笔记、代码或数据。"
-              : "为当前任务整理资料、数据与研究结果。"}
+          <DialogDescription className="min-w-0 font-mono text-xs leading-5 [overflow-wrap:anywhere]">
+            {parentDirectory.split(/(?<=[\\/])/).map((part, index) => (
+              <Fragment key={index}>
+                {part}
+                <wbr />
+              </Fragment>
+            ))}
           </DialogDescription>
         </DialogHeader>
         <form
           id="workspace-create-folder"
-          className="px-6 pb-6"
+          className="p-4"
           onSubmit={submit}
           {...life.compositionProps}
         >
           <FieldGroup className="gap-0">
-            <Field className="gap-2">
-              <FieldLabel id="workspace-folder-parent-label">
-                父目录位置
+            <Field
+              className="min-w-0 gap-1.5"
+              data-invalid={!!form.formState.errors.name}
+            >
+              <FieldLabel
+                htmlFor="workspace-folder-name"
+                className="text-[13px]"
+              >
+                Name
               </FieldLabel>
-              <div
-                className="flex items-start gap-2 rounded-md bg-muted/60 px-3 py-3"
-                aria-labelledby="workspace-folder-parent-label"
-              >
-                <FolderIcon
-                  className="mt-0.5 size-4 shrink-0 text-muted-foreground"
-                  aria-hidden="true"
-                />
-                <p className="min-w-0 text-sm break-all">
-                  {target.relativePath
-                    ? `${target.relativePath}/`
-                    : "当前任务根目录"}
-                </p>
-              </div>
-            </Field>
-            <div className="flex gap-3 pt-4">
-              <CornerDownRightIcon
-                className="mt-7 size-4 shrink-0 text-muted-foreground"
-                aria-hidden="true"
+              <Input
+                id="workspace-folder-name"
+                autoComplete="off"
+                placeholder={isFile ? "e.g. notes.md" : "e.g. research"}
+                disabled={pending}
+                aria-invalid={!!form.formState.errors.name}
+                aria-describedby={
+                  form.formState.errors.name
+                    ? "workspace-folder-name-error"
+                    : undefined
+                }
+                {...name}
+                ref={(element) => {
+                  name.ref(element)
+                  inputRef.current = element
+                }}
               />
-              <Field
-                className="min-w-0"
-                data-invalid={!!form.formState.errors.name}
-              >
-                <FieldLabel htmlFor="workspace-folder-name">
-                  {isFile ? "文件名称" : "文件夹名称"}
-                </FieldLabel>
-                <Input
-                  id="workspace-folder-name"
-                  autoComplete="off"
-                  placeholder={
-                    isFile
-                      ? "例如：研究笔记.md、analysis.py"
-                      : "例如：文献综述、实验数据"
-                  }
-                  disabled={pending}
-                  aria-invalid={!!form.formState.errors.name}
-                  aria-describedby={
-                    form.formState.errors.name
-                      ? "workspace-folder-name-error"
-                      : "workspace-folder-name-help"
-                  }
-                  {...name}
-                  ref={(element) => {
-                    name.ref(element)
-                    inputRef.current = element
-                  }}
-                />
-                <FieldDescription id="workspace-folder-name-help">
-                  {isFile
-                    ? "输入完整名称（含扩展名），支持中文和空格。"
-                    : "输入一个名称，支持中文和空格。"}
-                </FieldDescription>
-                <FieldError
-                  id="workspace-folder-name-error"
-                  errors={[form.formState.errors.name]}
-                />
-              </Field>
-            </div>
+              <FieldError
+                id="workspace-folder-name-error"
+                errors={[form.formState.errors.name]}
+              />
+            </Field>
             {error && (
-              <Alert variant="destructive" className="mt-4">
+              <Alert variant="destructive" className="mt-3">
                 <TriangleAlertIcon />
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
           </FieldGroup>
         </form>
-        <DialogFooter className="mx-0 mb-0 px-6 py-4">
+        <DialogFooter className="mx-0 mb-0 flex-row justify-end rounded-b-3xl border-t px-4 py-3">
           <Button variant="outline" disabled={pending} onClick={onClose}>
-            取消
+            Cancel
           </Button>
           <Button
             form="workspace-create-folder"
@@ -281,7 +268,7 @@ export function CreateWorkspaceEntryDialog({
             className="sm:min-w-24"
           >
             {pending && <Spinner data-icon="inline-start" />}
-            {pending ? "创建中…" : "创建"}
+            {pending ? "Creating…" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -374,10 +361,10 @@ export function DeleteWorkspaceFileDialog({
         className="max-h-[calc(100dvh-2rem)] gap-0 overflow-x-hidden overflow-y-auto p-0 data-[size=default]:max-w-[calc(100%-2rem)] data-[size=default]:sm:max-w-lg"
         initialFocus={cancelRef}
       >
-        <AlertDialogHeader className="place-items-start gap-3 px-6 pt-6 pb-5 text-left">
-          <div className="flex items-center gap-3">
+        <AlertDialogHeader className="place-items-start gap-1.5 px-4 pt-4 pb-0 text-left">
+          <div className="flex items-center gap-2">
             <Trash2Icon
-              className="size-5 text-destructive"
+              className="size-4 text-destructive"
               aria-hidden="true"
             />
             <AlertDialogTitle>删除文件？</AlertDialogTitle>
@@ -386,21 +373,21 @@ export function DeleteWorkspaceFileDialog({
             删除前，请核对文件名称与所在位置。
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <div className="mx-6 flex min-w-0 items-start gap-3 rounded-lg border p-4">
+        <div className="mx-4 mt-3 flex min-w-0 items-start gap-2.5 rounded-xl bg-muted px-2.5 py-2">
           <FileIcon
-            className="mt-0.5 size-5 shrink-0 text-muted-foreground"
+            className="mt-px size-3.5 shrink-0 text-muted-foreground"
             aria-hidden="true"
           />
-          <div className="flex min-w-0 flex-col gap-2">
-            <p className="text-sm font-medium break-all">
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <p className="text-[13px] font-medium break-all">
               {initialInspection.name}
             </p>
-            <p className="text-xs leading-relaxed break-all text-muted-foreground">
+            <p className="font-mono text-[11px] leading-relaxed break-all text-muted-foreground">
               {target.relativePath}
             </p>
           </div>
         </div>
-        <div className="flex flex-col gap-4 px-6 pt-4 pb-6">
+        <div className="flex flex-col gap-3 px-4 pt-3 pb-4">
           <Alert variant="destructive">
             <TriangleAlertIcon />
             <AlertTitle>此操作无法撤销</AlertTitle>
@@ -428,7 +415,7 @@ export function DeleteWorkspaceFileDialog({
             </Button>
           )}
         </div>
-        <AlertDialogFooter className="mx-0 mb-0 px-6 py-4">
+        <AlertDialogFooter className="mx-0 mb-0 rounded-b-3xl border-t px-4 py-3">
           <Button
             ref={cancelRef}
             variant="outline"
@@ -557,10 +544,10 @@ export function DeleteWorkspaceFolderDialog({
         className="max-h-[calc(100dvh-2rem)] gap-0 overflow-x-hidden overflow-y-auto p-0 data-[size=default]:max-w-[calc(100%-2rem)] data-[size=default]:sm:max-w-lg"
         initialFocus={cancelRef}
       >
-        <AlertDialogHeader className="place-items-start gap-3 px-6 pt-6 pb-5 text-left">
-          <div className="flex items-center gap-3">
+        <AlertDialogHeader className="place-items-start gap-1.5 px-4 pt-4 pb-0 text-left">
+          <div className="flex items-center gap-2">
             <Trash2Icon
-              className="size-5 text-destructive"
+              className="size-4 text-destructive"
               aria-hidden="true"
             />
             <AlertDialogTitle>删除文件夹？</AlertDialogTitle>
@@ -569,26 +556,26 @@ export function DeleteWorkspaceFolderDialog({
             删除前，请核对文件夹位置与删除范围。
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <div className="mx-6 flex min-w-0 items-start gap-3 rounded-lg border p-4">
+        <div className="mx-4 mt-3 flex min-w-0 items-start gap-2.5 rounded-xl bg-muted px-2.5 py-2">
           <FolderIcon
-            className="mt-0.5 size-5 shrink-0 text-muted-foreground"
+            className="mt-px size-3.5 shrink-0 text-muted-foreground"
             aria-hidden="true"
           />
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <p className="text-sm font-medium break-all">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <p className="text-[13px] font-medium break-all">
               {initialInspection.name}
             </p>
-            <p className="text-xs leading-relaxed break-all text-muted-foreground">
+            <p className="font-mono text-[11px] leading-relaxed break-all text-muted-foreground">
               {target.relativePath}/
             </p>
             {inspection && (
-              <Badge variant="secondary" className="w-fit">
+              <Badge variant="secondary" className="mt-0.5 w-fit text-[10px]">
                 {inspection.isEmpty ? "空文件夹" : "包含内容"}
               </Badge>
             )}
           </div>
         </div>
-        <div className="px-6 py-4">
+        <div className="px-4 pt-3">
           <Alert variant="destructive">
             <TriangleAlertIcon />
             <AlertTitle>此操作无法撤销</AlertTitle>
@@ -603,7 +590,7 @@ export function DeleteWorkspaceFolderDialog({
         </div>
         <form
           id="workspace-delete-folder"
-          className="px-6 pb-6"
+          className="px-4 pt-3 pb-4"
           onSubmit={submit}
           {...life.compositionProps}
         >
@@ -612,7 +599,7 @@ export function DeleteWorkspaceFolderDialog({
               <Field data-invalid={!!nameError}>
                 <FieldLabel
                   htmlFor="workspace-delete-name"
-                  className="break-all"
+                  className="text-[13px] break-all"
                 >
                   输入文件夹名称以确认
                 </FieldLabel>
@@ -631,7 +618,7 @@ export function DeleteWorkspaceFolderDialog({
                 />
                 <FieldDescription
                   id="workspace-delete-name-help"
-                  className="break-all"
+                  className="text-[11px] break-all"
                 >
                   请完整输入“{inspection.name}”，包括空格与大小写。
                 </FieldDescription>
@@ -664,7 +651,7 @@ export function DeleteWorkspaceFolderDialog({
             )}
           </FieldGroup>
         </form>
-        <AlertDialogFooter className="mx-0 mb-0 px-6 py-4">
+        <AlertDialogFooter className="mx-0 mb-0 rounded-b-3xl border-t px-4 py-3">
           <Button
             ref={cancelRef}
             variant="outline"

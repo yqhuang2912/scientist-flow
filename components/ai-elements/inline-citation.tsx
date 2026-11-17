@@ -1,6 +1,7 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
 import type { CarouselApi } from "@/components/ui/carousel";
 import {
   Carousel,
@@ -202,7 +203,10 @@ export const InlineCitationCarouselPrev = ({
   return (
     <button
       aria-label="Previous"
-      className={cn("shrink-0", className)}
+      className={cn(
+        buttonVariants({ variant: "ghost", size: "icon-xs" }),
+        className
+      )}
       onClick={handleClick}
       type="button"
       {...props}
@@ -229,7 +233,10 @@ export const InlineCitationCarouselNext = ({
   return (
     <button
       aria-label="Next"
-      className={cn("shrink-0", className)}
+      className={cn(
+        buttonVariants({ variant: "ghost", size: "icon-xs" }),
+        className
+      )}
       onClick={handleClick}
       type="button"
       {...props}

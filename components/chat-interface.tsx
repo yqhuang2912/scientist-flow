@@ -44,6 +44,8 @@ import type { chatAgent } from "@/trigger/chat"
 import type { ChatWithBot } from "@/queries/chats"
 import { Badge } from "@/components/ui/badge"
 import { ChatAvatar } from "@/components/chat-avatar"
+import { compactChatAvatarStyles } from "@/components/ui/compact-styles"
+import { SelectGroup } from "@/components/ui/select"
 
 type ChatBot = ChatWithBot["bots"][number]
 
@@ -57,12 +59,7 @@ function AssistantMessageRow({
   return (
     <div className="grid grid-cols-[1.75rem_minmax(0,1fr)] items-start gap-x-3">
       {bot ? (
-        <ChatAvatar
-          seed={bot.avatar}
-          animated
-          alt={`${bot.name} avatar`}
-          className="size-7 shrink-0 rounded-lg"
-        />
+        <ChatAvatar seed={bot.avatar} animated alt={`${bot.name} avatar`} />
       ) : (
         <div aria-hidden className="size-7" />
       )}
@@ -75,13 +72,13 @@ function UserBotBadge({ bot }: { bot: ChatBot }) {
   return (
     <Badge
       variant="outline"
-      className="max-w-40 shrink-0 gap-1.5 px-1.5 pr-2 text-xs"
+      className="max-w-40 shrink-0 gap-1.5 overflow-visible px-1.5 pr-2 text-xs"
     >
       <ChatAvatar
         seed={bot.avatar}
         animated
         alt={`${bot.name} avatar`}
-        className="size-4 rounded-sm"
+        className={compactChatAvatarStyles}
       />
       <span className="min-w-0 truncate">{bot.name}</span>
     </Badge>
@@ -420,7 +417,7 @@ function ChatView({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <Conversation className="min-h-0 flex-1">
-        <ConversationContent className="mx-auto w-full max-w-3xl">
+        <ConversationContent className="mx-auto w-full max-w-2xl">
           {messages.length === 0 ? (
             <ConversationEmptyState
               title="Start a conversation"
@@ -441,7 +438,7 @@ function ChatView({
           )}
         </ConversationContent>
       </Conversation>
-      <div className="mx-auto w-full max-w-3xl px-4 pb-4">
+      <div className="mx-auto w-full max-w-2xl px-4 pb-3">
         <PromptInput onSubmit={handleSubmit}>
           <PromptInputBody>
             <PromptInputTextarea placeholder="Message your bot..." />
@@ -469,17 +466,19 @@ function ChatView({
                     </PromptInputSelectValue>
                   </PromptInputSelectTrigger>
                   <PromptInputSelectContent>
-                    {bots.map((bot) => (
-                      <PromptInputSelectItem key={bot.id} value={bot.id}>
-                        <ChatAvatar
-                          seed={bot.avatar}
-                          animated
-                          alt={`${bot.name} avatar`}
-                          className="size-5 rounded-md"
-                        />
-                        {bot.name}
-                      </PromptInputSelectItem>
-                    ))}
+                    <SelectGroup>
+                      {bots.map((bot) => (
+                        <PromptInputSelectItem key={bot.id} value={bot.id}>
+                          <ChatAvatar
+                            seed={bot.avatar}
+                            animated
+                            alt={`${bot.name} avatar`}
+                            className={compactChatAvatarStyles}
+                          />
+                          {bot.name}
+                        </PromptInputSelectItem>
+                      ))}
+                    </SelectGroup>
                   </PromptInputSelectContent>
                 </PromptInputSelect>
               )}
