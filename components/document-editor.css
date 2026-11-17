@@ -1,0 +1,84 @@
+/* Workspace editor.
+ *
+ * The source view for every workspace file: markdown edits here and renders in
+ * its own preview, while code files have this as their only surface.
+ *
+ * Syntax colors come from Shiki's github-light / github-dark, the same themes
+ * the chat transcript highlights with, declared as variables so one stylesheet
+ * serves both themes.
+ */
+
+.cm-host {
+  --cm-text: var(--foreground);
+  --cm-keyword: #cf222e;
+  --cm-string: #0a3069;
+  --cm-comment: #6e7781;
+  --cm-function: #8250df;
+  --cm-constant: #0550ae;
+  --cm-variable: #953800;
+  --cm-property: #0550ae;
+  --cm-type: #953800;
+  --cm-punctuation: #24292f;
+  --cm-invalid: var(--destructive);
+  --cm-heading: #0550ae;
+  --cm-link: #0969da;
+}
+
+.dark .cm-host {
+  --cm-keyword: #ff7b72;
+  --cm-string: #a5d6ff;
+  --cm-comment: #8b949e;
+  --cm-function: #d2a8ff;
+  --cm-constant: #79c0ff;
+  --cm-variable: #ffa657;
+  --cm-property: #79c0ff;
+  --cm-type: #ffa657;
+  --cm-punctuation: #c9d1d9;
+  --cm-heading: #79c0ff;
+  --cm-link: #58a6ff;
+}
+
+/* Frame ------------------------------------------------------------------ */
+.cm-host .cm-editor {
+  height: 100%;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 13px;
+}
+.cm-host .cm-editor.cm-focused {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.cm-host .cm-scroller {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  line-height: 1.65;
+  scrollbar-width: thin;
+}
+.cm-host .cm-content {
+  padding: 20px 0 40vh;
+  caret-color: var(--foreground);
+}
+.cm-host .cm-line {
+  padding-inline: 20px;
+}
+.cm-host .cm-cursor,
+.cm-host .cm-dropCursor {
+  border-left-color: var(--foreground);
+}
+.cm-host .cm-activeLine {
+  background: color-mix(in oklab, var(--foreground) 3%, transparent);
+}
+.cm-host .cm-selectionBackground,
+.cm-host .cm-editor ::selection {
+  background: color-mix(in oklab, var(--primary) 22%, transparent) !important;
+}
+.cm-host .cm-matchingBracket {
+  outline: 1px solid color-mix(in oklab, var(--foreground) 30%, transparent);
+  background: transparent !important;
+}
+
+.cm-host .cm-gutters {
+  border-right: 1px solid var(--border);
+  background: var(--background);
+  color: var(--muted-foreground);
+}
