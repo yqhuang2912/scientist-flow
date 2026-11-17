@@ -1,7 +1,27 @@
-"use client"
+﻿"use client"
 
-import { useCallback, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react"
+import type { PanelImperativeHandle } from "react-resizable-panels"
 import { ResearchWorkspace } from "@/components/research-workspace"
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable"
+import { useSidebar } from "@/components/ui/sidebar"
+import { cn } from "@/lib/utils"
+import {
+  clampWorkspaceWidth,
+  shouldCollapseNavigation,
+  workspaceLayoutBounds,
+  WORKSPACE_DEFAULT_WIDTH,
+} from "@/lib/workspace-layout"
 
 interface ChatWorkspaceLayoutProps {
   chatId: string
@@ -12,10 +32,6 @@ interface ChatWorkspaceLayoutProps {
   children: React.ReactNode
 }
 
-const WORKSPACE_MIN_PX = 220
-const WORKSPACE_DEFAULT_PX = 400
-const WORKSPACE_MAX_RATIO = 0.6
-
 export function ChatWorkspaceLayout({
   chatId,
   workspaceKey,
@@ -24,84 +40,225 @@ export function ChatWorkspaceLayout({
   onOpenSettings,
   children,
 }: ChatWorkspaceLayoutProps) {
-  const [workspaceWidth, setWorkspaceWidth] = useState(WORKSPACE_DEFAULT_PX)
+  const { open: sidebarOpen, setOpen: setSidebarOpen, isMobile } = useSidebar()
   const containerRef = useRef<HTMLDivElement>(null)
+  const workspaceRef = useRef<PanelImperativeHandle>(null)
+  const preferredWidth = useRef(WORKSPACE_DEFAULT_WIDTH)
+  const resizeStartWidth = useRef(0)
+  const dragging = useRef(false)
+  const collapsedDuringDrag = useRef(false)
+  const lastPageWidth = useRef(0)
+  const wasOpen = useRef(false)
+  const [size, setSize] = useState({ page: 1024, content: 814 })
+  const bounds = workspaceLayoutBounds(size.page, size.content)
+  const compact = isMobile
 
-  const handlePointerDown = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      if (event.button !== 0) return
-
-      const startX = event.clientX
-      const startWidth = workspaceWidth
-
-      const prevCursor = document.body.style.cursor
-      const prevSelect = document.body.style.userSelect
-      document.body.style.cursor = "col-resize"
-      document.body.style.userSelect = "none"
-
-      function onMove(e: PointerEvent) {
-        if (!containerRef.current) return
-        const containerWidth = containerRef.current.offsetWidth
-        const maxWidth = Math.floor(containerWidth * WORKSPACE_MAX_RATIO)
-        const delta = startX - e.clientX
-        const next = Math.min(
-          Math.max(startWidth + delta, WORKSPACE_MIN_PX),
-          Math.max(maxWidth, WORKSPACE_MIN_PX)
-        )
-        setWorkspaceWidth(next)
-        if (next <= WORKSPACE_MIN_PX + 10 && delta > 50) {
-          onWorkspaceOpenChange(false)
-        }
+  // The page includes the navigation; content size alone is not the 2/3 cap.
+  // A manual sidebar expansion is respected until the next resize gesture.
+  useEffect(() => {
+    const container = containerRef.current
+    const page = container?.closest<HTMLElement>(
+      '[data-slot="sidebar-wrapper"]'
+    )
+    if (!container || !page) return
+    let frame = 0
+    let justOpened = workspaceOpen && !wasOpen.current
+    wasOpen.current = workspaceOpen
+    const measure = () => {
+      const pageWidth = page.clientWidth
+      const contentWidth = container.clientWidth
+      const shrinking = lastPageWidth.current > pageWidth
+      lastPageWidth.current = pageWidth
+      setSize((previous) =>
+        previous.page === pageWidth && previous.content === contentWidth
+          ? previous
+          : { page: pageWidth, content: contentWidth }
+      )
+      if (
+        workspaceOpen &&
+        sidebarOpen &&
+        !isMobile &&
+        (justOpened || shrinking) &&
+        shouldCollapseNavigation(contentWidth, preferredWidth.current)
+      ) {
+        setSidebarOpen(false)
       }
+      justOpened = false
+    }
+    const schedule = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(measure)
+    }
+    const observer = new ResizeObserver(schedule)
+    observer.observe(page)
+    observer.observe(container)
+    schedule()
+    return () => {
+      observer.disconnect()
+      cancelAnimationFrame(frame)
+    }
+  }, [workspaceOpen, sidebarOpen, setSidebarOpen, isMobile])
 
-      function onUp() {
-        document.body.style.cursor = prevCursor
-        document.body.style.userSelect = prevSelect
-        window.removeEventListener("pointermove", onMove)
-        window.removeEventListener("pointerup", onUp)
-        window.removeEventListener("pointercancel", onUp)
+  // Both subtrees remain mounted across panel toggles and the mobile breakpoint.
+  // Changing sizes never resets chat effects, file operations, or input drafts.
+  useLayoutEffect(() => {
+    const container = containerRef.current
+    const page = container?.closest<HTMLElement>(
+      '[data-slot="sidebar-wrapper"]'
+    )
+    if (!container || !page) return
+    const activeElement = document.activeElement
+    if (!workspaceOpen) {
+      if (
+        activeElement instanceof HTMLElement &&
+        activeElement.closest("#workspace-panel")
+      ) {
+        container
+          .querySelector<HTMLButtonElement>("[data-workspace-toggle]")
+          ?.focus()
       }
+      return
+    }
+    // Panel constraints are registered in the library's effects. Restore the
+    // desktop width after those effects, rather than resizing against the old
+    // mobile 100% constraint (which would silently discard the requested size).
+    const frame = requestAnimationFrame(() => {
+      workspaceRef.current?.resize(
+        compact
+          ? "100%"
+          : clampWorkspaceWidth(
+              preferredWidth.current,
+              page.clientWidth,
+              container.clientWidth
+            )
+      )
+    })
+    if (
+      compact &&
+      !(
+        activeElement instanceof HTMLElement &&
+        activeElement.closest('[role="dialog"]')
+      )
+    ) {
+      container
+        .querySelector<HTMLButtonElement>("[data-workspace-back]")
+        ?.focus()
+    }
+    return () => cancelAnimationFrame(frame)
+  }, [workspaceOpen, compact])
 
-      window.addEventListener("pointermove", onMove)
-      window.addEventListener("pointerup", onUp)
-      window.addEventListener("pointercancel", onUp)
+  const collapseForResize = useCallback(
+    (width: number) => {
+      if (
+        sidebarOpen &&
+        !compact &&
+        !collapsedDuringDrag.current &&
+        width > resizeStartWidth.current + 1 &&
+        shouldCollapseNavigation(containerRef.current?.clientWidth ?? 0, width)
+      ) {
+        collapsedDuringDrag.current = true
+        setSidebarOpen(false)
+      }
     },
-    [workspaceWidth, onWorkspaceOpenChange]
+    [sidebarOpen, compact, setSidebarOpen]
   )
 
-  // The chat subtree (children) is always rendered at the same DOM position
-  // so opening/closing the workspace panel never unmounts or remounts it.
-  // The workspace column is hidden via CSS (width: 0 + overflow hidden) when
-  // closed, keeping the chat identity and input draft stable.
+  useEffect(() => {
+    // Read pointer intent even at the panel's hard limit, where onResize no
+    // longer fires. This lets a leftward drag still release navigation space.
+    const move = (event: PointerEvent) => {
+      const container = containerRef.current
+      if (dragging.current && container) {
+        collapseForResize(
+          container.getBoundingClientRect().right - event.clientX
+        )
+      }
+    }
+    const finish = () => {
+      dragging.current = false
+    }
+    window.addEventListener("pointermove", move)
+    window.addEventListener("pointerup", finish)
+    window.addEventListener("pointercancel", finish)
+    window.addEventListener("blur", finish)
+    return () => {
+      window.removeEventListener("pointermove", move)
+      window.removeEventListener("pointerup", finish)
+      window.removeEventListener("pointercancel", finish)
+      window.removeEventListener("blur", finish)
+    }
+  }, [collapseForResize])
+
   return (
-    <div
-      ref={containerRef}
-      className="flex h-full min-w-0 flex-1 flex-row overflow-hidden"
+    <ResizablePanelGroup
+      elementRef={containerRef}
+      orientation="horizontal"
+      className="min-w-0 flex-1 overflow-hidden"
+      disabled={!workspaceOpen || compact}
+      resizeTargetMinimumSize={{ fine: 12, coarse: 24 }}
+      onLayoutChanged={(_, meta) => {
+        if (!meta.isUserInteraction || compact || !workspaceOpen) return
+        const width = workspaceRef.current?.getSize().inPixels
+        if (width === undefined) return
+        preferredWidth.current = width
+        collapseForResize(width)
+      }}
     >
-      {/* Chat column — always mounted, takes remaining space */}
-      <div className="flex min-w-80 flex-1 flex-col overflow-hidden">
+      <ResizablePanel
+        id="chat-panel"
+        minSize={!workspaceOpen ? "100%" : compact ? 0 : bounds.chatMin}
+        maxSize={compact && workspaceOpen ? 0 : "100%"}
+        className="flex h-full min-w-0 flex-col overflow-hidden"
+        inert={compact && workspaceOpen}
+        aria-hidden={compact && workspaceOpen}
+      >
         {children}
-      </div>
-
-      {/* Drag handle — only interactive when workspace is open */}
-      {workspaceOpen && (
-        <div
-          role="separator"
-          aria-label="Resize workspace panel"
-          aria-orientation="vertical"
-          onPointerDown={handlePointerDown}
-          className="relative z-10 w-px cursor-col-resize bg-border transition-colors hover:bg-ring/40 after:absolute after:inset-y-0 after:left-1/2 after:w-3 after:-translate-x-1/2"
-        />
-      )}
-
-      {/* Workspace column — zero-width when closed, no unmount */}
-      <div
-        className="flex shrink-0 flex-col overflow-hidden border-l border-border transition-[width] duration-200 ease-linear"
-        style={{ width: workspaceOpen ? workspaceWidth : 0, borderLeftWidth: workspaceOpen ? 1 : 0 }}
+      </ResizablePanel>
+      <ResizableHandle
+        aria-label="调整 Workspace 宽度"
+        title="拖动调整 Workspace 宽度；双击恢复默认宽度"
+        disabled={!workspaceOpen || compact}
+        className={cn(
+          "touch-none transition-colors hover:bg-ring/50 focus-visible:bg-ring data-[separator=active]:bg-ring motion-reduce:transition-none",
+          (!workspaceOpen || compact) && "hidden"
+        )}
+        onPointerDownCapture={(event) => {
+          if (event.button !== 0) return
+          dragging.current = true
+          collapsedDuringDrag.current = false
+          resizeStartWidth.current =
+            workspaceRef.current?.getSize().inPixels ?? 0
+        }}
+        onKeyDownCapture={(event) => {
+          collapsedDuringDrag.current = false
+          resizeStartWidth.current =
+            workspaceRef.current?.getSize().inPixels ?? 0
+          if (event.key === "ArrowLeft" || event.key === "Home") {
+            collapseForResize(resizeStartWidth.current + 10)
+          }
+        }}
+        onDoubleClick={() => {
+          preferredWidth.current = WORKSPACE_DEFAULT_WIDTH
+        }}
+      />
+      <ResizablePanel
+        id="workspace-panel"
+        panelRef={workspaceRef}
+        defaultSize={WORKSPACE_DEFAULT_WIDTH}
+        minSize={!workspaceOpen ? 0 : compact ? "100%" : bounds.min}
+        maxSize={!workspaceOpen ? 0 : compact ? "100%" : bounds.max}
+        groupResizeBehavior="preserve-pixel-size"
+        className="h-full min-w-0 overflow-hidden"
+        inert={!workspaceOpen}
         aria-hidden={!workspaceOpen}
       >
-        <ResearchWorkspace key={workspaceKey} chatId={chatId} onOpenSettings={onOpenSettings} />
-      </div>
-    </div>
+        <ResearchWorkspace
+          key={workspaceKey}
+          chatId={chatId}
+          onOpenSettings={onOpenSettings}
+          onBack={compact ? () => onWorkspaceOpenChange(false) : undefined}
+        />
+      </ResizablePanel>
+    </ResizablePanelGroup>
   )
 }

@@ -9,6 +9,7 @@ import {
   RefreshCwIcon,
   SettingsIcon,
   AlertCircleIcon,
+  ArrowLeftIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -55,6 +56,7 @@ import {
 interface ResearchWorkspaceProps {
   chatId: string
   onOpenSettings?: () => void
+  onBack?: () => void
 }
 type Operation = { chatId: string; relativePath: string } & (
   | { kind: "create" | "inspect" | "create-file" | "inspect-file" }
@@ -110,6 +112,7 @@ export function ResearchWorkspace(props: ResearchWorkspaceProps) {
 function ResearchWorkspaceInner({
   chatId,
   onOpenSettings,
+  onBack,
 }: ResearchWorkspaceProps) {
   const [status, setStatus] = useState<WorkspaceStatus | null>(null)
   const [statusLoading, setStatusLoading] = useState(true)
@@ -454,9 +457,41 @@ function ResearchWorkspaceInner({
 
   return (
     <div ref={container} className="flex h-full min-w-0 flex-col">
-      <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-3">
-        <span className="text-sm font-medium text-foreground">Workspace</span>
-        <div className="flex items-center gap-0.5">
+      <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border px-3">
+        <div className="flex min-w-0 items-center gap-2">
+          {onBack && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="返回聊天"
+                    data-workspace-back
+                    onClick={onBack}
+                  />
+                }
+              >
+                <ArrowLeftIcon />
+              </TooltipTrigger>
+              <TooltipContent>返回聊天</TooltipContent>
+            </Tooltip>
+          )}
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-sm leading-5 font-medium text-foreground">
+              Workspace
+            </span>
+            {!statusLoading && isReady && (
+              <p
+                className="truncate text-[10px] leading-tight text-muted-foreground"
+                title={chatId}
+              >
+                {chatId}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-0.5">
           <Tooltip>
             <TooltipTrigger
               render={
@@ -626,9 +661,6 @@ function ResearchWorkspaceInner({
         )}
         {!statusLoading && isReady && (
           <div className="flex min-h-0 flex-col gap-1">
-            <p className="mb-1 text-[10px] font-medium tracking-wide text-muted-foreground">
-              {chatId}
-            </p>
             {(operation?.kind === "inspect" ||
               operation?.kind === "inspect-file") && (
               <p

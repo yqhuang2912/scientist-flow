@@ -64,8 +64,8 @@ function isMac() {
 }
 
 function BrandHeader() {
-  const { toggleSidebar, state } = useSidebar()
-  const collapsed = state === "collapsed"
+  const { toggleSidebar, state, isMobile } = useSidebar()
+  const collapsed = !isMobile && state === "collapsed"
 
   return (
     <div
@@ -114,6 +114,7 @@ export function AppSidebar({
 }) {
   const pathname = usePathname()
   const router = useRouter()
+  const { setOpenMobile } = useSidebar()
   const [botDialogOpen, setBotDialogOpen] = useState(false)
   const [groupChatDialogOpen, setGroupChatDialogOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -124,6 +125,7 @@ export function AppSidebar({
 
   function handleChatSelect(chatId: string) {
     setSearchOpen(false)
+    setOpenMobile(false)
     router.push(`/chats/${chatId}`)
   }
 
