@@ -130,7 +130,7 @@ function FileTreeRow({
     <Button
       type="button"
       variant="ghost"
-      size="sm"
+      size="row"
       data-workspace-path={node.entry.relPath}
       aria-label={node.entry.name}
       aria-current={selected ? "true" : undefined}

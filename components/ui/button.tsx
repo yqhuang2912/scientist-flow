@@ -7,16 +7,13 @@ import {
 } from "@/components/ui/compact-styles"
 
 const buttonVariants = cva(
-  cn(
-    compactItemTypography,
-    "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 motion-reduce:transition-none dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
-  ),
+  "group/button inline-flex shrink-0 cursor-default items-center justify-center rounded-2xl border border-transparent bg-clip-padding whitespace-nowrap transition-all duration-150 outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 motion-reduce:transition-none dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
         default: "bg-primary text-primary-foreground hover:bg-primary/80",
         outline:
-          "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
+          "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:bg-transparent dark:hover:bg-input/30",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost:
@@ -26,14 +23,22 @@ const buttonVariants = cva(
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
-        default: "h-7.5 gap-2 rounded-xl px-2.5",
-        xs: "h-6 gap-1 rounded-lg px-2 text-xs in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
-        sm: "h-7.5 gap-2 rounded-xl px-2.5 text-[13px] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-4",
-        lg: "h-9 gap-1.5 rounded-xl px-3 has-data-[icon=inline-end]:pr-2.5 has-data-[icon=inline-start]:pl-2.5",
-        icon: `${iconButtonStyles} size-7.5`,
-        "icon-xs": `${iconButtonStyles} size-6 [&_svg:not([class*='size-'])]:size-4`,
-        "icon-sm": `${iconButtonStyles} size-7.5 [&_svg:not([class*='size-'])]:size-4`,
-        "icon-lg": `${iconButtonStyles} size-9`,
+        default:
+          "h-8 gap-1.5 px-3 type-control has-data-[icon=inline-end]:pr-2.5 has-data-[icon=inline-start]:pl-2.5",
+        sm: "h-7 gap-1 px-3 type-control in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
+        compact:
+          "h-7 gap-1 px-2.5 type-control-compact in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
+        // Existing extra sizes and tree rows retain their metrics until their
+        // component pass; do not infer them from the 01–04 reference samples.
+        xs: "h-6 gap-1 px-2 text-xs leading-5 font-medium in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
+        lg: `${compactItemTypography} h-9 gap-1.5 px-3 has-data-[icon=inline-end]:pr-2.5 has-data-[icon=inline-start]:pl-2.5`,
+        row: `${compactItemTypography} h-7.5 gap-2 px-2.5`,
+        icon: `type-control ${iconButtonStyles} size-7.5 transition-none duration-0`,
+        "icon-xs": `type-control ${iconButtonStyles} size-6 transition-none duration-0`,
+        // Preserve the existing 30px toolbar alias; close controls opt in to 28px.
+        "icon-sm": `type-control ${iconButtonStyles} size-7.5 transition-none duration-0`,
+        "icon-compact": `type-control ${iconButtonStyles} size-7`,
+        "icon-lg": `${compactItemTypography} ${iconButtonStyles} size-9`,
       },
     },
     defaultVariants: {
@@ -52,6 +57,8 @@ function Button({
   return (
     <ButtonPrimitive
       data-slot="button"
+      data-variant={variant}
+      data-size={size}
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
     />

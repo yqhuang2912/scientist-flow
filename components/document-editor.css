@@ -50,7 +50,7 @@
   outline-offset: -2px;
 }
 .cm-host .cm-scroller {
-  font-family: var(--font-mono), ui-monospace, monospace;
+  font-family: var(--font-mono);
   line-height: 1.65;
   scrollbar-width: thin;
 }

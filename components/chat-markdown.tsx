@@ -75,7 +75,7 @@ const icons = {
 const diagram: ComponentProps<typeof Streamdown>["mermaid"] = {
   config: {
     theme: "neutral",
-    fontFamily: "var(--font-sans, sans-serif)",
+    fontFamily: "var(--font-sans)",
     themeVariables: { fontSize: "13px" },
     flowchart: {
       padding: 12,

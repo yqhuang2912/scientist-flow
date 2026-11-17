@@ -172,7 +172,7 @@ const ChatTurn = memo(function ChatTurn({
     return (
       <Message align="end">
         <MessageContent className="gap-2">
-          <MessageHeader className="gap-3">
+          <MessageHeader>
             You
             <SpeakerAvatar user />
           </MessageHeader>
@@ -238,7 +238,7 @@ const ChatTurn = memo(function ChatTurn({
         return (
           <Message key={segment.key}>
             <MessageContent className="gap-2">
-              <MessageHeader className="gap-3">
+              <MessageHeader>
                 <SpeakerAvatar bot={bot} />
                 <BotName name={bot?.name ?? "Assistant"} job={bot?.job} />
               </MessageHeader>
@@ -295,7 +295,7 @@ export function ChatTranscript({
     <MessageScrollerProvider autoScroll defaultScrollPosition="end">
       <MessageScroller className="flex-1">
         <MessageScrollerViewport aria-label="Chat messages">
-          <MessageScrollerContent className="mx-auto w-full max-w-3xl gap-8 px-4 py-6 sm:px-6">
+          <MessageScrollerContent className="mx-auto w-full max-w-2xl gap-6 px-4 py-6 sm:px-6">
             {messages.length === 0 && !busy && (
               <MessageScrollerItem messageId="empty">
                 <Empty className="min-h-64 border-0">
@@ -337,7 +337,7 @@ export function ChatTranscript({
               <MessageScrollerItem messageId="responding">
                 <Message>
                   <MessageContent>
-                    <MessageHeader className="gap-3">
+                    <MessageHeader>
                       <SpeakerAvatar bot={pendingBot} />
                       <BotName
                         name={pendingBot?.name ?? "Assistant"}

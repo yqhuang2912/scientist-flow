@@ -239,12 +239,7 @@ export function CreateWorkspaceEntryDialog({
               className="min-w-0 gap-1.5"
               data-invalid={!!form.formState.errors.name}
             >
-              <FieldLabel
-                htmlFor="workspace-folder-name"
-                className="text-[13px]"
-              >
-                Name
-              </FieldLabel>
+              <FieldLabel htmlFor="workspace-folder-name">Name</FieldLabel>
               <Input
                 id="workspace-folder-name"
                 autoComplete="off"
@@ -629,7 +624,7 @@ export function DeleteWorkspaceFolderDialog({
               <Field data-invalid={!!nameError}>
                 <FieldLabel
                   htmlFor="workspace-delete-name"
-                  className="text-[13px] break-all"
+                  className="break-all"
                 >
                   输入文件夹名称以确认
                 </FieldLabel>
@@ -648,7 +643,7 @@ export function DeleteWorkspaceFolderDialog({
                 />
                 <FieldDescription
                   id="workspace-delete-name-help"
-                  className="text-[11px] break-all"
+                  className="break-all"
                 >
                   请完整输入“{inspection.name}”，包括空格与大小写。
                 </FieldDescription>

@@ -1,5 +1,12 @@
 # Compact application UI
 
+The 2026-11-18 [visual foundation](./visual-foundation.md) supersedes this
+document's font/token guidance. Its ClawsGo component index governs subsequent
+visual passes. [Button / IconButton](./visual-buttons.md) now supersedes the
+button metrics below. [Input / Field](./visual-inputs.md) supersedes form input
+surfaces and field typography. Other geometry below describes the existing implementation,
+not components already migrated to the new reference.
+
 Settings navigation — specifically the Bots and Workspace items — is the density
 reference. Keep the current Inter
 typeface, neutral light/dark themes, Lucide icons, and Base UI shadcn primitives.
@@ -90,7 +97,7 @@ Approvals use a separate review surface with Deny / Approve actions. Render
 only events supplied by the backend; do not invent thoughts or progress steps.
 Markdown, code, math and Mermaid share the existing Streamdown renderer, with
 its Tailwind sources and KaTeX stylesheet loaded in `app/globals.css`.
-Chat code uses 13 px Geist Mono, matching the body size. Follow the official
+Chat code uses the shared system monospace stack at its existing size. Follow the official
 Base Message example: a muted rounded surface, language label, line numbers
 and copy button, with no separate tinted toolbar. Markdown fences and tool
 values share `components/ui/code-block.tsx`. `ChatMarkdown` handles highlighting;

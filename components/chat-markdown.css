@@ -1,3 +1,39 @@
+/* Chat prose.
+ *
+ * The message itself sets 14px at 1.625 line height; these rules give that
+ * body text its rhythm. Streamdown's own defaults are built for a wider
+ * document column — a 30px h1 and no space between paragraphs — which reads
+ * as a web page rather than as a reply, so the scale is brought down to the
+ * one the interface uses elsewhere.
+ */
+
+/* A blank line between paragraphs, none after the last one. */
+.chat-markdown p:not(:last-child) {
+  margin-bottom: 16px;
+}
+
+/* Headings in a reply are section markers, not page titles: they top out one
+   step above body text and lean on weight for the rest. */
+.chat-markdown [data-streamdown="heading-1"] {
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+}
+.chat-markdown [data-streamdown="heading-2"] {
+  font-size: 18px;
+  line-height: 28px;
+}
+.chat-markdown [data-streamdown="heading-3"] {
+  font-size: 16px;
+  line-height: 24px;
+}
+.chat-markdown [data-streamdown="heading-4"],
+.chat-markdown [data-streamdown="heading-5"],
+.chat-markdown [data-streamdown="heading-6"] {
+  font-size: 14px;
+  line-height: 22px;
+}
+
 /* Markdown uses the same Base UI CodeBlock as tool input/output. */
 .chat-markdown [data-slot="code-block"] {
   margin-block: 16px;
@@ -21,9 +57,7 @@
 .chat-markdown [data-streamdown="mermaid-block"] > div:first-child {
   min-height: 40px;
   padding: 12px 96px 0 16px;
-  font:
-    500 13px/20px var(--font-sans),
-    sans-serif;
+  font: 500 13px/20px var(--font-sans);
 }
 .chat-markdown [data-streamdown="mermaid-block"] > div:first-child > span {
   margin: 0;

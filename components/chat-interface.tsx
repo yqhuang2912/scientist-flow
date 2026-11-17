@@ -139,7 +139,9 @@ function ChatView({
         pendingBotId={selectedBotId}
         onApproval={addToolApprovalResponse}
       />
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-4 pb-3 sm:px-6">
+      {/* The composer tracks the transcript's width so the input lines up with
+          the messages above it. */}
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 pb-3 sm:px-6">
         {error && (
           <Alert variant="destructive">
             <CircleAlertIcon />
