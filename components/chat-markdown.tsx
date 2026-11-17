@@ -1,24 +1,13 @@
 "use client"
 
-import {
-  memo,
-  useEffect,
-  useState,
-  type ComponentProps,
-  type CSSProperties,
-} from "react"
+import { memo, type ComponentProps } from "react"
 import { cjk } from "@streamdown/cjk"
-import {
-  code,
-  type HighlightResult,
-  type HighlightOptions,
-} from "@streamdown/code"
+import { code } from "@streamdown/code"
 import { math } from "@streamdown/math"
 import { mermaid } from "@streamdown/mermaid"
 import {
   Streamdown,
   defaultComponents,
-  useIsCodeFenceIncomplete,
   type ExtraProps,
 } from "streamdown"
 import {
@@ -31,97 +20,9 @@ import {
   ZoomInIcon,
   ZoomOutIcon,
 } from "lucide-react"
-import {
-  CodeBlock,
-  CodeBlockActions,
-  CodeBlockContent,
-  CodeBlockCopyButton,
-  CodeBlockHeader,
-  CodeBlockLine,
-  CodeBlockTitle,
-} from "@/components/ui/code-block"
+import { MarkdownCodeBlock } from "@/components/markdown-code-block"
 import { cn } from "@/lib/utils"
 import "@/components/chat-markdown.css"
-
-function MarkdownCodeBlock({
-  text,
-  language,
-}: {
-  text: string
-  language: string
-}) {
-  const incomplete = useIsCodeFenceIncomplete()
-  const source = text.replace(/\n$/, "")
-  const [highlight, setHighlight] = useState<{
-    source: string
-    language: string
-    result: HighlightResult
-  }>()
-
-  useEffect(() => {
-    let current = true
-    const publish = (result: HighlightResult) => {
-      if (current) setHighlight({ source, language, result })
-    }
-    // Reuse the installed Streamdown highlighter. Late results cannot paint a
-    // different snippet or an earlier streaming revision.
-    void Promise.resolve()
-      .then(() => {
-        if (!current) return
-        const result = code.highlight(
-          {
-            code: source,
-            language: language as HighlightOptions["language"],
-            themes: code.getThemes(),
-            isIncomplete: incomplete,
-          },
-          publish
-        )
-        if (result) publish(result)
-      })
-      .catch(() => {})
-    return () => {
-      current = false
-    }
-  }, [source, language, incomplete])
-
-  const tokens =
-    highlight?.source === source && highlight.language === language
-      ? highlight.result.tokens
-      : undefined
-
-  return (
-    <CodeBlock>
-      <CodeBlockHeader>
-        <CodeBlockTitle>{language || "text"}</CodeBlockTitle>
-        <CodeBlockActions>
-          <CodeBlockCopyButton value={text} disabled={incomplete} />
-        </CodeBlockActions>
-      </CodeBlockHeader>
-      <CodeBlockContent lineNumbers>
-        {source.split("\n").map((line, index) => (
-          <CodeBlockLine key={index}>
-            {tokens?.[index]?.length
-              ? tokens[index].map((token, tokenIndex) => (
-                  <span
-                    key={tokenIndex}
-                    style={
-                      {
-                        color: token.color,
-                        ...token.htmlStyle,
-                      } as CSSProperties
-                    }
-                  >
-                    {token.content}
-                  </span>
-                ))
-              : line}
-          </CodeBlockLine>
-        ))}
-      </CodeBlockContent>
-    </CodeBlock>
-  )
-}
 
 function MarkdownCode({
   node,

@@ -1,0 +1,185 @@
+/* Workspace file preview.
+ *
+ * Reading a file is a different job from reading a chat reply, so the type is
+ * set for a document rather than a transcript: a flatter heading scale that
+ * stays legible in a small floating window, generous leading for prose, and
+ * structural rules (quote bar, table hairlines) that mark structure without
+ * turning every block into a card. Sizes are absolute rather than `em` so a
+ * heading never compounds inside a list or a quote.
+ */
+
+.document-markdown {
+  line-height: 1.7;
+}
+
+/* Headings ---------------------------------------------------------------
+ * Streamdown's defaults jump to 30px at h1, which overwhelms a windowed
+ * preview. Hierarchy comes from weight and the space above each level, with
+ * only the top two levels carrying a size change.
+ */
+.document-markdown [data-streamdown^="heading-"] {
+  margin-block: 1.6em 0.6em;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.011em;
+  text-wrap: balance;
+}
+.document-markdown [data-streamdown="heading-1"] {
+  margin-block-start: 0;
+  font-size: 20px;
+  letter-spacing: -0.018em;
+}
+.document-markdown [data-streamdown="heading-2"] {
+  font-size: 16px;
+  letter-spacing: -0.014em;
+}
+.document-markdown [data-streamdown="heading-3"] {
+  font-size: 14px;
+}
+.document-markdown [data-streamdown="heading-4"],
+.document-markdown [data-streamdown="heading-5"],
+.document-markdown [data-streamdown="heading-6"] {
+  font-size: 14px;
+  color: var(--muted-foreground);
+}
+
+/* A rule under h1 and h2 separates major sections the way a document does,
+ * rather than relying on whitespace alone in a narrow column. */
+.document-markdown [data-streamdown="heading-1"],
+.document-markdown [data-streamdown="heading-2"] {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.35em;
+}
+
+/* Prose ------------------------------------------------------------------ */
+.document-markdown p {
+  margin-block: 0.9em;
+}
+.document-markdown [data-streamdown="strong"] {
+  font-weight: 600;
+}
+
+.document-markdown [data-streamdown="link"] {
+  color: var(--foreground);
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in oklab, var(--foreground) 35%, transparent);
+  text-underline-offset: 2px;
+}
+.document-markdown [data-streamdown="link"]:hover {
+  text-decoration-color: var(--foreground);
+}
+
+/* Lists ------------------------------------------------------------------ */
+.document-markdown [data-streamdown="unordered-list"],
+.document-markdown [data-streamdown="ordered-list"] {
+  margin-block: 0.9em;
+  padding-inline-start: 1.4em;
+}
+.document-markdown [data-streamdown="unordered-list"] {
+  list-style: disc;
+}
+.document-markdown [data-streamdown="ordered-list"] {
+  list-style: decimal;
+}
+.document-markdown [data-streamdown="list-item"] {
+  margin-block: 0.3em;
+  padding-inline-start: 0.2em;
+}
+.document-markdown [data-streamdown="list-item"]::marker {
+  color: var(--muted-foreground);
+}
+/* Nested lists tighten up: the indent already carries the nesting. */
+.document-markdown [data-streamdown$="-list"]
+  [data-streamdown$="-list"] {
+  margin-block: 0.3em;
+}
+/* A task list replaces its marker with the checkbox. */
+.document-markdown [data-streamdown="list-item"]:has(> input[type="checkbox"]) {
+  list-style: none;
+  margin-inline-start: -1.4em;
+  padding-inline-start: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+}
+.document-markdown [data-streamdown="list-item"] > input[type="checkbox"] {
+  accent-color: var(--primary);
+  translate: 0 1px;
+}
+
+/* Quotes ----------------------------------------------------------------- */
+.document-markdown [data-streamdown="blockquote"] {
+  margin-block: 1.1em;
+  border-inline-start: 2px solid var(--border);
+  padding-inline-start: 1em;
+  color: var(--muted-foreground);
+}
+.document-markdown [data-streamdown="blockquote"] > *:first-child {
+  margin-block-start: 0;
+}
+.document-markdown [data-streamdown="blockquote"] > *:last-child {
+  margin-block-end: 0;
+}
+
+/* Rules ------------------------------------------------------------------ */
+.document-markdown [data-streamdown="horizontal-rule"] {
+  margin-block: 2em;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* Code ------------------------------------------------------------------- */
+.document-markdown [data-slot="code-block"] {
+  margin-block: 1.2em;
+}
+.dark .document-markdown [data-slot="code-block-line-content"] span {
+  color: var(--shiki-dark) !important;
+}
+
+/* Tables ----------------------------------------------------------------- */
+.document-markdown [data-streamdown="table-wrapper"] {
+  margin-block: 1.2em;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+}
+.document-markdown [data-streamdown="table"] {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.document-markdown [data-streamdown="table-header"] {
+  background: var(--muted);
+}
+.document-markdown [data-streamdown="table-header-cell"],
+.document-markdown [data-streamdown="table-cell"] {
+  padding: 7px 12px;
+  text-align: start;
+  vertical-align: top;
+}
+.document-markdown [data-streamdown="table-header-cell"] {
+  font-weight: 600;
+}
+.document-markdown [data-streamdown="table-row"]:not(:last-child)
+  [data-streamdown="table-cell"] {
+  border-bottom: 1px solid var(--border);
+}
+
+/* Media ------------------------------------------------------------------ */
+.document-markdown img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-lg);
+}
+
+/* Math — KaTeX inherits the document color rather than its own stylesheet's. */
+.document-markdown .katex {
+  font-size: 1.05em;
+}
+.document-markdown .katex-display {
+  margin-block: 1.2em;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.2em;
+}
