@@ -2,22 +2,22 @@
 
 import { useState } from "react"
 import {
-  compactItemStyles,
-  compactItemTypography,
-  compactItemStates,
-  compactListStyles,
-} from "@/components/ui/compact-styles"
-import {
   AlertCircleIcon,
-  ChevronDownIcon,
   ChevronRightIcon,
+  FileIcon,
   FilePlusIcon,
+  FolderIcon,
   FolderPlusIcon,
   MoreHorizontalIcon,
   Trash2Icon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import {
   Tooltip,
   TooltipContent,
@@ -41,10 +41,10 @@ import {
 } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
 import { type WorkspaceTreeNode } from "@/lib/workspace-tree"
-import { WorkspaceEntryIcon } from "@/components/workspace-entry-icon"
 
 export type WorkspaceEntryAction =
   "create" | "delete" | "create-file" | "delete-file"
+
 type TreeProps = {
   nodes: WorkspaceTreeNode[]
   selectedRel: string | null
@@ -56,7 +56,7 @@ type TreeProps = {
   depth?: number
 }
 
-// Both menu surfaces share the same items and row-bound callback.
+// Shared menu items for both DropdownMenu and ContextMenu surfaces.
 function EntryMenuItems({
   context = false,
   isDir,
@@ -92,7 +92,7 @@ function EntryMenuItems({
         onClick={() => onAction(isDir ? "delete" : "delete-file")}
       >
         <Trash2Icon />
-        {isDir ? "删除文件夹" : "删除文件"}
+        {isDir ? "Delete folder" : "Delete file"}
       </Item>
     </Group>
   )
@@ -103,62 +103,60 @@ function FileTreeRow({
   selected,
   disabled,
   onSelect,
-  onToggle,
   onAction,
 }: {
   node: WorkspaceTreeNode
   selected: boolean
   disabled: boolean
   onSelect: () => void
-  onToggle: () => void
   onAction: (action: WorkspaceEntryAction) => void
 }) {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [contextOpen, setContextOpen] = useState(false)
   const hasActions = node.entry.isDir || node.entry.isFile === true
-  const actionLabel = node.entry.isDir ? "文件夹操作" : "文件操作"
-  const row = (
-    <div
-      data-active={selected || undefined}
+  const actionLabel = node.entry.isDir ? "Folder actions" : "File actions"
+  const menuOpen = dropdownOpen || contextOpen
+  const button = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      data-workspace-path={node.entry.relPath}
+      aria-label={node.entry.name}
+      aria-current={selected ? "true" : undefined}
+      aria-busy={node.loading || undefined}
+      onClick={onSelect}
       className={cn(
-        compactItemTypography,
-        compactItemStates,
-        "group/tree-row relative flex min-w-0 items-center rounded-xl ring-ring ring-inset focus-within:bg-highlight has-[[data-workspace-path]:focus-visible]:ring-2",
-        (dropdownOpen || contextOpen) && "bg-highlight text-foreground"
+        "w-full min-w-0 justify-start font-normal group-hover/tree-row:bg-highlight",
+        hasActions && "pr-9",
+        selected || menuOpen
+          ? "bg-accent text-accent-foreground aria-expanded:bg-accent"
+          : "aria-expanded:bg-transparent aria-expanded:group-hover/tree-row:bg-highlight"
       )}
     >
-      <button
-        type="button"
-        data-workspace-path={node.entry.relPath}
-        aria-label={node.entry.name}
-        aria-expanded={node.entry.isDir ? node.expanded : undefined}
-        className={cn(
-          compactItemStyles,
-          "relative flex h-7.5 min-w-0 flex-1 items-center pr-1 text-left outline-none"
-        )}
-        onClick={() => {
-          onSelect()
-          if (node.entry.isDir) onToggle()
-        }}
-      >
-        <span
-          aria-hidden="true"
-          className="absolute -left-3.5 flex size-3 items-center justify-center text-muted-foreground [&_svg]:size-3"
-        >
-          {node.entry.isDir &&
-            (node.loading ? (
-              <Spinner />
-            ) : node.expanded ? (
-              <ChevronDownIcon />
-            ) : (
-              <ChevronRightIcon />
-            ))}
-        </span>
-        <WorkspaceEntryIcon entry={node.entry} expanded={node.expanded} />
-        <span className="min-w-0 truncate" title={node.entry.name}>
-          {node.entry.name}
-        </span>
-      </button>
+      {node.entry.isDir ? (
+        <>
+          {node.loading ? (
+            <Spinner />
+          ) : (
+            <ChevronRightIcon className="transition-transform group-data-panel-open/button:rotate-90 motion-reduce:transition-none" />
+          )}
+          <FolderIcon />
+        </>
+      ) : (
+        <FileIcon />
+      )}
+      <span className="min-w-0 truncate" title={node.entry.name}>
+        {node.entry.name}
+      </span>
+    </Button>
+  )
+
+  const rowContent = (
+    <div className="group/tree-row relative min-w-0">
+      {node.entry.isDir ? <CollapsibleTrigger render={button} /> : button}
+
+      {/* A sibling control: opening a menu never toggles the folder. */}
       {hasActions && (
         <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
           <Tooltip>
@@ -169,9 +167,9 @@ function FileTreeRow({
                     <Button type="button" variant="ghost" size="icon-xs" />
                   }
                   disabled={disabled}
-                  aria-label={`${node.entry.name} 的${actionLabel}`}
+                  aria-label={`${actionLabel}: ${node.entry.name}`}
                   className={cn(
-                    "mr-1 shrink-0 text-muted-foreground",
+                    "absolute top-1/2 right-1 -translate-y-1/2",
                     "group-focus-within/tree-row:opacity-100 group-hover/tree-row:opacity-100",
                     !dropdownOpen &&
                       !contextOpen &&
@@ -195,10 +193,12 @@ function FileTreeRow({
       )}
     </div>
   )
-  if (!hasActions) return row
+
+  if (!hasActions) return rowContent
+
   return (
     <ContextMenu open={contextOpen} onOpenChange={setContextOpen}>
-      <ContextMenuTrigger render={row} />
+      <ContextMenuTrigger render={rowContent} />
       <ContextMenuContent className="min-w-44">
         <EntryMenuItems
           isDir={node.entry.isDir}
@@ -208,6 +208,84 @@ function FileTreeRow({
         />
       </ContextMenuContent>
     </ContextMenu>
+  )
+}
+
+function FileTreeNode({
+  node,
+  selectedRel,
+  onSelect,
+  onToggle,
+  onRetry,
+  onEntryAction,
+  actionsDisabled,
+  depth,
+}: {
+  node: WorkspaceTreeNode
+  selectedRel: string | null
+  onSelect: (r: string) => void
+  onToggle: (r: string) => void
+  onRetry: (r: string) => void
+  onEntryAction: (a: WorkspaceEntryAction, r: string) => void
+  actionsDisabled: boolean
+  depth: number
+}) {
+  const row = (
+    <FileTreeRow
+      node={node}
+      selected={selectedRel === node.entry.relPath}
+      disabled={actionsDisabled}
+      onSelect={() => onSelect(node.entry.relPath)}
+      onAction={(action) => onEntryAction(action, node.entry.relPath)}
+    />
+  )
+  if (!node.entry.isDir) return row
+
+  return (
+    <Collapsible
+      open={node.expanded}
+      onOpenChange={() => onToggle(node.entry.relPath)}
+      className="min-w-0"
+    >
+      {row}
+      <CollapsibleContent>
+        <div className="ml-4 flex min-w-0 flex-col">
+          {node.error && (
+            <div
+              role="alert"
+              className="flex items-center gap-2 px-2.5 py-1 text-xs text-destructive"
+            >
+              <AlertCircleIcon className="size-3.5 shrink-0" />
+              <span className="min-w-0 break-words">{node.error}</span>
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => onRetry(node.entry.relPath)}
+              >
+                Retry
+              </Button>
+            </div>
+          )}
+          {node.children && (
+            <WorkspaceFileTree
+              nodes={node.children}
+              selectedRel={selectedRel}
+              onSelect={onSelect}
+              onToggle={onToggle}
+              onRetry={onRetry}
+              onEntryAction={onEntryAction}
+              actionsDisabled={actionsDisabled}
+              depth={depth + 1}
+            />
+          )}
+          {node.truncated && (
+            <p className="px-2.5 py-1 text-xs text-muted-foreground">
+              Showing the first 200 items and newly created items.
+            </p>
+          )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
@@ -223,63 +301,24 @@ export function WorkspaceFileTree({
 }: TreeProps) {
   if (!nodes.length) return null
   return (
-    <ul
-      role={depth === 0 ? "tree" : "group"}
-      aria-label={depth === 0 ? "任务文件树" : undefined}
-      className={cn(
-        compactListStyles,
-        "min-w-0",
-        depth === 0 ? "pl-4" : "ml-4 border-l border-border/80 pl-1"
-      )}
+    <div
+      role={depth === 0 ? "group" : undefined}
+      aria-label={depth === 0 ? "Workspace files" : undefined}
+      className="flex min-w-0 flex-col"
     >
       {nodes.map((node) => (
-        <li
+        <FileTreeNode
           key={node.entry.relPath}
-          role="treeitem"
-          className="flex min-w-0 flex-col gap-0.5"
-          aria-selected={selectedRel === node.entry.relPath}
-          aria-expanded={node.entry.isDir ? node.expanded : undefined}
-        >
-          <FileTreeRow
-            node={node}
-            selected={selectedRel === node.entry.relPath}
-            disabled={actionsDisabled}
-            onSelect={() => onSelect(node.entry.relPath)}
-            onToggle={() => onToggle(node.entry.relPath)}
-            onAction={(action) => onEntryAction(action, node.entry.relPath)}
-          />
-          {node.error && (
-            <div className="flex items-center gap-1 py-1 text-[11px] text-destructive">
-              <AlertCircleIcon className="size-3 shrink-0" />
-              <span>{node.error}</span>
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={() => onRetry(node.entry.relPath)}
-              >
-                重试
-              </Button>
-            </div>
-          )}
-          {node.expanded && node.children && (
-            <WorkspaceFileTree
-              nodes={node.children}
-              selectedRel={selectedRel}
-              onSelect={onSelect}
-              onToggle={onToggle}
-              onRetry={onRetry}
-              onEntryAction={onEntryAction}
-              actionsDisabled={actionsDisabled}
-              depth={depth + 1}
-            />
-          )}
-          {node.expanded && node.truncated && (
-            <p className="py-1 text-[11px] text-muted-foreground">
-              列表已截断：仅显示前 200 项及本次新建项。
-            </p>
-          )}
-        </li>
+          node={node}
+          selectedRel={selectedRel}
+          onSelect={onSelect}
+          onToggle={onToggle}
+          onRetry={onRetry}
+          onEntryAction={onEntryAction}
+          actionsDisabled={actionsDisabled}
+          depth={depth}
+        />
       ))}
-    </ul>
+    </div>
   )
 }

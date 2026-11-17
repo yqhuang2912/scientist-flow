@@ -9,9 +9,9 @@ Do not add a second theme or change chat behavior for visual consistency.
 
 | Element | Scale |
 | --- | --- |
-| Menu, navigation, file row | 30 px minimum height; 13 px / 20 px text; weight 500 |
+| Menu, navigation | 30 px minimum height; 13 px / 20 px text; weight 500 |
 | Row inset / icon-to-label gap | 10 px horizontal / 8 px |
-| Adjacent items | 2 px gap, including recursive file-tree levels |
+| Adjacent items | 2 px gap; file-tree levels use the official gapless stack |
 | Action icon | 16 px; Lucide's default 2 px stroke |
 | Small row action | 24 px target; 16 px icon |
 | Standalone icon button | Square target with `rounded-full` in hover, selected, pressed and focus states |
@@ -23,7 +23,7 @@ Do not add a second theme or change chat behavior for visual consistency.
 | Supporting form text | 12 px |
 
 `components/ui/compact-styles.ts` owns row typography, geometry, list spacing,
-and navigation states. Settings, sidebar, file tree, bot selection, generic
+and navigation states. Settings, sidebar, bot selection, generic
 items, dropdown, context, menubar, select, combobox and command items use it.
 Buttons share the typography. Keep their native
 selection, disabled, focus and destructive states. Do not override spacing at
@@ -62,8 +62,12 @@ remain task titles; they do not inherit a member bot's job.
 
 Chat messages use a 28 px avatar on both sides: the responding bot on the left,
 and a neutral default user avatar on the right. Direct chats use their bot's
-avatar too. Each message has a separate 28 px identity line aligned with its
-avatar, followed by the body with a 4 px gap. Bot names use 13 px medium text
+avatar too. Each message has a separate 28 px identity line containing its
+avatar, followed by the body with an 8 px gap. The body spans the identity
+line's full width: its outer edge aligns with the avatar, not the name column.
+Assistant body content has a 4 px optical inset to match the visible avatar
+and copy glyphs inside their containers.
+Bot names use 13 px medium text
 and their job uses the shared muted 12 px `BotName` treatment. Message body text
 on both sides is also 13 px, with relaxed line spacing for paragraphs and lists.
 User messages
@@ -71,6 +75,35 @@ show only `You` in that line until a user profile is available. Keep user
 identity right-aligned and bot identity left-aligned with their content column.
 Addressed bots appear inline as muted `@Name` text, without a
 portrait, badge border or background. Leave 10 px before the message body.
+The mention and first paragraph share inline text flow, so wrapped lines
+return to the mention's left edge instead of retaining a mention-width indent.
+
+Chat presentation composes the official shadcn AI Elements primitives:
+`MessageScroller` owns following/anchoring/jump-to-latest, `Message` owns the
+identity row, and `Bubble` owns the user surface. The assistant answer sits
+directly in `MessageContent`, with clipboard actions in `MessageFooter`. Consecutive reasoning,
+tool and source parts form one compact `Trace`; text, files, step boundaries
+and approval requests split that run. Preserve the stream's original order.
+Reasoning opens while streaming and closes when finished unless the reader
+explicitly toggles it. Tool results are collapsed; errors open for inspection.
+Approvals use a separate review surface with Deny / Approve actions. Render
+only events supplied by the backend; do not invent thoughts or progress steps.
+Markdown, code, math and Mermaid share the existing Streamdown renderer, with
+its Tailwind sources and KaTeX stylesheet loaded in `app/globals.css`.
+Chat code uses 13 px Geist Mono, matching the body size. Follow the official
+Base Message example: a muted rounded surface, language label, line numbers
+and copy button, with no separate tinted toolbar. Markdown fences and tool
+values share `components/ui/code-block.tsx`. `ChatMarkdown` handles highlighting;
+Mermaid keeps its installed renderer and matches the code surface. Its 13 px
+labels follow live theme tokens, including in fullscreen.
+See [chat presentation](./chat-presentation.md) for the runtime boundary.
+
+The composer directly uses shadcn `InputGroup` with its muted variant, a
+multiline textarea, a `DropdownMenuRadioGroup` bot selector and circular
+send/stop control. The textarea uses 13 px / 20 px typography with 12 px insets
+and grows to 192 px before scrolling. Only a disabled text control can dim the
+group. Preserve IME composition, newline entry, pending state and newer drafts.
+Do not restore the removed AI Elements wrappers or a second chat theme.
 
 The neutral light palette is approximately white `#ffffff`, ink `#0a0a0a`,
 muted surface `#f5f5f5`, secondary text `#737373`, and border `#e5e5e5`.
@@ -80,24 +113,24 @@ theme values. File type accents are the six `file-*` semantic tokens in
 
 ## Workspace alignment
 
-```text
-v [folder] docs                         […]
-  │ [text] notes.md                     […]
-  │ > [folder] references               […]
-  │   │ [text] sources.bib              […]
-  [code] analysis.py                    […]
-```
+Follow the official [Base File Tree](https://ui.shadcn.com/docs/ai-elements/base/file-tree)
+composition: folders are controlled `Collapsible` components with
+`CollapsibleTrigger render={<Button variant="ghost" size="sm" />}`, and files
+are ordinary ghost Buttons. Use the example's normal text weight, monochrome
+`FolderIcon` / `FileIcon`, and a 16 px (`ml-4`) child indentation. Do not add
+colored extension/zone icons, guide lines, a file disclosure spacer, custom row
+geometry or a separate file-tree theme.
 
-Each recursive list indents the whole row by 21 px and draws a thin guide at its
-parent icon's center. The disclosure gutter sits outside the hover surface.
-The file/folder icon, name and trailing action share one rounded row background.
-The main click area and action menu button are siblings. Root-level files and
-folders have the same icon/text columns; trailing menus align at the right edge.
-Long names truncate with a title; full paths in operation dialogs wrap.
+The main button covers the row surface; the trailing menu is a sibling control
+positioned at the right edge, never a nested button. Preserve selection with
+`aria-current`, while the Collapsible trigger owns expanded state and keyboard
+activation. The root is a labelled group of disclosure buttons, not an ARIA
+tree without its required arrow-key navigation. Long names truncate with a title.
 
-The menu action remains accessible on touch devices and on keyboard focus.
-Opening a menu never toggles a directory. Selected, hovered and menu-open rows
-use the same subtle foreground overlay; a visible keyboard focus ring remains.
+Menu actions remain available on touch devices and keyboard focus. Menus never
+toggle a directory. Preserve row-wide hover, standard focus rings, controlled
+expansion, lazy reads, retries, truncation notices and row-bound operation targets.
+Expanded empty directories render no placeholder.
 
 ## Dialogs
 

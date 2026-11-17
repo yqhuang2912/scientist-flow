@@ -1,0 +1,100 @@
+/* Markdown uses the same Base UI CodeBlock as tool input/output. */
+.chat-markdown [data-slot="code-block"] {
+  margin-block: 16px;
+}
+.dark .chat-markdown [data-slot="code-block-line-content"] span {
+  color: var(--shiki-dark) !important;
+}
+
+/* Mermaid has no Base UI renderer. Keep the streaming plugin and match the
+   official CodeBlock surface around it, including its fullscreen controls. */
+.chat-markdown [data-streamdown="mermaid-block"] {
+  margin-block: 16px;
+  gap: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-2xl);
+  background: var(--muted);
+  padding: 0;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 5%, transparent);
+}
+.chat-markdown [data-streamdown="mermaid-block"] > div:first-child {
+  min-height: 40px;
+  padding: 12px 96px 0 16px;
+  font:
+    500 13px/20px var(--font-sans),
+    sans-serif;
+}
+.chat-markdown [data-streamdown="mermaid-block"] > div:first-child > span {
+  margin: 0;
+  color: var(--foreground);
+  font-family: inherit;
+}
+.chat-markdown
+  [data-streamdown="mermaid-block"]
+  > div:has(> [data-streamdown$="-actions"]) {
+  top: 10px;
+  right: 12px;
+}
+.chat-markdown [data-streamdown="mermaid-block-actions"] {
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+.chat-markdown [data-streamdown="mermaid-block"] > div:last-child {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 16px 12px;
+}
+
+/* The plugin places its pan/zoom control group directly in the viewport. */
+.chat-markdown [data-streamdown="mermaid"] > div > div:has(> button) {
+  right: 0;
+  bottom: 0;
+  left: auto;
+  flex-direction: row;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: var(--muted);
+  backdrop-filter: none;
+}
+
+.chat-markdown [data-streamdown="mermaid-block"] button:has(> svg),
+[data-streamdown="mermaid-fullscreen"] button:has(> svg) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--muted-foreground);
+}
+
+.chat-markdown
+  [data-streamdown="mermaid-block"]
+  button:has(> svg):hover:not(:disabled),
+[data-streamdown="mermaid-fullscreen"] button:has(> svg):hover:not(:disabled) {
+  background: var(--highlight);
+  color: var(--foreground);
+}
+
+.chat-markdown
+  [data-streamdown="mermaid-block"]
+  button:has(> svg):focus-visible,
+[data-streamdown="mermaid-fullscreen"] button:has(> svg):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.chat-markdown [data-streamdown="mermaid-block"] button:has(> svg) svg,
+[data-streamdown="mermaid-fullscreen"] button:has(> svg) svg {
+  width: 14px;
+  height: 14px;
+}
