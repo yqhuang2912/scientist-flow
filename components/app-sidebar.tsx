@@ -2,13 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { nanoid } from "nanoid"
-import {
-  PlusIcon,
-  SearchIcon,
-  SettingsIcon,
-  PanelLeftIcon,
-  DiamondIcon,
-} from "lucide-react"
+import { PlusIcon, SearchIcon, SettingsIcon, DiamondIcon } from "lucide-react"
 import { usePathname, useRouter } from "next/navigation"
 
 import { BotDialog } from "@/components/bot-dialog"
@@ -20,7 +14,6 @@ import { TaskDialog } from "@/components/task-dialog"
 import { SettingsDialog } from "@/components/settings-dialog"
 import type { BotSummary, SidebarChat } from "@/queries/bots"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
 import {
   Command,
   CommandDialog,
@@ -43,9 +36,10 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar"
-import { Kbd, KbdGroup } from "@/components/ui/kbd"
+import { Kbd } from "@/components/ui/kbd"
 import {
   Tooltip,
   TooltipContent,
@@ -58,7 +52,7 @@ function isMac() {
 }
 
 function BrandHeader() {
-  const { toggleSidebar, state, isMobile } = useSidebar()
+  const { state, isMobile } = useSidebar()
   const collapsed = !isMobile && state === "collapsed"
 
   return (
@@ -82,18 +76,12 @@ function BrandHeader() {
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Toggle sidebar"
-              onClick={toggleSidebar}
-              className="shrink-0 text-muted-foreground hover:text-foreground"
+            <SidebarTrigger
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              className="shrink-0"
             />
           }
-        >
-          <PanelLeftIcon />
-        </TooltipTrigger>
+        />
         <TooltipContent side="right">
           {collapsed ? "Expand sidebar" : "Collapse sidebar"}
         </TooltipContent>
@@ -193,10 +181,12 @@ export function AppSidebar({
                 <span className="flex-1 truncate text-left group-data-[collapsible=icon]:hidden">
                   Search
                 </span>
-                <KbdGroup className="ml-auto gap-0 group-data-[collapsible=icon]:hidden">
-                  <Kbd>{mac ? "⌘" : "Ctrl"}</Kbd>
-                  <Kbd>K</Kbd>
-                </KbdGroup>
+                <Kbd
+                  variant="plain"
+                  className="ml-auto shrink-0 group-data-[collapsible=icon]:hidden"
+                >
+                  {mac ? "⌘ K" : "Ctrl K"}
+                </Kbd>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -204,7 +194,7 @@ export function AppSidebar({
 
         <SidebarContent>
           <SidebarGroup className="gap-0 px-2 pt-1 group-data-[collapsible=icon]:pt-0">
-            <SidebarGroupLabel className="h-7.5 gap-1 rounded-xl px-2.5 text-[11px] font-medium text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">
+            <SidebarGroupLabel className="h-7.5 gap-1 rounded-xl px-1.5 text-[11px] font-medium text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">
               Recents
             </SidebarGroupLabel>
             <SidebarGroupContent>
@@ -252,7 +242,12 @@ export function AppSidebar({
                           </span>
                         )}
                       </span>
-                      <time className="shrink-0 text-[11px] font-normal text-muted-foreground group-data-[collapsible=icon]:hidden">
+                      <time
+                        dateTime={chat.lastMessageAt}
+                        title={chat.lastMessageAtTitle}
+                        aria-label={chat.lastMessageAtTitle}
+                        className="shrink-0 text-[11px] font-normal whitespace-nowrap text-muted-foreground tabular-nums group-data-[collapsible=icon]:hidden"
+                      >
                         {chat.lastMessageAtLabel}
                       </time>
                     </SidebarMenuButton>
@@ -359,7 +354,13 @@ export function AppSidebar({
                     )}
                   </span>
                   <CommandShortcut className="shrink-0 whitespace-nowrap">
-                    {chat.lastMessageAtLabel}
+                    <time
+                      dateTime={chat.lastMessageAt}
+                      title={chat.lastMessageAtTitle}
+                      aria-label={chat.lastMessageAtTitle}
+                    >
+                      {chat.lastMessageAtLabel}
+                    </time>
                   </CommandShortcut>
                 </CommandItem>
               ))}

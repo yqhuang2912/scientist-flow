@@ -1,6 +1,6 @@
 import "server-only"
 
-import { formatDistanceToNow } from "date-fns"
+import { format, isSameDay, isSameYear } from "date-fns"
 import { asc, desc, eq } from "drizzle-orm"
 
 import { bots, chatMembers, chats } from "@/db/schema"
@@ -16,7 +16,9 @@ export interface SidebarChat {
   kind: "direct" | "group"
   name: string
   lastMessagePreview: string
+  lastMessageAt: string
   lastMessageAtLabel: string
+  lastMessageAtTitle: string
   bots: Pick<BotSummary, "id" | "name" | "avatar" | "job">[]
   bot: Pick<BotSummary, "id" | "name" | "avatar" | "job"> | null
 }
@@ -40,6 +42,7 @@ export async function getUserChats(): Promise<SidebarChat[]> {
     .orderBy(desc(chats.lastMessageAt), desc(chatMembers.joinedAt))
 
   const chatMap = new Map<string, SidebarChat>()
+  const now = new Date()
 
   for (const row of chatRows) {
     const memberBot =
@@ -69,9 +72,16 @@ export async function getUserChats(): Promise<SidebarChat[]> {
       kind: row.chatKind,
       name: row.chatName ?? memberBot?.name ?? "Untitled chat",
       lastMessagePreview: row.lastMessagePreview ?? "",
-      lastMessageAtLabel: formatDistanceToNow(row.lastMessageAt, {
-        addSuffix: false,
-      }),
+      lastMessageAt: row.lastMessageAt.toISOString(),
+      lastMessageAtLabel: format(
+        row.lastMessageAt,
+        isSameDay(row.lastMessageAt, now)
+          ? "HH:mm"
+          : isSameYear(row.lastMessageAt, now)
+            ? "MMM d"
+            : "yyyy-MM-dd"
+      ),
+      lastMessageAtTitle: format(row.lastMessageAt, "yyyy-MM-dd HH:mm xxx"),
       bots: memberBots,
       bot: memberBot,
     })

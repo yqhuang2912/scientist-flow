@@ -44,6 +44,13 @@ occupy a 20 px content line using 4 px negative vertical margins. This keeps
 single-line items at 30 px including their original padding. Multiline items
 still grow for text. Center avatars in the collapsed 32 px action target.
 Bot portraits are not navigation icons and must not inherit their 16 px size.
+Expanded sidebar items use a 6 px left inset, placing icons and portraits 4 px
+closer to the left edge; collapsed items stay centered. The header uses the
+shared sidebar trigger with the standard foreground and circular ghost
+button surface. Search's keyboard hint uses plain muted `Kbd` text with no keycap
+background or border. Recents and chat search
+show absolute activity times: `HH:mm` today, `MMM d` on other dates this year,
+and `yyyy-MM-dd` in other years. Hover reveals the full date, time and UTC offset.
 The bot editor keeps its larger 40 px avatar preview.
 Readable message text, code, and full-size bot portraits keep their own content
 scale. Secondary descriptions use 12 px normal-weight
@@ -52,6 +59,11 @@ Bot names in the chat header, task picker and chat search use `BotName`: the job
 follows the name on the same baseline in muted 12 px text. Keep the row height,
 truncate long descriptions, and expose the full identity on hover. Task titles
 remain task titles; they do not inherit a member bot's job.
+
+Chat messages use a 28 px avatar on both sides: the responding bot on the left,
+and a neutral default user avatar on the right. Direct chats use their bot's
+avatar too. Addressed bots appear inline as muted `@Name` text, without a
+portrait, badge border or background. Leave 10 px before the message body.
 
 The neutral light palette is approximately white `#ffffff`, ink `#0a0a0a`,
 muted surface `#f5f5f5`, secondary text `#737373`, and border `#e5e5e5`.

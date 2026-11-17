@@ -7,7 +7,7 @@ import {
   useTriggerChatTransport,
 } from "@trigger.dev/sdk/chat/react"
 import type { UIMessage } from "ai"
-import { ArrowRightIcon } from "lucide-react"
+import { ArrowRightIcon, UserRoundIcon } from "lucide-react"
 import { useRouter } from "next/navigation"
 
 import {
@@ -42,7 +42,7 @@ import {
 } from "@/actions/chat"
 import type { chatAgent } from "@/trigger/chat"
 import type { ChatWithBot } from "@/queries/chats"
-import { Badge } from "@/components/ui/badge"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { ChatAvatar } from "@/components/chat-avatar"
 import { compactChatAvatarStyles } from "@/components/ui/compact-styles"
 import { SelectGroup } from "@/components/ui/select"
@@ -68,20 +68,28 @@ function AssistantMessageRow({
   )
 }
 
-function UserBotBadge({ bot }: { bot: ChatBot }) {
+function UserMessageRow({ children }: { children: React.ReactNode }) {
   return (
-    <Badge
-      variant="outline"
-      className="max-w-40 shrink-0 gap-1.5 overflow-visible px-1.5 pr-2 text-xs"
+    <div className="flex min-w-0 items-start justify-end gap-3">
+      {children}
+      <Avatar className="mt-1 size-7" role="img" aria-label="User avatar">
+        <AvatarFallback>
+          <UserRoundIcon className="size-4" aria-hidden />
+        </AvatarFallback>
+      </Avatar>
+    </div>
+  )
+}
+
+function UserBotMention({ bot }: { bot: ChatBot }) {
+  return (
+    <span
+      className="inline-flex max-w-40 shrink-0 items-baseline gap-0.5 text-muted-foreground"
+      title={`@${bot.name}`}
     >
-      <ChatAvatar
-        seed={bot.avatar}
-        animated
-        alt={`${bot.name} avatar`}
-        className={compactChatAvatarStyles}
-      />
+      <span className="relative -top-px">@</span>
       <span className="min-w-0 truncate">{bot.name}</span>
-    </Badge>
+    </span>
   )
 }
 
@@ -96,9 +104,10 @@ function MessageParts({
   bots: ChatBot[]
   isGroup: boolean
 }) {
-  const botId =
-    isGroup && message.role === "assistant" ? getMessageBotId(message) : null
-  const bot = botId ? bots.find((candidate) => candidate.id === botId) : null
+  const botId = getMessageBotId(message)
+  const bot = isGroup
+    ? bots.find((candidate) => candidate.id === botId)
+    : bots[0]
   const userBotId =
     isGroup && message.role === "user" ? getMessageBotId(message) : null
   const userBot = userBotId
@@ -154,7 +163,7 @@ function MessageParts({
 
   return (
     <Message from={message.role}>
-      {message.role === "assistant" && isGroup ? (
+      {message.role === "assistant" ? (
         <AssistantMessageRow bot={bot}>
           <MessageContent>
             {message.parts.map((part, index) => {
@@ -187,55 +196,54 @@ function MessageParts({
           </MessageContent>
         </AssistantMessageRow>
       ) : (
-        <MessageContent>
-          {message.parts.map((part, index) => {
-            if (part.type === "text") {
-              if (userBot && index === firstTextPartIndex) {
-                return (
-                  <div
-                    key={`${message.id}-${index}`}
-                    className="flex min-w-0 items-start gap-1.5"
-                  >
-                    <span aria-hidden className="text-muted-foreground">
-                      @
-                    </span>
-                    <UserBotBadge bot={userBot} />
-                    <MessageResponse
-                      className="min-w-0"
-                      isAnimating={isStreaming}
+        <UserMessageRow>
+          <MessageContent>
+            {message.parts.map((part, index) => {
+              if (part.type === "text") {
+                if (userBot && index === firstTextPartIndex) {
+                  return (
+                    <div
+                      key={`${message.id}-${index}`}
+                      className="flex min-w-0 items-start gap-2.5"
                     >
-                      {part.text}
-                    </MessageResponse>
-                  </div>
+                      <UserBotMention bot={userBot} />
+                      <MessageResponse
+                        className="min-w-0"
+                        isAnimating={isStreaming}
+                      >
+                        {part.text}
+                      </MessageResponse>
+                    </div>
+                  )
+                }
+
+                return (
+                  <MessageResponse
+                    key={`${message.id}-${index}`}
+                    isAnimating={isStreaming}
+                  >
+                    {part.text}
+                  </MessageResponse>
                 )
               }
 
+              const handoffLabel = getHandoffLabel(part)
+              if (!handoffLabel) {
+                return null
+              }
+
               return (
-                <MessageResponse
+                <div
                   key={`${message.id}-${index}`}
-                  isAnimating={isStreaming}
+                  className="flex items-center gap-2 text-sm text-muted-foreground"
                 >
-                  {part.text}
-                </MessageResponse>
+                  <ArrowRightIcon className="size-4" />
+                  {handoffLabel}
+                </div>
               )
-            }
-
-            const handoffLabel = getHandoffLabel(part)
-            if (!handoffLabel) {
-              return null
-            }
-
-            return (
-              <div
-                key={`${message.id}-${index}`}
-                className="flex items-center gap-2 text-sm text-muted-foreground"
-              >
-                <ArrowRightIcon className="size-4" />
-                {handoffLabel}
-              </div>
-            )
-          })}
-        </MessageContent>
+            })}
+          </MessageContent>
+        </UserMessageRow>
       )}
     </Message>
   )
