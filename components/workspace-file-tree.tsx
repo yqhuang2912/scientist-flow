@@ -127,8 +127,9 @@ function FileTreeRow({
   const row = (
     <div
       className={cn(
-        "group/row flex min-w-0 items-center rounded hover:bg-accent",
-        selected && "bg-accent text-accent-foreground"
+        "group/row flex min-w-0 items-center rounded ring-ring ring-inset focus-within:bg-accent hover:bg-accent has-[[data-workspace-path]:focus-visible]:ring-2",
+        (selected || dropdownOpen || contextOpen) &&
+          "bg-accent text-accent-foreground"
       )}
     >
       <button
@@ -136,7 +137,7 @@ function FileTreeRow({
         data-workspace-path={node.entry.relPath}
         aria-label={node.entry.name}
         aria-expanded={node.entry.isDir ? node.expanded : undefined}
-        className="flex min-w-0 flex-1 items-center gap-1 rounded py-1 pr-1 text-left text-xs outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring"
+        className="flex min-w-0 flex-1 items-center gap-1 rounded py-1 pr-1 text-left text-xs outline-none"
         style={{ paddingLeft: depth * 12 + 4 }}
         onClick={() => {
           onSelect()
@@ -227,15 +228,7 @@ export function WorkspaceFileTree({
   actionsDisabled,
   depth = 0,
 }: TreeProps) {
-  if (!nodes.length)
-    return (
-      <p
-        className="py-1 text-[11px] text-muted-foreground"
-        style={{ paddingLeft: depth * 12 + 8 }}
-      >
-        空文件夹
-      </p>
-    )
+  if (!nodes.length) return null
   return (
     <ul
       role={depth === 0 ? "tree" : "group"}

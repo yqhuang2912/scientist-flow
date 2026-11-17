@@ -148,9 +148,7 @@ function ResearchWorkspaceInner({
     if (noticeToast.current) toast.close(noticeToast.current)
     noticeToast.current = toast.add({
       title,
-      description: description ? (
-        <span className="break-all">{description}</span>
-      ) : undefined,
+      description,
       type,
       timeout: type === "error" ? 5000 : 3000,
     })
