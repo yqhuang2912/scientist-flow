@@ -11,7 +11,10 @@
     "start": "next start",
     "lint": "eslint",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:server && npm run test:client",
+    "test:server": "tsx --conditions react-server --test \"tests/*.server.test.ts\"",
+    "test:client": "tsx --test \"tests/!(*.server).test.ts\""
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.176",
@@ -84,6 +87,7 @@
     "prettier": "^3.9.10",
     "prettier-plugin-tailwindcss": "^0.8.1",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }
