@@ -36,7 +36,7 @@ export function ChatHeader({
 
   return (
     <>
-      <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-3 text-foreground sm:px-4">
+      <header className="dashboard-header justify-between gap-2 bg-background px-3 text-foreground sm:px-4">
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <SidebarTrigger className="shrink-0 md:hidden" />
           {chat.kind === "group" ? (

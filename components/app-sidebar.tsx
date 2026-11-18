@@ -58,7 +58,7 @@ function BrandHeader() {
   return (
     <div
       className={cn(
-        "flex h-11 shrink-0 items-center px-2.5",
+        "dashboard-header px-2.5",
         collapsed ? "justify-center" : "justify-between"
       )}
     >

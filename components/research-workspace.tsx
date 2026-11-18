@@ -493,7 +493,10 @@ function ResearchWorkspaceInner({
 
   return (
     <div ref={container} className="flex h-full min-w-0 flex-col">
-      <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border px-3">
+      <header
+        aria-label="Workspace"
+        className="dashboard-header justify-between gap-2 px-3"
+      >
         <div className="flex min-w-0 items-center gap-2">
           {onBack && (
             <Tooltip>
@@ -513,19 +516,9 @@ function ResearchWorkspaceInner({
               <TooltipContent>Back to chat</TooltipContent>
             </Tooltip>
           )}
-          <div className="flex min-w-0 flex-col gap-0">
-            <span className="text-sm leading-5 font-medium text-foreground">
-              Workspace
-            </span>
-            {!statusLoading && isReady && (
-              <p
-                className="truncate text-[11px] leading-tight text-muted-foreground"
-                title={chatId}
-              >
-                {chatId}
-              </p>
-            )}
-          </div>
+          <span className="truncate text-sm leading-5 font-medium text-foreground">
+            Workspace
+          </span>
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
           <Tooltip>
@@ -629,7 +622,7 @@ function ResearchWorkspaceInner({
             </Tooltip>
           ))}
         </div>
-      </div>
+      </header>
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
         {statusLoading && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">

@@ -197,6 +197,10 @@
   }
 }
 
+@utility dashboard-header {
+  @apply flex h-11 shrink-0 items-center border-b border-border;
+}
+
 /* Typography roles are opt-in for subsequent component-family passes. They
    reuse this theme's scale and do not override existing page/editor selectors.
    Evidence and adoption status: docs/visual-foundation.md. */

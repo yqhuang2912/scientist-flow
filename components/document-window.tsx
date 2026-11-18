@@ -10,6 +10,8 @@ import {
 } from "react"
 import {
   FileTextIcon,
+  EyeIcon,
+  PencilIcon,
   Maximize2Icon,
   Minimize2Icon,
   MinusIcon,
@@ -32,6 +34,12 @@ import {
   AlertDialogDescription,
   AlertDialogFooter,
 } from "@/components/ui/alert-dialog"
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+  PopoverTitle,
+} from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { DocumentEditor } from "@/components/document-editor"
@@ -154,6 +162,9 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
   const small = viewport.width <= 640 || viewport.height <= 400
   const bounds = maximized || small ? { x: 0, y: 0, ...viewport } : rect
   const name = doc.relativePath.split("/").at(-1)!
+  const parentPath = doc.relativePath.slice(0, -name.length)
+  const identity = `${doc.taskName} / ${doc.relativePath}`
+  const compact = bounds.width < 560
   const language = workspaceFileLanguage(doc.relativePath)
   const policy = workspaceOpenPolicy(doc.relativePath)
   // Markdown keeps a preview of its own: rendering it in place loses the
@@ -279,7 +290,10 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
           aria-label="File window controls"
           tabIndex={0}
           aria-describedby="document-move-help"
-          className="flex h-11 shrink-0 touch-none items-center gap-2 border-b px-3 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          className={cn(
+            "flex h-11 shrink-0 touch-none items-center border-b outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+            compact ? "gap-1 px-1.5" : "gap-2 px-3"
+          )}
           onPointerDown={(event) => beginPointer(event, false)}
           {...pointerHandlers}
           onKeyDown={(event) => {
@@ -313,17 +327,34 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
             )
           }}
         >
-          <FileTextIcon
-            className="size-4 shrink-0 text-muted-foreground"
-            aria-hidden
-          />
-          <span
-            id="document-title"
-            className="pointer-events-none flex min-w-0 flex-1 items-center gap-1 text-[13px] leading-[1.5] font-medium select-none"
-          >
-            <span className="pointer-events-auto truncate select-text" title={name}>
-              {name}
-            </span>
+          <div className="pointer-events-none flex min-w-0 flex-1 items-center gap-1">
+            <Popover>
+              <PopoverTrigger
+                render={<Button variant="ghost" size="compact" />}
+                className="pointer-events-auto max-w-full min-w-0 shrink justify-start"
+                aria-label={identity}
+                id="document-title"
+              >
+                <FileTextIcon aria-hidden />
+                {!compact && (
+                  <span className="max-w-[45%] truncate text-muted-foreground">
+                    {doc.taskName} / {parentPath}
+                  </span>
+                )}
+                <span className="min-w-0 truncate">{name}</span>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                className="max-w-[calc(100vw-1rem)]"
+              >
+                <PopoverTitle className="wrap-anywhere">
+                  {doc.taskName}
+                </PopoverTitle>
+                <p className="wrap-anywhere text-muted-foreground">
+                  {doc.relativePath}
+                </p>
+              </PopoverContent>
+            </Popover>
             {dirty && (
               <span
                 className="shrink-0 text-muted-foreground"
@@ -332,44 +363,12 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
                 •
               </span>
             )}
-          </span>
+          </div>
           <span id="document-move-help" className="sr-only">
             Drag the blank title bar to move. With this toolbar focused, use
             arrow keys to move or Shift and arrow keys to resize.
           </span>
-          <div className="ml-auto flex shrink-0 gap-0.5">
-            <WindowButton
-              label="Minimize file"
-              onClick={() => {
-                setMinimized(true)
-                requestAnimationFrame(() => restoreRef.current?.focus())
-              }}
-            >
-              <MinusIcon />
-            </WindowButton>
-            <WindowButton
-              label={maximized ? "Restore window size" : "Maximize file"}
-              disabled={small}
-              onClick={() => setMaximized((value) => !value)}
-            >
-              {maximized ? <Minimize2Icon /> : <Maximize2Icon />}
-            </WindowButton>
-            <WindowButton
-              label="Close file"
-              disabled={doc.saving || !!state.deletion}
-              onClick={session.requestClose}
-            >
-              <XIcon />
-            </WindowButton>
-          </div>
-        </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-1">
-          <p className="max-h-12 min-w-0 flex-[1_0_min(100%,12rem)] overflow-y-auto text-xs leading-4 wrap-anywhere text-muted-foreground">
-            <span className="font-medium">{doc.taskName}</span>
-            <span aria-hidden> / </span>
-            {doc.relativePath}
-          </p>
-          <div className="ml-auto flex shrink-0 items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1">
             {markdown && (
               <ToggleGroup
                 size="sm"
@@ -380,8 +379,22 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
                 }}
                 aria-label="Document view"
               >
-                <ToggleGroupItem value="preview">Preview</ToggleGroupItem>
-                <ToggleGroupItem value="source">Edit</ToggleGroupItem>
+                <ToggleGroupItem
+                  value="preview"
+                  aria-label="Preview"
+                  title="Preview"
+                  className={compact ? "size-7.5 rounded-full p-0" : undefined}
+                >
+                  {compact ? <EyeIcon /> : "Preview"}
+                </ToggleGroupItem>
+                <ToggleGroupItem
+                  value="source"
+                  aria-label="Edit"
+                  title="Edit"
+                  className={compact ? "size-7.5 rounded-full p-0" : undefined}
+                >
+                  {compact ? <PencilIcon /> : "Edit"}
+                </ToggleGroupItem>
               </ToggleGroup>
             )}
             <WindowButton
@@ -392,7 +405,9 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
               <RefreshCwIcon />
             </WindowButton>
             <Button
-              size="sm"
+              size={compact ? "icon-sm" : "sm"}
+              aria-label="Save"
+              title="Save"
               disabled={!canSave || locked}
               onClick={() => void session.save()}
             >
@@ -401,8 +416,34 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
               ) : (
                 <SaveIcon data-icon="inline-start" />
               )}
-              Save
+              {!compact && "Save"}
             </Button>
+          </div>
+          <div className="flex shrink-0 gap-0.5">
+            <WindowButton
+              label="Minimize file"
+              onClick={() => {
+                setMinimized(true)
+                requestAnimationFrame(() => restoreRef.current?.focus())
+              }}
+            >
+              <MinusIcon />
+            </WindowButton>
+            {!small && (
+              <WindowButton
+                label={maximized ? "Restore window size" : "Maximize file"}
+                onClick={() => setMaximized((value) => !value)}
+              >
+                {maximized ? <Minimize2Icon /> : <Maximize2Icon />}
+              </WindowButton>
+            )}
+            <WindowButton
+              label="Close file"
+              disabled={doc.saving || !!state.deletion}
+              onClick={session.requestClose}
+            >
+              <XIcon />
+            </WindowButton>
           </div>
         </div>
         <div className="relative min-h-0 flex-1 overflow-hidden">
