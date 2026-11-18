@@ -13,9 +13,14 @@ import {
   chats,
   skills,
   botSkills,
+  botTools,
+  toolDefinitions,
 } from "@/db/schema"
 import { createDevPodSandboxId, deleteDevPodSandbox } from "@/lib/devpod"
-import { isSkillReferenceError } from "@/lib/skill-constraint"
+import {
+  isSkillReferenceError,
+  isToolReferenceError,
+} from "@/lib/skill-constraint"
 
 type CreateBotResult =
   | {
@@ -45,6 +50,32 @@ async function skillsExist(ids: string[]) {
     .from(skills)
     .where(inArray(skills.id, ids))
   return rows.length === ids.length
+}
+
+const missingTool = {
+  success: false as const,
+  error:
+    "A selected tool no longer exists. Reopen the form to refresh the list.",
+}
+
+async function missingBinding(skillIds: string[], toolIds: string[]) {
+  const [validSkills, selectedTools] = await Promise.all([
+    skillsExist(skillIds),
+    toolIds.length
+      ? db
+          .select({ id: toolDefinitions.id })
+          .from(toolDefinitions)
+          .where(inArray(toolDefinitions.id, toolIds))
+      : [],
+  ])
+  if (!validSkills) return missingSkill
+  if (selectedTools.length !== toolIds.length) return missingTool
+}
+
+function insertToolBindings(botId: string, ids: string[]) {
+  return ids.length
+    ? [db.insert(botTools).values(ids.map((toolId) => ({ botId, toolId })))]
+    : []
 }
 
 function insertBindings(botId: string, ids: string[]) {
@@ -78,14 +109,15 @@ export async function createBot(
     }
   }
 
-  const { skillIds, ...fields } = parsed.data
+  const { skillIds, toolIds, ...fields } = parsed.data
   const botId = creationId(key.data, "bot")
   const chatId = creationId(
     key.data,
-    JSON.stringify([fields, [...skillIds].sort()])
+    JSON.stringify([fields, [...skillIds].sort(), [...toolIds].sort()])
   )
   try {
-    if (!(await skillsExist(skillIds))) return missingSkill
+    const missing = await missingBinding(skillIds, toolIds)
+    if (missing) return missing
     const sandboxId = createDevPodSandboxId(botId)
     const [botRows, chatRows, chatMemberRows] = await db.batch([
       db
@@ -98,6 +130,7 @@ export async function createBot(
         .returning(),
       db.insert(chatMembers).values({ chatId, botId }).returning(),
       ...insertBindings(botId, skillIds),
+      ...insertToolBindings(botId, toolIds),
     ])
 
     const bot = botRows[0]
@@ -110,6 +143,7 @@ export async function createBot(
 
     return { success: true, bot, chat, chatMember }
   } catch (error) {
+    if (isToolReferenceError(error)) return missingTool
     if (isSkillReferenceError(error)) return missingSkill
     const cause = error instanceof Error ? (error.cause ?? error) : error
     if (
@@ -161,8 +195,9 @@ export async function updateBot(
   }
 
   try {
-    const { skillIds, ...fields } = parsed.data
-    if (!(await skillsExist(skillIds))) return missingSkill
+    const { skillIds, toolIds, ...fields } = parsed.data
+    const missing = await missingBinding(skillIds, toolIds)
+    if (missing) return missing
     // Updating the Bot first serializes concurrent full-set replacements.
     const [rows] = await db.batch([
       db
@@ -173,8 +208,10 @@ export async function updateBot(
         })
         .where(eq(bots.id, botId))
         .returning(),
+      db.delete(botTools).where(eq(botTools.botId, botId)),
       db.delete(botSkills).where(eq(botSkills.botId, botId)),
       ...insertBindings(botId, skillIds),
+      ...insertToolBindings(botId, toolIds),
     ])
 
     const bot = rows[0]
@@ -184,6 +221,7 @@ export async function updateBot(
 
     return { success: true, bot }
   } catch (error) {
+    if (isToolReferenceError(error)) return missingTool
     if (isSkillReferenceError(error)) return missingSkill
     console.error("Failed to update bot", error)
     return { success: false, error: "The bot could not be updated." }

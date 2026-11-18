@@ -1,9 +1,7 @@
 "use client"
 
 import {
-  useEffect,
   useId,
-  useImperativeHandle,
   useRef,
   useState,
   useTransition,
@@ -26,23 +24,15 @@ import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+  useSettingsFormGuard,
+  type SettingsLeaveGuard,
+} from "@/components/settings-form-guard"
 import {
   skillFormSchema,
   type Skill,
   type SkillInput,
   type SkillValues,
 } from "@/db/schema"
-
-export type SkillLeaveGuard = (leave: () => void) => void
 
 export function SkillForm({
   skill,
@@ -51,7 +41,7 @@ export function SkillForm({
   onSaved,
 }: {
   skill: Skill | null
-  guard: Ref<SkillLeaveGuard>
+  guard: Ref<SettingsLeaveGuard>
   onCancel: () => void
   onSaved: (id: string) => void
 }) {
@@ -69,23 +59,12 @@ export function SkillForm({
   const [error, setError] = useState("")
   const [pending, startTransition] = useTransition()
   const saving = useRef(false)
-  const [leaveAction, setLeaveAction] = useState<(() => void) | null>(null)
-
-  function requestLeave(leave: () => void) {
-    if (saving.current) return
-    if (isDirty) setLeaveAction(() => leave)
-    else leave()
-  }
-  useImperativeHandle(guard, () => requestLeave)
-  useEffect(() => {
-    if (!isDirty) return
-    const warn = (event: BeforeUnloadEvent) => {
-      event.preventDefault()
-      event.returnValue = ""
-    }
-    window.addEventListener("beforeunload", warn)
-    return () => window.removeEventListener("beforeunload", warn)
-  }, [isDirty])
+  const { requestLeave, discardDialog } = useSettingsFormGuard(
+    guard,
+    isDirty,
+    saving,
+    "skill"
+  )
 
   function submit(event?: FormEvent<HTMLFormElement>) {
     return form.handleSubmit(
@@ -219,33 +198,7 @@ export function SkillForm({
           {skill ? "Save changes" : "Create skill"}
         </Button>
       </div>
-      <AlertDialog
-        open={!!leaveAction}
-        onOpenChange={(open) => {
-          if (!open) setLeaveAction(null)
-        }}
-      >
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Discard changes?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Your edits to this skill will be lost.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Keep editing</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() => {
-                setLeaveAction(null)
-                leaveAction?.()
-              }}
-            >
-              Discard changes
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {discardDialog}
     </>
   )
 }

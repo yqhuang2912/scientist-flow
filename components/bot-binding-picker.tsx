@@ -13,7 +13,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Spinner } from "@/components/ui/spinner"
 import type { SkillSummary } from "@/db/schema"
 
-export function BotSkillPicker({
+export function BotBindingPicker({
+  label,
   options,
   ids,
   onChange,
@@ -23,7 +24,9 @@ export function BotSkillPicker({
   onRetry,
   onManage,
 }: {
-  options: SkillSummary[] | null
+  label: "Skills" | "Tools"
+  options:
+    Pick<SkillSummary, "id" | "name" | "displayName" | "description">[] | null
   ids: string[]
   onChange: (ids: string[]) => void
   disabled: boolean
@@ -42,7 +45,7 @@ export function BotSkillPicker({
   return (
     <Field data-invalid={!!validationError}>
       <div className="flex items-center justify-between">
-        <FieldTitle>Skills</FieldTitle>
+        <FieldTitle>{label}</FieldTitle>
         {options && (
           <span className="text-xs text-muted-foreground">
             {ids.length} selected
@@ -65,7 +68,7 @@ export function BotSkillPicker({
           className="flex items-center gap-2 text-xs text-muted-foreground"
         >
           <Spinner />
-          Loading skills…
+          Loading {label.toLowerCase()}…
         </span>
       ) : options.length === 0 ? (
         <Button
@@ -74,21 +77,21 @@ export function BotSkillPicker({
           className="w-fit!"
           onClick={onManage}
         >
-          Manage shared skills
+          Manage shared {label.toLowerCase()}
         </Button>
       ) : (
         <>
           <Input
             type="search"
-            aria-label="Search skills"
-            placeholder="Search skills…"
+            aria-label={"Search " + label.toLowerCase()}
+            placeholder={"Search " + label.toLowerCase() + "…"}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
           <div
             className="max-h-40 overflow-y-auto"
             role="group"
-            aria-label="Available skills"
+            aria-label={"Available " + label.toLowerCase()}
           >
             {visible?.map((s) => (
               <FieldLabel
@@ -128,7 +131,7 @@ export function BotSkillPicker({
             ))}
             {!visible?.length && (
               <p className="p-2 text-xs text-muted-foreground">
-                No matching skills.
+                No matching {label.toLowerCase()}.
               </p>
             )}
           </div>

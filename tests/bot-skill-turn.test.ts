@@ -17,7 +17,7 @@ const definition = {
   updatedAt: new Date("2026-01-01"),
   botId: "designer",
 }
-const fields = { name: "A", avatar: "a", job: "design" }
+const fields = { toolIds: [], name: "A", avatar: "a", job: "design" }
 test("saving requires an explicit set of valid IDs, allows clearing, and deduplicates", () => {
   const id = "s".repeat(21)
   assert.equal(botFormSchema.safeParse(fields).success, false)

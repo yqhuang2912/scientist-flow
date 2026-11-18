@@ -42,6 +42,7 @@ import { cleanBotText } from "@/lib/chat-bot-text"
 import { cn } from "@/lib/utils"
 import {
   getAssistantSegments,
+  getHandoff,
   getMessageBotId,
   groupChatParts,
   type ChatSpeaker,
@@ -228,6 +229,7 @@ const ChatTurn = memo(function ChatTurn({
     )
   }
 
+  const handoff = message.parts.map(getHandoff).find(Boolean)
   const segments = getAssistantSegments(
     message,
     isGroup ? null : (bots[0]?.id ?? null)
@@ -236,12 +238,21 @@ const ChatTurn = memo(function ChatTurn({
     <MessageGroup className="gap-5">
       {segments.map((segment) => {
         const bot = bots.find((candidate) => candidate.id === segment.botId)
+        const pastName =
+          handoff && segment.botId === handoff.sourceId
+            ? handoff.sourceName
+            : handoff && segment.botId === handoff.targetId
+              ? handoff.targetName
+              : null
         return (
           <Message key={segment.key}>
             <MessageContent className="gap-2">
               <MessageHeader>
                 <SpeakerAvatar bot={bot} />
-                <BotName name={bot?.name ?? "Assistant"} job={bot?.job} />
+                <BotName
+                  name={bot?.name ?? pastName ?? "Assistant"}
+                  job={bot?.job}
+                />
               </MessageHeader>
               <AssistantParts
                 parts={segment.parts}

@@ -1,13 +1,20 @@
 "use client"
 
 import { useRef, useState } from "react"
-import { BookOpenIcon, FolderIcon, SettingsIcon, UsersIcon } from "lucide-react"
+import {
+  BookOpenIcon,
+  FolderIcon,
+  SettingsIcon,
+  WrenchIcon,
+  UsersIcon,
+} from "lucide-react"
 
 import { ChatAvatar } from "@/components/chat-avatar"
 import { GeneralSettingsPanel } from "@/components/general-settings-panel"
 import { SettingsNavItem, SettingsShell } from "@/components/settings-shell"
 import { SkillsSettingsPanel } from "@/components/skills-settings-panel"
-import type { SkillLeaveGuard } from "@/components/skill-form"
+import type { SettingsLeaveGuard } from "@/components/settings-form-guard"
+import { ToolsSettingsPanel } from "@/components/tools-settings-panel"
 import { WorkspaceSettingsPanel } from "@/components/workspace-settings-panel"
 import { Button } from "@/components/ui/button"
 import {
@@ -25,7 +32,7 @@ import {
 } from "@/components/ui/dialog"
 import type { BotSummary } from "@/queries/bots"
 
-type SettingsTab = "general" | "bots" | "skills" | "workspace"
+type SettingsTab = "general" | "bots" | "skills" | "tools" | "workspace"
 
 /**
  * One settings surface for the whole app: a fixed navigation column plus a
@@ -48,11 +55,12 @@ export function SettingsDialog({
   onManageBots?: () => void
 }) {
   const [tab, setTab] = useState<SettingsTab>(initialTab)
-  const skillGuard = useRef<SkillLeaveGuard>(null)
+  const leaveGuard = useRef<SettingsLeaveGuard>(null)
+  const libraryTab = tab === "skills" || tab === "tools"
 
   function selectTab(next: SettingsTab) {
     if (next === tab) return
-    if (skillGuard.current) skillGuard.current(() => setTab(next))
+    if (leaveGuard.current) leaveGuard.current(() => setTab(next))
     else setTab(next)
   }
 
@@ -60,9 +68,9 @@ export function SettingsDialog({
     <Dialog
       open={open}
       onOpenChange={(next, event) => {
-        if (!next && skillGuard.current) {
+        if (!next && leaveGuard.current) {
           event.cancel()
-          skillGuard.current(() => onOpenChange(false))
+          leaveGuard.current(() => onOpenChange(false))
           return
         }
         if (next && initialTab !== tab) setTab(initialTab)
@@ -72,18 +80,19 @@ export function SettingsDialog({
       <DialogContent
         className={cn(
           "gap-0 overflow-hidden p-0 sm:max-w-xl",
-          tab === "skills" && "sm:max-w-2xl"
+          libraryTab && "sm:max-w-2xl"
         )}
       >
         <DialogHeader className="sr-only">
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
-            Manage appearance, bots, shared skills and the workspace directory.
+            Manage appearance, bots, shared skills, tools and the workspace
+            directory.
           </DialogDescription>
         </DialogHeader>
         <SettingsShell
           className={
-            tab === "skills"
+            libraryTab
               ? "max-h-[calc(100dvh-2rem)] min-h-0 grid-rows-[auto_minmax(0,1fr)] sm:min-h-[min(24rem,calc(100dvh-2rem))] sm:grid-rows-1 [&>div]:min-h-0 [&>div]:overflow-y-auto"
               : undefined
           }
@@ -111,6 +120,13 @@ export function SettingsDialog({
                 Skills
               </SettingsNavItem>
               <SettingsNavItem
+                active={tab === "tools"}
+                icon={<WrenchIcon />}
+                onClick={() => selectTab("tools")}
+              >
+                Tools
+              </SettingsNavItem>
+              <SettingsNavItem
                 active={tab === "workspace"}
                 icon={<FolderIcon strokeWidth={2} />}
                 onClick={() => selectTab("workspace")}
@@ -123,7 +139,9 @@ export function SettingsDialog({
           {tab === "general" ? (
             <GeneralSettingsPanel />
           ) : tab === "skills" ? (
-            open && <SkillsSettingsPanel guard={skillGuard} />
+            open && <SkillsSettingsPanel guard={leaveGuard} />
+          ) : tab === "tools" ? (
+            open && <ToolsSettingsPanel guard={leaveGuard} />
           ) : tab === "bots" ? (
             <div className="flex flex-col p-4">
               <p className="type-section-title">Bots</p>

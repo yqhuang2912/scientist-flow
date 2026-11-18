@@ -1,6 +1,15 @@
-import { asc, eq } from "drizzle-orm"
+import { and, asc, eq, getTableColumns } from "drizzle-orm"
 
-import { bots, botSkills, skills, chatMembers, chats } from "../db/schema"
+import {
+  bots,
+  botSkills,
+  skills,
+  chatMembers,
+  chats,
+  botTools,
+  toolDefinitions,
+  toolPostClaims,
+} from "../db/schema"
 import { db } from "../lib/db"
 
 export type TriggerBot = Pick<
@@ -75,4 +84,40 @@ export async function getTriggerChatContext(
   }, [])
 
   return { kind: row.kind, bots: memberBots }
+}
+export function getChatToolBindings(
+  chatId: string,
+  member?: { botId: string; toolId: string }
+) {
+  return db
+    .select({
+      botId: chatMembers.botId,
+      botName: bots.name,
+      ...getTableColumns(toolDefinitions),
+    })
+    .from(chatMembers)
+    .innerJoin(bots, eq(bots.id, chatMembers.botId))
+    .innerJoin(botTools, eq(chatMembers.botId, botTools.botId))
+    .innerJoin(toolDefinitions, eq(toolDefinitions.id, botTools.toolId))
+    .where(
+      and(
+        eq(chatMembers.chatId, chatId),
+        member && eq(chatMembers.botId, member.botId),
+        member && eq(toolDefinitions.id, member.toolId)
+      )
+    )
+}
+
+export async function claimToolPost(
+  chatId: string,
+  messageId: string,
+  toolId: string,
+  inputHash: string
+) {
+  const rows = await db
+    .insert(toolPostClaims)
+    .values({ chatId, messageId, toolId, inputHash })
+    .onConflictDoNothing()
+    .returning({ id: toolPostClaims.toolId })
+  return rows.length === 1
 }

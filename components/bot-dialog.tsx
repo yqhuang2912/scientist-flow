@@ -44,9 +44,10 @@ import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { botFormSchema, type BotFormValues } from "@/db/schema"
 
-import type { SkillSummary } from "@/db/schema"
+import type { SkillSummary, ToolSummary } from "@/db/schema"
 import { getSkills, getBotSkillIds } from "@/queries/skills"
-import { BotSkillPicker } from "@/components/bot-skill-picker"
+import { BotBindingPicker } from "@/components/bot-binding-picker"
+import { getTools, getBotToolIds } from "@/queries/tools"
 
 const botPresets = [
   {
@@ -144,6 +145,7 @@ function BotForm({
   const [isPending, startTransition] = useTransition()
   const defaultValues = {
     skillIds: [] as string[],
+    toolIds: [] as string[],
     avatar: bot?.avatar ?? initialAvatarSeed,
     name: bot?.name ?? "Ada",
     job: bot?.job ?? botPresets[0].job,
@@ -154,7 +156,14 @@ function BotForm({
     defaultValues,
   })
   const selection = useController({ control: form.control, name: "skillIds" })
-  const [options, setOptions] = useState<SkillSummary[] | null>(null)
+  const toolSelection = useController({
+    control: form.control,
+    name: "toolIds",
+  })
+  const [options, setOptions] = useState<{
+    skills: SkillSummary[]
+    tools: ToolSummary[]
+  } | null>(null)
   const [loadError, setLoadError] = useState("")
   const [attempt, setAttempt] = useState(0)
   const botId = bot?.id
@@ -163,19 +172,31 @@ function BotForm({
     let current = true
     async function load() {
       try {
-        const [catalog, binding] = await Promise.all([
+        const [catalog, binding, toolCatalog, toolBinding] = await Promise.all([
           getSkills(),
           botId ? getBotSkillIds(botId) : null,
+          getTools(),
+          botId ? getBotToolIds(botId) : null,
         ])
         if (!current) return
-        if (!catalog.success || (binding && !binding.success)) throw new Error()
+        if (
+          !catalog.success ||
+          (binding && !binding.success) ||
+          !toolCatalog.success ||
+          (toolBinding && !toolBinding.success)
+        )
+          throw new Error()
         const ids = binding?.data ?? []
         if (ids.some((id) => !catalog.data.some((skill) => skill.id === id)))
           throw new Error()
         resetField("skillIds", { defaultValue: ids })
-        setOptions(catalog.data)
+        const toolIds = toolBinding?.data ?? []
+        if (toolIds.some((id) => !toolCatalog.data.some((t) => t.id === id)))
+          throw new Error()
+        resetField("toolIds", { defaultValue: toolIds })
+        setOptions({ skills: catalog.data, tools: toolCatalog.data })
       } catch {
-        if (current) setLoadError("Could not load the skill selection.")
+        if (current) setLoadError("Could not load bot bindings.")
       }
     }
     void load()
@@ -346,22 +367,34 @@ function BotForm({
             />
             <FieldError errors={[form.formState.errors.instructions]} />
           </Field>
-          <BotSkillPicker
-            options={options}
-            ids={selection.field.value}
-            onChange={selection.field.onChange}
-            disabled={isPending}
-            error={loadError}
-            validationError={selection.fieldState.error?.message}
-            onRetry={() => {
-              setLoadError("")
-              setAttempt((n) => n + 1)
-            }}
-            onManage={() => {
-              onClose()
-              window.dispatchEvent(new Event("scientistflow:manage-skills"))
-            }}
-          />
+          {(["Skills", "Tools"] as const).map((label) => {
+            const selected = label === "Skills" ? selection : toolSelection
+            return (
+              <BotBindingPicker
+                key={label}
+                label={label}
+                options={
+                  (label === "Skills" ? options?.skills : options?.tools) ??
+                  null
+                }
+                ids={selected.field.value}
+                onChange={selected.field.onChange}
+                disabled={isPending}
+                error={loadError}
+                validationError={selected.fieldState.error?.message}
+                onRetry={() => {
+                  setLoadError("")
+                  setAttempt((n) => n + 1)
+                }}
+                onManage={() => {
+                  onClose()
+                  window.dispatchEvent(
+                    new Event("scientistflow:manage-" + label.toLowerCase())
+                  )
+                }}
+              />
+            )
+          })}
         </FieldGroup>
 
         {serverError && (

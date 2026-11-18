@@ -1,7 +1,9 @@
 import { nanoid } from "nanoid"
 import { relations } from "drizzle-orm"
+import type { HttpToolConfig, ToolInputSchema } from "../lib/tool-definition"
 import {
   index,
+  jsonb,
   pgEnum,
   pgTable,
   primaryKey,
@@ -10,6 +12,29 @@ import {
 } from "drizzle-orm/pg-core"
 import { createInsertSchema } from "drizzle-zod"
 import { z } from "zod"
+
+export const toolDefinitions = pgTable("tools", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => nanoid()),
+  name: text("name").notNull().unique(),
+  displayName: text("display_name"),
+  description: text("description").notNull(),
+  kind: text("kind", { enum: ["http"] }).notNull(),
+  inputSchema: jsonb("input_schema").$type<ToolInputSchema>().notNull(),
+  config: jsonb("config").$type<HttpToolConfig>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+})
+export type ToolDefinition = typeof toolDefinitions.$inferSelect
+export type ToolSummary = Omit<
+  ToolDefinition,
+  "config" | "inputSchema" | "createdAt"
+>
 
 export const skills = pgTable("skills", {
   id: text("id")
@@ -105,6 +130,22 @@ export const botSkills = pgTable(
   ]
 )
 
+export const botTools = pgTable(
+  "bot_tools",
+  {
+    botId: text("bot_id")
+      .notNull()
+      .references(() => bots.id, { onDelete: "cascade" }),
+    toolId: text("tool_id")
+      .notNull()
+      .references(() => toolDefinitions.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.botId, table.toolId] }),
+    index("bot_tools_tool_id_idx").on(table.toolId),
+  ]
+)
+
 export const chats = pgTable("chats", {
   id: text("id")
     .primaryKey()
@@ -119,6 +160,25 @@ export const chats = pgTable("chats", {
     .notNull()
     .defaultNow(),
 })
+
+// An admitted POST is never dispatched again for the same user turn and arguments,
+// including after an interrupted worker. No payloads or credentials are stored.
+export const toolPostClaims = pgTable(
+  "tool_post_claims",
+  {
+    chatId: text("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    messageId: text("message_id").notNull(),
+    toolId: text("tool_id")
+      .notNull()
+      .references(() => toolDefinitions.id, { onDelete: "cascade" }),
+    inputHash: text("input_hash").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.chatId, t.messageId, t.toolId, t.inputHash] }),
+  ]
+)
 
 export const chatMembers = pgTable(
   "chat_members",
@@ -173,6 +233,7 @@ export const botFormSchema = insertBotSchema
     name: z.string().trim().min(1, "Name is required"),
     job: z.string().trim().min(1, "Job is required"),
     instructions: z.string().trim().optional(),
+    toolIds: z.array(z.nanoid()).transform((ids) => [...new Set(ids)]),
     skillIds: z.array(z.nanoid()).transform((ids) => [...new Set(ids)]),
   })
   .strict()

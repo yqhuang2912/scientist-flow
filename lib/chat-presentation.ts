@@ -42,6 +42,7 @@ export function getHandoff(part: ChatPart) {
   if (output?.success !== true || typeof target?.name !== "string") return null
 
   return {
+    sourceName: typeof source?.name === "string" ? source.name : null,
     sourceId: typeof source?.id === "string" ? source.id : null,
     targetId: typeof target.id === "string" ? target.id : null,
     targetName: target.name,
@@ -127,6 +128,29 @@ export function groupChatParts(parts: IndexedChatPart[]): PartBlock[] {
 
 export function getToolPresentation(part: ChatToolPart, active: boolean) {
   const name = getToolName(part)
+  const http = part.state === "output-available" ? record(part.output) : null
+  if (http?.kind === "shared-http") {
+    const label = String(http.displayName || name)
+    const ok = http.success === true
+    const summary = [
+      http.botName,
+      name,
+      typeof http.status === "number" ? "HTTP " + http.status : null,
+      typeof http.durationMs === "number" ? http.durationMs + " ms" : null,
+    ]
+    if (!ok && typeof http.message === "string") summary.push(http.message)
+    return {
+      name,
+      label,
+      status: ok ? undefined : ("error" as const),
+      title: (ok ? "Ran " : "Failed · ") + label,
+      input: undefined,
+      output: undefined,
+      error: null,
+      reason: summary.filter(Boolean).join(" · "),
+      deniedReason: null,
+    }
+  }
   const label =
     part.title ||
     name.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ")

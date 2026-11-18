@@ -103,12 +103,18 @@ export function AppSidebar({
   const [botDialogOpen, setBotDialogOpen] = useState(false)
   const [taskDialogOpen, setTaskDialogOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
-  const [settingsTab, setSettingsTab] = useState<"general" | "skills" | null>(null)
+  const [settingsTab, setSettingsTab] = useState<
+    "general" | "skills" | "tools" | null
+  >(null)
   useEffect(() => {
     const manageSkills = () => setSettingsTab("skills")
     window.addEventListener("scientistflow:manage-skills", manageSkills)
-    return () =>
+    const manageTools = () => setSettingsTab("tools")
+    window.addEventListener("scientistflow:manage-tools", manageTools)
+    return () => {
       window.removeEventListener("scientistflow:manage-skills", manageSkills)
+      window.removeEventListener("scientistflow:manage-tools", manageTools)
+    }
   }, [])
   const [avatarSeed] = useState(() => nanoid())
   const [mac] = useState(() => isMac())
