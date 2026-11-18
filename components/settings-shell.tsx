@@ -2,40 +2,125 @@
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
+import { DialogContent, DialogFooter } from "@/components/ui/dialog"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import {
   navigationItemStyles,
   navigationItemStates,
 } from "@/components/ui/compact-styles"
 
-/**
- * Compact settings shell: a fixed-width navigation column on the left and a
- * single column of rows on the right. Rows sit on hairline dividers with no
- * card chrome, matching the rest of the workspace surfaces.
- */
+export function SettingsDialogContent({
+  className,
+  ...props
+}: React.ComponentProps<typeof DialogContent>) {
+  return (
+    <DialogContent
+      className={cn(
+        "h-[min(36rem,calc(100dvh-2rem))] w-[calc(100%-2rem)] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:max-w-3xl",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
 export function SettingsShell({
   nav,
   children,
-  className,
 }: {
   nav: React.ReactNode
   children: React.ReactNode
-  className?: string
 }) {
   return (
-    <div
-      className={cn(
-        "grid min-h-[19rem] grid-cols-1 sm:grid-cols-[9.5rem_minmax(0,1fr)]",
-        className
-      )}
-    >
+    <div className="grid min-h-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] sm:grid-cols-[9.5rem_minmax(0,1fr)] sm:grid-rows-1">
       <nav
         aria-label="Settings sections"
-        className="flex flex-wrap gap-0.5 border-b p-2 pr-12 sm:flex-col sm:flex-nowrap sm:border-r sm:border-b-0 sm:pr-2"
+        className="flex items-center justify-around gap-0.5 border-b px-2 py-1 sm:flex-col sm:items-stretch sm:justify-start sm:overflow-y-auto sm:border-r sm:border-b-0 sm:py-2"
       >
         {nav}
       </nav>
-      <div className="flex min-w-0 flex-col">{children}</div>
+      {children}
     </div>
+  )
+}
+
+export function SettingsPane({
+  className,
+  children,
+  ...props
+}: React.ComponentProps<"section">) {
+  return (
+    <section
+      className="min-h-0 min-w-0 [scrollbar-gutter:stable] overflow-y-auto overscroll-contain"
+      {...props}
+    >
+      <div className={cn("flex min-w-0 flex-col p-4", className)}>
+        {children}
+      </div>
+    </section>
+  )
+}
+
+export function SettingsFormBody(props: React.ComponentProps<"form">) {
+  return (
+    <form
+      {...props}
+      className={cn(
+        "min-h-0 min-w-0 [scrollbar-gutter:stable] overflow-y-auto overscroll-contain p-4 max-md:[&_[data-slot=input]]:type-control max-md:[&_[data-slot=textarea]]:type-control-compact",
+        props.className
+      )}
+    />
+  )
+}
+
+export function SettingsFormFooter({
+  children,
+  formId,
+  noun,
+  editing,
+  dirty,
+  pending,
+  ready = true,
+  onCancel,
+}: {
+  children?: React.ReactNode
+  formId: string
+  noun: "bot" | "skill" | "tool"
+  editing: boolean
+  dirty: boolean
+  pending: boolean
+  ready?: boolean
+  onCancel: () => void
+}) {
+  const unchanged = editing && !dirty
+  return (
+    <DialogFooter className="mx-0 mb-0 flex-row flex-wrap justify-end rounded-none max-sm:gap-1 max-sm:px-2 max-sm:[&>button]:px-2">
+      {children && <div className="mr-auto">{children}</div>}
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        disabled={pending}
+        onClick={onCancel}
+      >
+        Cancel
+      </Button>
+      <Button
+        size="sm"
+        type="submit"
+        form={formId}
+        variant={unchanged ? "secondary" : "default"}
+        disabled={pending || !ready || unchanged}
+      >
+        {pending && <Spinner />}
+        {editing ? "Save changes" : "Create " + noun}
+      </Button>
+    </DialogFooter>
   )
 }
 
@@ -47,28 +132,36 @@ export function SettingsNavItem({
 }: {
   active?: boolean
   icon: React.ReactNode
-  children: React.ReactNode
+  children: string
   onClick?: () => void
 }) {
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      onClick={onClick}
-      aria-current={active ? "page" : undefined}
-      data-active={active || undefined}
-      className={cn(
-        navigationItemStyles,
-        navigationItemStates,
-        "h-7.5 w-auto min-w-0 justify-start gap-1.5 sm:w-full",
-        !active && "text-sidebar-foreground"
-      )}
-    >
-      <span className="flex size-4 shrink-0 items-center justify-center [&_svg]:size-4">
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={onClick}
+            aria-label={children}
+            aria-current={active ? "page" : undefined}
+            data-active={active || undefined}
+            className={cn(
+              navigationItemStyles,
+              navigationItemStates,
+              "size-10 min-w-0 gap-1.5 max-sm:rounded-full max-sm:p-0 sm:h-7.5 sm:w-full sm:justify-start",
+              !active && "text-sidebar-foreground"
+            )}
+          />
+        }
+      >
         {icon}
-      </span>
-      <span className="min-w-0 truncate">{children}</span>
-    </Button>
+        <span className="hidden min-w-0 truncate sm:inline">{children}</span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="sm:hidden">
+        {children}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 

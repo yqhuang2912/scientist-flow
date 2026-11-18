@@ -1,6 +1,7 @@
 "use client"
 
 import {
+  useCallback,
   useId,
   useRef,
   useState,
@@ -10,9 +11,18 @@ import {
 } from "react"
 import { Controller, useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { createSkill, updateSkill } from "@/actions/skill"
+import { createSkill, deleteSkill, updateSkill } from "@/actions/skill"
+import { getSkill } from "@/queries/skills"
 import { DocumentEditor } from "@/components/document-editor"
-import { Button } from "@/components/ui/button"
+import { SettingsDeleteAction } from "@/components/settings-detail-actions"
+import {
+  LibraryReadStatus,
+  useLibraryRead,
+} from "@/components/shared-library-panel"
+import {
+  SettingsFormBody,
+  SettingsFormFooter,
+} from "@/components/settings-shell"
 import {
   Field,
   FieldDescription,
@@ -21,7 +31,6 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import {
   useSettingsFormGuard,
@@ -30,6 +39,7 @@ import {
 import {
   skillFormSchema,
   type Skill,
+  type SkillSummary,
   type SkillInput,
   type SkillValues,
 } from "@/db/schema"
@@ -38,24 +48,34 @@ export function SkillForm({
   skill,
   guard,
   onCancel,
-  onSaved,
 }: {
-  skill: Skill | null
+  skill: SkillSummary | null
   guard: Ref<SettingsLeaveGuard>
   onCancel: () => void
-  onSaved: (id: string) => void
 }) {
   const formId = useId()
+  const [skillId, setSkillId] = useState(skill?.id)
   const form = useForm<SkillInput, unknown, SkillValues>({
     resolver: zodResolver(skillFormSchema),
     defaultValues: {
       displayName: skill?.displayName ?? "",
       name: skill?.name ?? "",
       description: skill?.description ?? "",
-      instructions: skill?.instructions ?? "",
+      instructions: "",
     },
   })
-  const { errors, isDirty } = form.formState
+  const { errors, isDirty, defaultValues } = form.formState
+  const { reset } = form
+  const load = useCallback(() => getSkill(skill?.id), [skill])
+  const accept = useCallback(
+    ({ name, displayName, description, instructions }: Skill) => {
+      reset({ name, displayName: displayName ?? "", description, instructions })
+    },
+    [reset]
+  )
+  const read = useLibraryRead(skill ? load : null, accept)
+  const { ready } = read
+  const unchanged = !!skillId && !isDirty
   const [error, setError] = useState("")
   const [pending, startTransition] = useTransition()
   const saving = useRef(false)
@@ -67,6 +87,10 @@ export function SkillForm({
   )
 
   function submit(event?: FormEvent<HTMLFormElement>) {
+    if (!ready || unchanged || saving.current) {
+      event?.preventDefault()
+      return
+    }
     return form.handleSubmit(
       (values) => {
         if (saving.current) return
@@ -74,11 +98,14 @@ export function SkillForm({
         setError("")
         startTransition(async () => {
           try {
-            const result = skill
-              ? await updateSkill(skill.id, values)
+            const result = skillId
+              ? await updateSkill(skillId, values)
               : await createSkill(values)
-            if (result.success) onSaved(result.data.id)
-            else setError(result.error)
+            if (!result.success) setError(result.error)
+            else {
+              form.reset({ ...values, displayName: values.displayName ?? "" })
+              setSkillId(result.data.id)
+            }
           } catch {
             setError("Could not reach the server. Please try again.")
           } finally {
@@ -95,12 +122,12 @@ export function SkillForm({
 
   return (
     <>
-      <h2 className="pr-7 type-section-title">
-        {skill ? "Edit skill" : "New skill"}
-      </h2>
-      <form id={formId} onSubmit={submit}>
-        <fieldset disabled={pending}>
-          <FieldGroup>
+      {!skillId && (
+        <h2 className="border-b px-4 py-3 type-section-title">New skill</h2>
+      )}
+      <SettingsFormBody id={formId} onSubmit={submit} className="flex flex-col">
+        <fieldset disabled={pending} className="flex min-w-0 flex-1 flex-col">
+          <FieldGroup className="flex-1">
             <div className="grid gap-3 sm:grid-cols-2">
               <Field data-invalid={!!errors.displayName}>
                 <FieldLabel htmlFor={formId + "-display"}>
@@ -111,6 +138,7 @@ export function SkillForm({
                 </FieldLabel>
                 <Input
                   id={formId + "-display"}
+                  readOnly={!ready}
                   aria-invalid={!!errors.displayName}
                   {...form.register("displayName")}
                 />
@@ -122,6 +150,7 @@ export function SkillForm({
                 </FieldLabel>
                 <Input
                   id={formId + "-name"}
+                  readOnly={!ready}
                   placeholder="literature-review"
                   autoCapitalize="none"
                   spellCheck={false}
@@ -137,6 +166,7 @@ export function SkillForm({
               </FieldLabel>
               <Textarea
                 id={formId + "-description"}
+                readOnly={!ready}
                 rows={2}
                 aria-invalid={!!errors.description}
                 aria-describedby={formId + "-help"}
@@ -147,7 +177,7 @@ export function SkillForm({
               </FieldDescription>
               <FieldError errors={[errors.description]} />
             </Field>
-            <Field data-invalid={!!errors.instructions}>
+            <Field data-invalid={!!errors.instructions} className="flex-1">
               <FieldLabel
                 htmlFor={formId + "-body"}
                 onClick={() =>
@@ -156,23 +186,34 @@ export function SkillForm({
               >
                 Markdown instructions
               </FieldLabel>
-              <div className="h-44 min-w-0 overflow-hidden rounded-xl border border-input [--editor-content-padding:0.5rem_0] [--editor-line-inset:0.625rem]">
-                <Controller
-                  control={form.control}
-                  name="instructions"
-                  render={({ field }) => (
-                    <DocumentEditor
-                      inputId={formId + "-body"}
-                      invalid={!!errors.instructions}
-                      label="Markdown instructions"
-                      language="markdown"
-                      readOnly={pending}
-                      value={field.value}
-                      onChange={field.onChange}
-                      onSave={() => void submit()}
+              <div className="relative min-h-32 min-w-0 flex-1 overflow-hidden rounded-xl border border-input bg-background [--editor-content-padding:0.5rem_0] [--editor-line-inset:0.625rem]">
+                <div className="absolute inset-0">
+                  {!ready ? (
+                    <div className="p-3">
+                      <LibraryReadStatus
+                        label="Loading instructions…"
+                        {...read}
+                      />
+                    </div>
+                  ) : (
+                    <Controller
+                      control={form.control}
+                      name="instructions"
+                      render={({ field }) => (
+                        <DocumentEditor
+                          inputId={formId + "-body"}
+                          invalid={!!errors.instructions}
+                          label="Markdown instructions"
+                          language="markdown"
+                          readOnly={pending}
+                          value={field.value}
+                          onChange={field.onChange}
+                          onSave={() => void submit()}
+                        />
+                      )}
                     />
                   )}
-                />
+                </div>
               </div>
               <FieldError errors={[errors.instructions]} />
             </Field>
@@ -183,21 +224,27 @@ export function SkillForm({
             {error}
           </p>
         )}
-      </form>
-      <div className="flex justify-end gap-2 border-t pt-3">
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={pending}
-          onClick={() => requestLeave(onCancel)}
-        >
-          Cancel
-        </Button>
-        <Button size="sm" type="submit" form={formId} disabled={pending}>
-          {pending && <Spinner />}
-          {skill ? "Save changes" : "Create skill"}
-        </Button>
-      </div>
+      </SettingsFormBody>
+      <SettingsFormFooter
+        formId={formId}
+        noun="skill"
+        editing={!!skillId}
+        dirty={isDirty}
+        pending={pending}
+        ready={ready}
+        onCancel={() => requestLeave(onCancel)}
+      >
+        {skillId && (
+          <SettingsDeleteAction
+            noun="skill"
+            title="Delete skill?"
+            description={`Permanently delete ${defaultValues?.name} from the shared library?`}
+            remove={() => deleteSkill(skillId)}
+            onDeleted={onCancel}
+            disabled={pending || !ready}
+          />
+        )}
+      </SettingsFormFooter>
       {discardDialog}
     </>
   )

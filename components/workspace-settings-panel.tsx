@@ -12,7 +12,6 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
-import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
 import {
   Popover,
@@ -36,10 +35,11 @@ export function WorkspaceSettingsPanel({ onSaved }: { onSaved?: () => void }) {
     resolver: zodResolver(workspaceRootFormSchema),
     defaultValues: { rootDir: "" },
   })
-  const { reset } = form
+  const { reset, setFocus } = form
   const rootDir = useWatch({ control: form.control, name: "rootDir" })
   const candidate = rootDir.trim()
   const [savedDir, setSavedDir] = useState<string | null>(null)
+  const [showForm, setShowForm] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [directoryCheck, setDirectoryCheck] = useState<{
@@ -66,12 +66,12 @@ export function WorkspaceSettingsPanel({ onSaved }: { onSaved?: () => void }) {
       .then((result) => {
         if (!active) return
         if (result.success) {
-          reset({ rootDir: result.rootDir ?? "" })
+          setShowForm(!result.rootDir)
           setSavedDir(result.rootDir)
+          setLoaded(true)
         } else {
           setError(result.error)
         }
-        setLoaded(true)
       })
       .catch(() => {
         if (!active) return
@@ -80,11 +80,15 @@ export function WorkspaceSettingsPanel({ onSaved }: { onSaved?: () => void }) {
     return () => {
       active = false
     }
-  }, [reset])
+  }, [])
+
+  useEffect(() => {
+    if (showForm && savedDir) setFocus("rootDir")
+  }, [showForm, savedDir, setFocus])
 
   useEffect(() => {
     const checkedPath = rootDir.trim()
-    if (!checkedPath) return
+    if (!showForm || !checkedPath) return
     let active = true
     const timer = setTimeout(async () => {
       try {
@@ -109,7 +113,7 @@ export function WorkspaceSettingsPanel({ onSaved }: { onSaved?: () => void }) {
       active = false
       clearTimeout(timer)
     }
-  }, [rootDir])
+  }, [rootDir, showForm])
 
   function saveRoot({ rootDir: target }: { rootDir: string }) {
     if (!canSubmit) return
@@ -134,6 +138,8 @@ export function WorkspaceSettingsPanel({ onSaved }: { onSaved?: () => void }) {
           return
         }
         setSavedDir(target)
+        setShowForm(false)
+        reset({ rootDir: "" })
         onSaved?.()
       } catch {
         setError("Could not save the root directory. Try again.")
@@ -142,112 +148,155 @@ export function WorkspaceSettingsPanel({ onSaved }: { onSaved?: () => void }) {
   }
 
   return (
-    <div className="flex flex-col px-4 pb-4">
-      <div className="flex flex-col gap-1 py-3.5">
-        <div className="flex flex-col gap-1 sm:pr-6">
-          <h3 className="shrink-0 type-section-title">Root directory</h3>
-          <span className="min-w-0 font-mono text-xs break-all text-muted-foreground">
-            {loaded ? (savedDir ?? "Not set") : "Loading…"}
+    <section
+      aria-labelledby="workspace-settings-title"
+      className="flex flex-col gap-3 pt-3.5"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <h3 id="workspace-settings-title" className="type-control">
+            Workspace root directory
+          </h3>
+          <span className="font-mono text-xs break-all text-muted-foreground">
+            {loaded
+              ? (savedDir ?? "Not set")
+              : error
+                ? "Unavailable"
+                : "Loading…"}
           </span>
         </div>
-        <p className="text-sm leading-5 text-muted-foreground">
-          {isEditing
-            ? "Choose an empty directory to move all task workspaces."
-            : "Choose an empty directory for your task workspaces."}
-        </p>
-      </div>
-      <Separator />
-
-      <form
-        className="flex flex-col gap-4 pt-3.5"
-        onSubmit={form.handleSubmit((values) => {
-          if (!canSubmit) return
-          if (isEditing) setConfirmOpen(true)
-          else saveRoot(values)
-        })}
-      >
-        <FieldGroup>
-          <Field
-            data-invalid={!!fieldError}
-            data-disabled={!loaded || isPending}
+        {loaded && !showForm && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              reset({ rootDir: "" })
+              setError(null)
+              setDirectoryCheck(null)
+              setShowForm(true)
+            }}
           >
-            <FieldLabel htmlFor="workspace-root">
-              {isEditing ? "New path" : "Path"}
-            </FieldLabel>
-            <Input
-              id="workspace-root"
-              {...form.register("rootDir", {
-                onChange: () => {
-                  setError(null)
-                  setDirectoryCheck(null)
-                  setConfirmOpen(false)
-                },
-              })}
-              placeholder="Absolute directory path"
-              disabled={!loaded || isPending}
-              aria-invalid={!!fieldError}
-              aria-describedby={fieldError ? "workspace-root-error" : undefined}
-              className="font-mono"
-            />
-            {fieldError && (
-              <FieldError id="workspace-root-error">{fieldError}</FieldError>
-            )}
-          </Field>
-        </FieldGroup>
-
-        <div className="flex justify-center">
-          {!isEditing ? (
-            <Button type="submit" size="sm" disabled={!canSubmit}>
-              {isPending && <Spinner data-icon="inline-start" />}
-              Save
-            </Button>
-          ) : (
-            <Popover open={confirmOpen} onOpenChange={setConfirmOpen}>
-              <PopoverTrigger
-                render={
-                  <Button type="button" size="sm" disabled={!canSubmit} />
+            {savedDir ? "Change" : "Set directory"}
+          </Button>
+        )}
+      </div>
+      {!showForm && error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      {showForm && (
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={form.handleSubmit((values) => {
+            if (!canSubmit) return
+            if (isEditing) setConfirmOpen(true)
+            else saveRoot(values)
+          })}
+        >
+          <p className="text-sm text-muted-foreground">
+            {isEditing
+              ? "Choose an empty directory to move all task workspaces."
+              : "Choose an empty directory for your task workspaces."}
+          </p>
+          <FieldGroup>
+            <Field
+              data-invalid={!!fieldError}
+              data-disabled={!loaded || isPending}
+            >
+              <FieldLabel htmlFor="workspace-root">
+                {isEditing ? "New path" : "Path"}
+              </FieldLabel>
+              <Input
+                id="workspace-root"
+                {...form.register("rootDir", {
+                  onChange: () => {
+                    setError(null)
+                    setDirectoryCheck(null)
+                    setConfirmOpen(false)
+                  },
+                })}
+                placeholder="Absolute directory path"
+                disabled={!loaded || isPending}
+                aria-invalid={!!fieldError}
+                aria-describedby={
+                  fieldError ? "workspace-root-error" : undefined
                 }
-              >
-                {isPending ? (
-                  <>
-                    <Spinner data-icon="inline-start" />
-                    Moving…
-                  </>
-                ) : (
-                  "Change directory"
-                )}
-              </PopoverTrigger>
-              <PopoverContent side="top" className="w-80">
-                <p className="text-[13px] font-medium">
-                  Move all task workspaces?
-                </p>
-                <p className="text-sm leading-5 text-muted-foreground">
-                  All task directories will move to the new location.
-                </p>
-                <div className="flex justify-end gap-2 pt-1">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={isPending}
-                    onClick={() => setConfirmOpen(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    disabled={!canSubmit}
-                    onClick={form.handleSubmit(saveRoot)}
-                  >
-                    Move and save
-                  </Button>
-                </div>
-              </PopoverContent>
-            </Popover>
-          )}
-        </div>
-      </form>
-    </div>
+                className="font-mono"
+              />
+              {fieldError && (
+                <FieldError id="workspace-root-error">{fieldError}</FieldError>
+              )}
+            </Field>
+          </FieldGroup>
+
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isPending}
+              onClick={() => {
+                setConfirmOpen(false)
+                setShowForm(false)
+                setError(null)
+              }}
+            >
+              Cancel
+            </Button>
+            {!isEditing ? (
+              <Button type="submit" size="sm" disabled={!canSubmit}>
+                {isPending && <Spinner data-icon="inline-start" />}
+                Save
+              </Button>
+            ) : (
+              <Popover open={confirmOpen} onOpenChange={setConfirmOpen}>
+                <PopoverTrigger
+                  render={
+                    <Button type="button" size="sm" disabled={!canSubmit} />
+                  }
+                >
+                  {isPending ? (
+                    <>
+                      <Spinner data-icon="inline-start" />
+                      Moving…
+                    </>
+                  ) : (
+                    "Change directory"
+                  )}
+                </PopoverTrigger>
+                <PopoverContent side="top" className="w-80">
+                  <p className="text-[13px] font-medium">
+                    Move all task workspaces?
+                  </p>
+                  <p className="text-sm leading-5 text-muted-foreground">
+                    All task directories will move to the new location.
+                  </p>
+                  <div className="flex justify-end gap-2 pt-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={isPending}
+                      onClick={() => setConfirmOpen(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={!canSubmit}
+                      onClick={form.handleSubmit(saveRoot)}
+                    >
+                      Move and save
+                    </Button>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
+          </div>
+        </form>
+      )}
+    </section>
   )
 }

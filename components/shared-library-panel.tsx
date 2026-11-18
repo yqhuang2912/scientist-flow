@@ -1,363 +1,169 @@
-"use client"
+﻿"use client"
 
-import {
-  useCallback,
-  useEffect,
-  useState,
-  useTransition,
-  type ReactNode,
-} from "react"
-import {
-  ArrowLeftIcon,
-  ChevronRightIcon,
-  PencilIcon,
-  PlusIcon,
-  Trash2Icon,
-} from "lucide-react"
+import { useEffect, useState, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
-import {
-  Empty,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
-import { Input } from "@/components/ui/input"
+import { SettingsPane } from "@/components/settings-shell"
+import { SettingsList, SettingsListHeader } from "@/components/settings-list"
 import { Spinner } from "@/components/ui/spinner"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 
 type Summary = {
   id: string
   name: string
   displayName: string | null
   description: string
-  updatedAt: Date
 }
 type Result<T> = { success: true; data: T } | { success: false; error: string }
-type Page<T> =
-  | { view: "list" }
-  | { view: "detail"; id: string }
-  | { view: "form"; entry: T | null }
 
-function LibraryRead<T>({
-  load,
-  children,
+export function LibraryReadStatus({
+  label,
+  error,
+  retry,
 }: {
-  load: () => Promise<Result<T>>
-  children: (data: T) => ReactNode
+  label: string
+  error?: string
+  retry: () => void
 }) {
-  const [result, setResult] = useState<Result<T> | null>(null)
-  const [attempt, setAttempt] = useState(0)
-  useEffect(() => {
-    let current = true
-    load()
-      .then((value) => {
-        if (current) setResult(value)
-      })
-      .catch(() => {
-        if (current)
-          setResult({ success: false, error: "Could not reach the server." })
-      })
-    return () => {
-      current = false
-    }
-  }, [load, attempt])
-  if (!result)
-    return (
-      <p
-        role="status"
-        className="flex items-center gap-2 py-3 text-sm text-muted-foreground"
-      >
-        <Spinner />
-        Loading…
-      </p>
-    )
-  if (!result.success)
+  if (error) {
     return (
       <div className="flex flex-wrap items-center gap-2">
         <p role="alert" className="text-sm text-destructive">
-          {result.error}
+          {error}
         </p>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            setResult(null)
-            setAttempt(attempt + 1)
-          }}
-        >
+        <Button type="button" size="sm" variant="outline" onClick={retry}>
           Retry
         </Button>
       </div>
     )
-  return children(result.data)
-}
-
-function DeleteEntry({
-  entry,
-  noun,
-  removeEntry,
-  onDeleted,
-}: {
-  entry: Summary
-  noun: string
-  removeEntry: (id: string) => Promise<Result<{ id: string }>>
-  onDeleted: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [error, setError] = useState("")
-  const [pending, startTransition] = useTransition()
-  function remove() {
-    setError("")
-    startTransition(async () => {
-      try {
-        const result = await removeEntry(entry.id)
-        if (result.success) {
-          setOpen(false)
-          onDeleted()
-        } else setError(result.error)
-      } catch {
-        setError("Could not reach the server. Please try again.")
-      }
-    })
   }
   return (
-    <AlertDialog
-      open={open}
-      onOpenChange={(value) => {
-        if (!pending) {
-          setError("")
-          setOpen(value)
-        }
-      }}
+    <p
+      role="status"
+      className="flex items-center gap-2 text-xs text-muted-foreground"
     >
-      <AlertDialogTrigger
-        render={
-          <Button variant="ghost" size="sm" className="text-destructive" />
-        }
-      >
-        <Trash2Icon />
-        Delete
-      </AlertDialogTrigger>
-      <AlertDialogContent size="sm">
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete {noun}?</AlertDialogTitle>
-          <AlertDialogDescription className="wrap-anywhere">
-            Permanently delete{" "}
-            {entry.displayName
-              ? `${entry.displayName} (${entry.name})`
-              : entry.name}{" "}
-            from the shared library?
-          </AlertDialogDescription>
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          )}
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            variant="destructive"
-            disabled={pending}
-            onClick={remove}
-          >
-            {pending && <Spinner />}Delete {noun}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+      <Spinner /> {label}
+    </p>
   )
 }
 
-const dateFormat = new Intl.DateTimeFormat(undefined, {
-  dateStyle: "medium",
-  timeStyle: "short",
-})
+// A selected summary can paint immediately while its full form values load.
+export function useLibraryRead<T>(
+  load: (() => Promise<Result<T>>) | null,
+  accept: (value: T) => void
+) {
+  const [ready, setReady] = useState(!load)
+  const [error, setError] = useState("")
+  const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    if (!load) return
+    let current = true
+    load()
+      .then((result) => {
+        if (!current) return
+        if (result.success) {
+          accept(result.data)
+          setReady(true)
+        } else setError(result.error)
+      })
+      .catch(() => {
+        if (current) setError("Could not reach the server.")
+      })
+    return () => {
+      current = false
+    }
+  }, [load, accept, attempt])
+  function retry() {
+    setError("")
+    setAttempt((previous) => previous + 1)
+  }
+  return { ready, error, retry }
+}
 
-export function SharedLibraryPanel<S extends Summary, T extends Summary>({
+function LibraryList<S extends Summary>({
+  getList,
+  query,
+  noun,
+  icon,
+  onSelect,
+}: {
+  getList: () => Promise<Result<S[]>>
+  query: string
+  noun: string
+  icon: ReactNode
+  onSelect: (entry: S) => void
+}) {
+  const [entries, setEntries] = useState<S[]>([])
+  const read = useLibraryRead(getList, setEntries)
+  if (!read.ready) return <LibraryReadStatus label="Loading…" {...read} />
+  const filtered = entries.filter((entry) =>
+    [entry.displayName, entry.name, entry.description].some((value) =>
+      value?.toLowerCase().includes(query)
+    )
+  )
+  return (
+    <SettingsList
+      items={filtered.map((entry) => ({
+        id: entry.id,
+        name: entry.displayName || entry.name,
+        description: entry.description,
+        icon,
+        onSelect: () => onSelect(entry),
+      }))}
+      icon={icon}
+      emptyLabel={
+        entries.length
+          ? "No matching " + noun + "s"
+          : "No shared " + noun + "s yet"
+      }
+    />
+  )
+}
+
+export function SharedLibraryPanel<S extends Summary>({
   noun,
   title,
   description,
   icon,
   getList,
-  getEntry,
-  removeEntry,
   renderForm,
-  identifier,
-  renderDetail,
-  listMeta,
 }: {
   noun: string
   title: string
   description: string
   icon: ReactNode
   getList: () => Promise<Result<S[]>>
-  getEntry: (id: unknown) => Promise<Result<T>>
-  removeEntry: (id: string) => Promise<Result<{ id: string }>>
-  renderForm: (
-    entry: T | null,
-    saved: (id: string) => void,
-    cancel: () => void
-  ) => ReactNode
-  identifier: (entry: T) => string
-  renderDetail: (entry: T) => ReactNode
-  listMeta?: (entry: S) => string
+  renderForm: (entry: S | null, close: () => void) => ReactNode
 }) {
-  const [page, setPage] = useState<Page<T>>({ view: "list" })
   const [search, setSearch] = useState("")
-  const id = page.view === "detail" ? page.id : null
-  const loadDetail = useCallback(() => getEntry(id), [getEntry, id])
-  const showList = () => setPage({ view: "list" })
-  const showDetail = (id: string) => setPage({ view: "detail", id })
-  const query = search.trim().toLowerCase()
+  const [editor, setEditor] = useState<{ entry: S | null } | null>(null)
+  const label = "Shared " + title.toLowerCase()
+  if (editor) {
+    return (
+      <section
+        key={editor.entry?.id ?? "new"}
+        aria-label={label}
+        className="flex min-h-0 min-w-0 flex-col [&>form]:flex-1"
+      >
+        {renderForm(editor.entry, () => setEditor(null))}
+      </section>
+    )
+  }
   return (
-    <section
-      aria-label={"Shared " + title.toLowerCase()}
-      className="flex min-w-0 flex-col gap-3 p-4"
-    >
-      {page.view === "form" ? (
-        renderForm(page.entry, showDetail, () =>
-          page.entry ? showDetail(page.entry.id) : showList()
-        )
-      ) : page.view === "detail" ? (
-        <>
-          <Button
-            className="w-fit"
-            size="compact"
-            variant="ghost"
-            onClick={showList}
-          >
-            <ArrowLeftIcon />
-            {title}
-          </Button>
-          <LibraryRead key={page.id} load={loadDetail}>
-            {(entry) => (
-              <>
-                <div className="space-y-1">
-                  <h2 className="type-section-title wrap-anywhere">
-                    {entry.displayName || entry.name}
-                  </h2>
-                  <p className="font-mono text-xs wrap-anywhere text-muted-foreground">
-                    {identifier(entry)}
-                  </p>
-                </div>
-                <p className="text-sm wrap-anywhere whitespace-pre-wrap">
-                  {entry.description}
-                </p>
-                <div className="flex items-center gap-1 border-b pb-3">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage({ view: "form", entry })}
-                  >
-                    <PencilIcon />
-                    Edit
-                  </Button>
-                  <DeleteEntry
-                    entry={entry}
-                    noun={noun}
-                    removeEntry={removeEntry}
-                    onDeleted={showList}
-                  />
-                </div>
-                <div className="min-w-0">{renderDetail(entry)}</div>
-              </>
-            )}
-          </LibraryRead>
-        </>
-      ) : (
-        <>
-          <div className="pr-6">
-            <h2 className="type-section-title">{title}</h2>
-            <p className="text-xs leading-5 text-muted-foreground">
-              {description}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Input
-              aria-label={"Search " + title.toLowerCase()}
-              placeholder={"Search " + title.toLowerCase() + "…"}
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-            <Button
-              size="sm"
-              onClick={() => setPage({ view: "form", entry: null })}
-            >
-              <PlusIcon />
-              New {noun}
-            </Button>
-          </div>
-          <LibraryRead load={getList}>
-            {(entries) => {
-              const filtered = entries.filter((entry) =>
-                [entry.displayName, entry.name, entry.description].some(
-                  (value) => value?.toLowerCase().includes(query)
-                )
-              )
-              if (!filtered.length)
-                return (
-                  <Empty>
-                    <EmptyHeader>
-                      <EmptyMedia variant="icon">{icon}</EmptyMedia>
-                      <EmptyTitle>
-                        {entries.length
-                          ? "No matching " + title.toLowerCase()
-                          : "No shared " + title.toLowerCase() + " yet"}
-                      </EmptyTitle>
-                    </EmptyHeader>
-                  </Empty>
-                )
-              return (
-                <ul className="flex min-w-0 flex-col gap-0.5">
-                  {filtered.map((entry) => (
-                    <li key={entry.id}>
-                      <Button
-                        variant="ghost"
-                        onClick={() => showDetail(entry.id)}
-                        className="h-auto w-full justify-between gap-2 rounded-xl px-2.5 py-2 text-left"
-                      >
-                        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                          <span className="truncate type-control">
-                            {entry.displayName || entry.name}
-                          </span>
-                          {entry.displayName && (
-                            <span className="truncate font-mono text-xs font-normal text-muted-foreground">
-                              {entry.name}
-                            </span>
-                          )}
-                          <span className="truncate text-xs font-normal text-muted-foreground">
-                            {entry.description}
-                          </span>
-                          <time
-                            className="text-xs font-normal text-muted-foreground"
-                            dateTime={entry.updatedAt.toISOString()}
-                          >
-                            {listMeta && <>{listMeta(entry)} · </>}Updated{" "}
-                            {dateFormat.format(entry.updatedAt)}
-                          </time>
-                        </span>
-                        <ChevronRightIcon className="text-muted-foreground" />
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              )
-            }}
-          </LibraryRead>
-        </>
-      )}
-    </section>
+    <SettingsPane aria-label={label} className="gap-3">
+      <SettingsListHeader
+        title={title}
+        description={description}
+        noun={noun}
+        search={search}
+        onSearch={setSearch}
+        onCreate={() => setEditor({ entry: null })}
+      />
+      <LibraryList
+        getList={getList}
+        query={search.trim().toLowerCase()}
+        noun={noun}
+        icon={icon}
+        onSelect={(entry) => setEditor({ entry })}
+      />
+    </SettingsPane>
   )
 }

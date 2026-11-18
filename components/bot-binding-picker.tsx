@@ -1,17 +1,22 @@
 "use client"
 
-import { useId, useState } from "react"
+import { useId } from "react"
 import { Button } from "@/components/ui/button"
 import {
-  Field,
-  FieldError,
-  FieldLabel,
-  FieldTitle,
-} from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
-import { Checkbox } from "@/components/ui/checkbox"
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxTrigger,
+} from "@/components/ui/combobox"
+import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
 import type { SkillSummary } from "@/db/schema"
+
+type Option = Pick<SkillSummary, "id" | "name" | "displayName" | "description">
+const optionLabel = (option: Option) => option.displayName || option.name
 
 export function BotBindingPicker({
   label,
@@ -25,8 +30,7 @@ export function BotBindingPicker({
   onManage,
 }: {
   label: "Skills" | "Tools"
-  options:
-    Pick<SkillSummary, "id" | "name" | "displayName" | "description">[] | null
+  options: Option[] | null
   ids: string[]
   onChange: (ids: string[]) => void
   disabled: boolean
@@ -35,30 +39,25 @@ export function BotBindingPicker({
   onRetry: () => void
   onManage: () => void
 }) {
-  const [query, setQuery] = useState("")
-  const prefix = useId()
-  const visible = options?.filter((s) =>
-    [s.displayName, s.name, s.description].some((v) =>
-      v?.toLowerCase().includes(query.trim().toLowerCase())
-    )
-  )
+  const id = useId()
+  const selected = options?.filter((item) => ids.includes(item.id)) ?? []
+  const selectedNames = selected.map(optionLabel).join(", ")
+  const noun = label.toLowerCase()
   return (
-    <Field data-invalid={!!validationError}>
-      <div className="flex items-center justify-between">
-        <FieldTitle>{label}</FieldTitle>
-        {options && (
-          <span className="text-xs text-muted-foreground">
-            {ids.length} selected
-          </span>
-        )}
-      </div>
+    <Field className="min-w-0" data-invalid={!!validationError}>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
       {error ? (
         <div
           role="alert"
           className="flex items-center gap-2 text-sm text-destructive"
         >
           {error}
-          <Button variant="outline" size="compact" onClick={onRetry}>
+          <Button
+            type="button"
+            variant="outline"
+            size="compact"
+            onClick={onRetry}
+          >
             Retry
           </Button>
         </div>
@@ -68,76 +67,100 @@ export function BotBindingPicker({
           className="flex items-center gap-2 text-xs text-muted-foreground"
         >
           <Spinner />
-          Loading {label.toLowerCase()}…
+          Loading {noun}…
         </span>
-      ) : options.length === 0 ? (
-        <Button
-          variant="outline"
-          size="sm"
-          className="w-fit!"
-          onClick={onManage}
-        >
-          Manage shared {label.toLowerCase()}
-        </Button>
       ) : (
-        <>
-          <Input
-            type="search"
-            aria-label={"Search " + label.toLowerCase()}
-            placeholder={"Search " + label.toLowerCase() + "…"}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <div
-            className="max-h-40 overflow-y-auto"
-            role="group"
-            aria-label={"Available " + label.toLowerCase()}
+        <Combobox
+          multiple
+          items={options}
+          value={selected}
+          disabled={disabled}
+          itemToStringLabel={optionLabel}
+          itemToStringValue={(item) => item.id}
+          onValueChange={(items) =>
+            onChange(items.map((item) => item.id).sort())
+          }
+          filter={(item, query) => {
+            const search = query.trim().toLowerCase()
+            return [item.displayName, item.name, item.description].some(
+              (text) => text?.toLowerCase().includes(search)
+            )
+          }}
+        >
+          <ComboboxTrigger
+            id={id}
+            aria-label={label}
+            title={selectedNames || undefined}
+            aria-description={selectedNames || undefined}
+            aria-invalid={!!validationError}
+            aria-describedby={validationError ? id + "-error" : undefined}
+            render={<Button type="button" variant="secondary" />}
+            className="min-w-0 justify-between bg-input/50 px-2.5"
           >
-            {visible?.map((s) => (
-              <FieldLabel
-                key={s.id}
-                htmlFor={prefix + s.id}
-                className="flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 hover:bg-highlight"
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-baseline gap-1.5">
-                    <span className="truncate">{s.displayName || s.name}</span>
-                    {s.displayName && (
-                      <span className="truncate font-mono text-xs font-normal text-muted-foreground">
-                        {s.name}
-                      </span>
-                    )}
-                  </span>
-                  <span
-                    className="block truncate text-xs font-normal text-muted-foreground"
-                    title={s.description}
-                  >
-                    {s.description}
-                  </span>
-                </span>
-                <Checkbox
-                  id={prefix + s.id}
-                  aria-label={s.displayName || s.name}
-                  aria-invalid={!!validationError}
-                  disabled={disabled}
-                  checked={ids.includes(s.id)}
-                  onCheckedChange={(checked) =>
-                    onChange(
-                      checked ? [...ids, s.id] : ids.filter((id) => id !== s.id)
-                    )
-                  }
-                />
-              </FieldLabel>
-            ))}
-            {!visible?.length && (
-              <p className="p-2 text-xs text-muted-foreground">
-                No matching {label.toLowerCase()}.
-              </p>
+            <span className="min-w-0 flex-1 truncate text-left">
+              {selected.length ? optionLabel(selected[0]) : "Select " + noun}
+            </span>
+            {selected.length > 1 && (
+              <span className="text-xs text-muted-foreground">
+                +{selected.length - 1}
+              </span>
             )}
-          </div>
-        </>
+          </ComboboxTrigger>
+          <ComboboxContent
+            aria-label={"Select " + noun}
+            className="w-[max(var(--anchor-width),16rem)] min-w-0"
+          >
+            <ComboboxInput
+              showTrigger={false}
+              aria-label={"Search " + noun}
+              placeholder={"Search " + noun + "…"}
+            />
+            <ComboboxList aria-label={label}>
+              {(item: Option) => (
+                <ComboboxItem
+                  key={item.id}
+                  value={item}
+                  aria-label={optionLabel(item)}
+                >
+                  <span className="min-w-0">
+                    <span className="flex min-w-0 items-baseline gap-1.5">
+                      <span className="truncate">{optionLabel(item)}</span>
+                      {item.displayName && item.displayName !== item.name && (
+                        <span className="truncate font-mono text-xs font-normal text-muted-foreground">
+                          {item.name}
+                        </span>
+                      )}
+                    </span>
+                    <span
+                      className="block truncate text-xs font-normal text-muted-foreground"
+                      title={item.description}
+                    >
+                      {item.description}
+                    </span>
+                  </span>
+                </ComboboxItem>
+              )}
+            </ComboboxList>
+            <ComboboxEmpty>
+              {options.length ? (
+                "No matching " + noun
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={onManage}
+                >
+                  Manage shared {noun}
+                </Button>
+              )}
+            </ComboboxEmpty>
+          </ComboboxContent>
+        </Combobox>
       )}
-      {validationError && <FieldError>{validationError}</FieldError>}
+      {validationError && (
+        <FieldError id={id + "-error"}>{validationError}</FieldError>
+      )}
     </Field>
   )
 }

@@ -2,10 +2,12 @@ import { createInsertSchema } from "drizzle-zod"
 import { z } from "zod"
 import { toolDefinitions } from "./schema"
 import {
+  emptyToolInput,
   httpConfigSchema,
   maxSchemaBytes,
   parameterSchema,
   toolNameSchema,
+  type ToolInputSchema,
 } from "../lib/tool-definition"
 
 export const toolDefinitionSchema = createInsertSchema(toolDefinitions, {
@@ -50,6 +52,19 @@ export const toolDefinitionSchema = createInsertSchema(toolDefinitions, {
       })
   })
 
+export function formatToolInput(schema?: ToolInputSchema): string {
+  if (!schema) return ""
+  // An empty parameter map can still carry constraints or metadata.
+  if (
+    !Object.keys(schema.properties).length &&
+    schema.required?.length === 0 &&
+    schema.additionalProperties === false &&
+    Object.keys(schema).every((key) => Object.hasOwn(emptyToolInput, key))
+  )
+    return ""
+  return JSON.stringify(schema, null, 2)
+}
+
 // The editor holds JSON text; only the parsed and validated objects cross the action boundary.
 export const toolEditorSchema = z
   .object({
@@ -69,7 +84,9 @@ export const toolEditorSchema = z
       jsonError = "Keep the input schema within 32 KiB."
     else {
       try {
-        inputSchema = JSON.parse(fields.schemaText)
+        inputSchema = fields.schemaText.trim()
+          ? JSON.parse(fields.schemaText)
+          : emptyToolInput
       } catch {
         jsonError = "Enter valid JSON for the input parameters."
       }

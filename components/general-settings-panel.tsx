@@ -3,7 +3,8 @@
 import { useSyncExternalStore } from "react"
 import { useTheme } from "next-themes"
 
-import { SettingsRow } from "@/components/settings-shell"
+import { SettingsPane, SettingsRow } from "@/components/settings-shell"
+import { WorkspaceSettingsPanel } from "@/components/workspace-settings-panel"
 import {
   Select,
   SelectContent,
@@ -21,7 +22,11 @@ const themeOptions = [
 
 const subscribe = () => () => {}
 
-export function GeneralSettingsPanel() {
+export function GeneralSettingsPanel({
+  onWorkspaceSaved,
+}: {
+  onWorkspaceSaved?: () => void
+}) {
   const { theme, setTheme, forcedTheme } = useTheme()
   // The saved preference is only available in the browser. Keep the server
   // render and first hydration render identical without hiding the whole row.
@@ -32,11 +37,8 @@ export function GeneralSettingsPanel() {
   )
 
   return (
-    <section
-      className="flex min-w-0 flex-col p-4"
-      aria-labelledby="general-settings-title"
-    >
-      <h2 id="general-settings-title" className="pr-8 type-section-title">
+    <SettingsPane aria-labelledby="general-settings-title">
+      <h2 id="general-settings-title" className="type-section-title">
         General
       </h2>
       <SettingsRow
@@ -71,6 +73,7 @@ export function GeneralSettingsPanel() {
           </Select>
         }
       />
-    </section>
+      <WorkspaceSettingsPanel onSaved={onWorkspaceSaved} />
+    </SettingsPane>
   )
 }

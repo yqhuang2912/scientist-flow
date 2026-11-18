@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/empty"
 import { BotDialog } from "@/components/bot-dialog"
 import { ChatAvatar } from "@/components/chat-avatar"
+import { SidebarTrigger } from "@/components/ui/sidebar"
 
 export const dynamic = "force-dynamic"
 
@@ -17,7 +18,11 @@ export default function Page() {
   const avatarSeed = nanoid()
 
   return (
-    <main className="flex min-h-svh items-center justify-center bg-background px-6 py-12 text-foreground">
+    <main className="relative flex min-h-svh items-center justify-center bg-background px-6 py-12 text-foreground">
+      <SidebarTrigger
+        aria-label="Open sidebar"
+        className="absolute top-2 left-3 md:hidden"
+      />
       <Empty className="max-w-xl border-0 bg-transparent p-0">
         <EmptyHeader className="max-w-md gap-3">
           <EmptyMedia className="mb-1">

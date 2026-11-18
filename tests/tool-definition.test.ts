@@ -1,9 +1,21 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { toolDefinitionSchema, toolEditorSchema } from "../db/tool-form-schema"
-import { emptyToolInput, toModelToolDefinition } from "../lib/tool-definition"
+import {
+  formatToolInput,
+  toolDefinitionSchema,
+  toolEditorSchema,
+} from "../db/tool-form-schema"
+import {
+  emptyToolInput,
+  toModelToolDefinition,
+  type ToolInputSchema,
+} from "../lib/tool-definition"
 
-const query = { type: "string", description: "Words to find", minLength: 1 }
+const query = {
+  type: "string",
+  description: "Words to find",
+  minLength: 1,
+} as const
 const inputSchema = {
   ...emptyToolInput,
   properties: {
@@ -12,7 +24,7 @@ const inputSchema = {
     reviewed: { type: "boolean", enum: [false, true] },
   },
   required: ["query"],
-}
+} satisfies ToolInputSchema
 const config = {
   method: "GET",
   url: "https://example.com/search",
@@ -57,6 +69,34 @@ test("editor and action round-trip typed objects, optional parameters, bounds, a
     toolEditorSchema.safeParse({ ...editor, schemaText: "broken" }).success,
     false
   )
+})
+
+test("blank input round-trips as the default no-parameter schema", () => {
+  assert.equal(formatToolInput(), "")
+  const reordered = {
+    required: [],
+    additionalProperties: false,
+    properties: {},
+    type: "object" as const,
+  }
+  assert.equal(formatToolInput(reordered), "")
+  for (const schemaText of ["", "  \n"]) {
+    assert.deepEqual(
+      toolEditorSchema.parse({ ...editor, schemaText }).inputSchema,
+      emptyToolInput
+    )
+  }
+  for (const schema of [
+    inputSchema,
+    { ...emptyToolInput, maxProperties: 0 },
+    { ...emptyToolInput, additionalProperties: true },
+  ]) {
+    const schemaText = formatToolInput(schema)
+    assert.deepEqual(
+      toolEditorSchema.parse({ ...editor, schemaText }).inputSchema,
+      schema
+    )
+  }
 })
 
 test("only editable fields, dedicated bearer references and fixed HTTP configurations are accepted", () => {

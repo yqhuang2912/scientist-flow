@@ -35,7 +35,9 @@ type UpdateBotResult =
   | { success: true; bot: typeof bots.$inferSelect }
   | { success: false; error: string }
 
-type DeleteBotResult = { success: true } | { success: false; error: string }
+type DeleteBotResult =
+  | { success: true; deletedChatIds: string[] }
+  | { success: false; error: string }
 
 const missingSkill = {
   success: false as const,
@@ -268,7 +270,7 @@ export async function deleteBot(botId: string): Promise<DeleteBotResult> {
       await db.delete(chats).where(inArray(chats.id, directChatIds))
     }
 
-    return { success: true }
+    return { success: true, deletedChatIds: directChatIds }
   } catch (error) {
     console.error("Failed to delete bot", error)
     return { success: false, error: "The bot could not be deleted." }

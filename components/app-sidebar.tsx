@@ -1,11 +1,9 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { nanoid } from "nanoid"
 import { PlusIcon, SearchIcon, SettingsIcon, DiamondIcon } from "lucide-react"
 import { usePathname, useRouter } from "next/navigation"
 
-import { BotDialog } from "@/components/bot-dialog"
 import { BotName } from "@/components/bot-name"
 import { ChatAvatar } from "@/components/chat-avatar"
 import { compactChatAvatarStyles } from "@/components/ui/compact-styles"
@@ -100,23 +98,24 @@ export function AppSidebar({
   const pathname = usePathname()
   const router = useRouter()
   const { setOpenMobile } = useSidebar()
-  const [botDialogOpen, setBotDialogOpen] = useState(false)
   const [taskDialogOpen, setTaskDialogOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<
     "general" | "skills" | "tools" | null
   >(null)
   useEffect(() => {
+    const manageGeneral = () => setSettingsTab("general")
+    window.addEventListener("scientistflow:manage-general", manageGeneral)
     const manageSkills = () => setSettingsTab("skills")
     window.addEventListener("scientistflow:manage-skills", manageSkills)
     const manageTools = () => setSettingsTab("tools")
     window.addEventListener("scientistflow:manage-tools", manageTools)
     return () => {
+      window.removeEventListener("scientistflow:manage-general", manageGeneral)
       window.removeEventListener("scientistflow:manage-skills", manageSkills)
       window.removeEventListener("scientistflow:manage-tools", manageTools)
     }
   }, [])
-  const [avatarSeed] = useState(() => nanoid())
   const [mac] = useState(() => isMac())
 
   function handleChatSelect(chatId: string) {
@@ -292,12 +291,6 @@ export function AppSidebar({
       </Sidebar>
 
       {/* Dialogs */}
-      <BotDialog
-        initialAvatarSeed={avatarSeed}
-        open={botDialogOpen}
-        onOpenChange={setBotDialogOpen}
-        showTrigger={false}
-      />
       <TaskDialog
         key={taskDialogOpen ? "new-task-open" : "new-task-closed"}
         bots={bots}
@@ -312,10 +305,9 @@ export function AppSidebar({
         bots={bots}
         open={settingsTab !== null}
         onOpenChange={(open) => setSettingsTab(open ? "general" : null)}
-        onManageBots={() => {
-          setSettingsTab(null)
-          setBotDialogOpen(true)
-        }}
+        onWorkspaceSaved={() =>
+          window.dispatchEvent(new Event("scientistflow:workspace-root-changed"))
+        }
       />
 
       {/* Search command palette */}
