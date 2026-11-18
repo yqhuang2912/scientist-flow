@@ -7,6 +7,15 @@ button metrics below. [Input / Field](./visual-inputs.md) supersedes form input
 surfaces and field typography. Other geometry below describes the existing implementation,
 not components already migrated to the new reference.
 
+[Select trigger / menu](./visual-selects.md) now governs the shared Select
+family and the Settings theme selector (reference 09–10).
+
+[Sequential visual rollout](./visual-rollout.md) supersedes the remaining legacy
+metrics below for references 11–35. It records each family's current values,
+application adaptations, browser coverage and screenshots. Menus, navigation,
+tabs, chat and document text deliberately have different roles/densities;
+`compact-styles.ts` is no longer a universal source for all these families.
+
 Settings navigation — specifically the Bots and Workspace items — is the density
 reference. Keep the current Inter
 typeface, neutral light/dark themes, Lucide icons, and Base UI shadcn primitives.
@@ -74,9 +83,11 @@ avatar, followed by the body with an 8 px gap. The body spans the identity
 line's full width: its outer edge aligns with the avatar, not the name column.
 Assistant body content has a 4 px optical inset to match the visible avatar
 and copy glyphs inside their containers.
-Bot names use 13 px medium text
-and their job uses the shared muted 12 px `BotName` treatment. Message body text
-on both sides is also 13 px, with relaxed line spacing for paragraphs and lists.
+Bot names use 14 px medium text
+and their job uses the shared muted 12 px `BotName` treatment. Assistant Markdown
+uses `type-chat-response` (15/26 px, regular); user Markdown uses
+`type-chat-prompt` (14/22 px, medium). Keep normal letter/word spacing and
+Streamdown's 16 px block spacing. See [chat typography](./visual-chat-markdown.md).
 User messages
 show only `You` in that line until a user profile is available. Keep user
 identity right-aligned and bot identity left-aligned with their content column.

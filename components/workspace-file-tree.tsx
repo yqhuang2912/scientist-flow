@@ -147,11 +147,11 @@ function FileTreeRow({
         }
       }}
       className={cn(
-        "w-full min-w-0 justify-start font-normal group-hover/tree-row:bg-highlight",
-        hasActions && "pr-9",
+        "w-full min-w-0 justify-start group-hover/tree-row:bg-sidebar-accent group-hover/tree-row:text-sidebar-accent-foreground",
+        hasActions && "pr-8",
         selected || menuOpen
-          ? "bg-accent text-accent-foreground aria-expanded:bg-accent"
-          : "aria-expanded:bg-transparent aria-expanded:group-hover/tree-row:bg-highlight"
+          ? "bg-sidebar-accent text-sidebar-accent-foreground aria-expanded:bg-sidebar-accent"
+          : "aria-expanded:bg-transparent aria-expanded:group-hover/tree-row:bg-sidebar-accent"
       )}
     >
       {node.entry.isDir ? (
@@ -164,7 +164,10 @@ function FileTreeRow({
           <FolderIcon />
         </>
       ) : (
-        <FileIcon />
+        <>
+          <span aria-hidden className="size-4 shrink-0" />
+          <FileIcon />
+        </>
       )}
       <span className="min-w-0 truncate" title={node.entry.name}>
         {node.entry.name}
@@ -269,7 +272,7 @@ function FileTreeNode({
     >
       {row}
       <CollapsibleContent>
-        <div className="ml-4 flex min-w-0 flex-col">
+        <div className={cn("flex min-w-0 flex-col", depth < 6 && "ml-4")}>
           {node.error && (
             <div
               role="alert"

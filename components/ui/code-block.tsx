@@ -14,12 +14,12 @@ import { toast } from "@/components/ui/toast"
 import { CheckIcon, CopyIcon } from "lucide-react"
 
 const codeBlockVariants = cva(
-  "group/code-block relative flex w-full min-w-0 flex-col overflow-hidden rounded-2xl text-[13px] has-[>[data-slot=code-block-content]:focus-visible]:ring-3 has-[>[data-slot=code-block-content]:focus-visible]:ring-ring/30 data-[size=sm]:rounded-xl data-[size=sm]:text-xs",
+  "group/code-block relative flex w-full min-w-0 flex-col overflow-hidden rounded-2xl text-[13px] has-[>[data-slot=code-block-content]:focus-visible]:ring-3 has-[>[data-slot=code-block-content]:focus-visible]:ring-ring/30 data-[size=sm]:rounded-xl data-[size=sm]:text-xs data-[size=sm]:ring-0",
   {
     variants: {
       variant: {
         default:
-          "bg-muted text-foreground ring-1 ring-foreground/5 dark:ring-foreground/10",
+          "bg-surface text-foreground ring-1 ring-foreground/5 dark:ring-foreground/10",
         destructive:
           "bg-destructive/5 text-destructive ring-1 ring-destructive/15 dark:bg-destructive/10 dark:ring-destructive/20",
       },

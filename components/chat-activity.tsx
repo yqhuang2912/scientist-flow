@@ -113,7 +113,7 @@ function ReasoningStep({
   return (
     <TraceCollapsible open={open ?? running} onOpenChange={setOpen}>
       <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
-      <TraceCollapsibleContent className="max-h-64 overflow-y-auto whitespace-pre-wrap">
+      <TraceCollapsibleContent className="mt-1 max-h-56 overflow-y-auto border-l-2 text-sm leading-6 font-medium whitespace-pre-wrap">
         {part.text}
       </TraceCollapsibleContent>
     </TraceCollapsible>

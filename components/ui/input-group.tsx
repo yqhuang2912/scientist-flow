@@ -12,7 +12,9 @@ function InputGroup({
   className,
   variant = "default",
   ...props
-}: React.ComponentProps<"div"> & { variant?: "default" | "muted" }) {
+}: React.ComponentProps<"div"> & {
+  variant?: "default" | "muted" | "composer"
+}) {
   return (
     <div
       data-slot="input-group"
@@ -23,6 +25,8 @@ function InputGroup({
         variant === "muted"
           ? "h-7.5 bg-muted! transition-colors has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-ring/50"
           : "h-8 bg-input/50 transition-[color,box-shadow] duration-200 has-[[data-slot=input-group-control]:focus-visible]:ring-3 has-[[data-slot=input-group-control]:focus-visible]:ring-ring/30 motion-reduce:transition-none",
+        variant === "composer" &&
+          "rounded-3xl border-border bg-chat-input py-1 shadow-sm",
         className
       )}
       {...props}
@@ -141,13 +145,17 @@ function InputGroupTextarea({
   className,
   size = "default",
   ...props
-}: React.ComponentProps<"textarea"> & { size?: "default" | "sm" }) {
+}: React.ComponentProps<"textarea"> & {
+  size?: "default" | "sm" | "composer"
+}) {
   return (
     <Textarea
       data-slot="input-group-control"
       className={cn(
         "flex-1 resize-none rounded-none border-0 bg-transparent py-2 text-base font-normal shadow-none ring-0 transition-colors duration-150 focus-visible:ring-0 disabled:bg-transparent aria-invalid:ring-0 md:text-[13px] dark:bg-transparent dark:disabled:bg-transparent",
         size === "sm" && "text-[13px] leading-5 max-md:text-[13px]",
+        size === "composer" &&
+          "px-4 py-2 text-sm leading-[1.625] font-medium md:text-sm",
         className
       )}
       {...props}

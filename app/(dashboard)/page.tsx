@@ -23,9 +23,7 @@ export default function Page() {
           <EmptyMedia className="mb-1">
             <ChatAvatar seed={avatarSeed} animated className="size-9" />
           </EmptyMedia>
-          <EmptyTitle className="text-sm font-semibold tracking-normal">
-            Meet your first bot
-          </EmptyTitle>
+          <EmptyTitle size="welcome">Meet your first bot</EmptyTitle>
           <EmptyDescription className="max-w-sm text-sm leading-5 text-muted-foreground">
             Every bot gets its own personality, memory, and face. Spin one up
             and start the conversation.

@@ -5,11 +5,7 @@ import { cjk } from "@streamdown/cjk"
 import { code } from "@streamdown/code"
 import { math } from "@streamdown/math"
 import { mermaid } from "@streamdown/mermaid"
-import {
-  Streamdown,
-  defaultComponents,
-  type ExtraProps,
-} from "streamdown"
+import { Streamdown, defaultComponents, type ExtraProps } from "streamdown"
 import {
   CheckIcon,
   CopyIcon,
@@ -31,25 +27,12 @@ function MarkdownCode({
   ...props
 }: ComponentProps<"code"> & ExtraProps) {
   const language = /language-(\S+)/.exec(className ?? "")?.[1] ?? ""
-  if (!("data-block" in props)) {
+  if (!("data-block" in props) || language === "mermaid") {
+    const StreamdownCode = defaultComponents.code
     return (
-      <code
-        className={cn(
-          "rounded-sm bg-muted px-1 py-0.5 font-mono text-[0.95em]",
-          className
-        )}
-        {...props}
-      >
+      <StreamdownCode node={node} className={className} {...props}>
         {children}
-      </code>
-    )
-  }
-  if (language === "mermaid") {
-    const Diagram = defaultComponents.code
-    return (
-      <Diagram node={node} className={className} {...props}>
-        {children}
-      </Diagram>
+      </StreamdownCode>
     )
   }
   return (
@@ -103,12 +86,18 @@ const diagram: ComponentProps<typeof Streamdown>["mermaid"] = {
 
 export const ChatMarkdown = memo(function ChatMarkdown({
   className,
+  variant = "assistant",
   ...props
-}: ComponentProps<typeof Streamdown>) {
+}: ComponentProps<typeof Streamdown> & {
+  variant?: "assistant" | "user"
+}) {
   return (
     <Streamdown
       className={cn(
         "chat-markdown w-full min-w-0 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+        "[&_[data-streamdown=heading-1]]:font-serif [&_[data-streamdown=heading-1]]:font-bold",
+        "[&_[data-streamdown=inline-code]]:rounded-sm [&_[data-streamdown=inline-code]]:bg-surface [&_[data-streamdown=table-header]]:bg-surface/80",
+        variant === "user" ? "type-chat-prompt" : "type-chat-response",
         className
       )}
       plugins={plugins}

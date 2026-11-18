@@ -179,7 +179,7 @@ const ChatTurn = memo(function ChatTurn({
           <Bubble
             align="end"
             variant="muted"
-            className="max-w-full sm:max-w-[90%]"
+            className="max-w-full sm:max-w-[85%]"
           >
             <BubbleContent>
               <div className="flex min-w-0 flex-col gap-2">
@@ -201,6 +201,7 @@ const ChatTurn = memo(function ChatTurn({
                         </span>
                       )}
                       <ChatMarkdown
+                        variant="user"
                         className={cn(
                           "min-w-0",
                           addressedBot &&

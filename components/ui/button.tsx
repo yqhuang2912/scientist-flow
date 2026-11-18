@@ -32,7 +32,7 @@ const buttonVariants = cva(
         // component pass; do not infer them from the 01–04 reference samples.
         xs: "h-6 gap-1 px-2 text-xs leading-5 font-medium in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
         lg: `${compactItemTypography} h-9 gap-1.5 px-3 has-data-[icon=inline-end]:pr-2.5 has-data-[icon=inline-start]:pl-2.5`,
-        row: `${compactItemTypography} h-7.5 gap-2 px-2.5`,
+        row: "h-7 gap-1.5 rounded-[calc(var(--radius-xl)*1.4)] px-2.5 py-2 type-control-compact",
         icon: `type-control ${iconButtonStyles} size-7.5 transition-none duration-0`,
         "icon-xs": `type-control ${iconButtonStyles} size-6 transition-none duration-0`,
         // Preserve the existing 30px toolbar alias; close controls opt in to 28px.

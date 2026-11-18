@@ -145,12 +145,12 @@ export function WorkspaceSettingsPanel({ onSaved }: { onSaved?: () => void }) {
     <div className="flex flex-col px-4 pb-4">
       <div className="flex flex-col gap-1 py-3.5">
         <div className="flex flex-col gap-1 sm:pr-6">
-          <h3 className="shrink-0 text-[13px] font-medium">Root directory</h3>
-          <span className="min-w-0 font-mono text-[11px] break-all text-muted-foreground">
+          <h3 className="shrink-0 type-section-title">Root directory</h3>
+          <span className="min-w-0 font-mono text-xs break-all text-muted-foreground">
             {loaded ? (savedDir ?? "Not set") : "Loading…"}
           </span>
         </div>
-        <p className="text-[12px] leading-relaxed text-muted-foreground">
+        <p className="text-sm leading-5 text-muted-foreground">
           {isEditing
             ? "Choose an empty directory to move all task workspaces."
             : "Choose an empty directory for your task workspaces."}
@@ -221,7 +221,7 @@ export function WorkspaceSettingsPanel({ onSaved }: { onSaved?: () => void }) {
                 <p className="text-[13px] font-medium">
                   Move all task workspaces?
                 </p>
-                <p className="text-[12px] leading-relaxed text-muted-foreground">
+                <p className="text-sm leading-5 text-muted-foreground">
                   All task directories will move to the new location.
                 </p>
                 <div className="flex justify-end gap-2 pt-1">

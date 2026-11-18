@@ -270,7 +270,7 @@ export function CreateWorkspaceEntryDialog({
             )}
           </FieldGroup>
         </form>
-        <DialogFooter className="mx-0 mb-0 flex-row justify-end rounded-b-3xl border-t px-4 py-3">
+        <DialogFooter className="mx-0 mb-0 flex-row justify-end">
           <Button variant="outline" disabled={pending} onClick={onClose}>
             Cancel
           </Button>
@@ -434,7 +434,7 @@ export function DeleteWorkspaceFileDialog({
             </Button>
           )}
         </div>
-        <AlertDialogFooter className="mx-0 mb-0 rounded-b-3xl border-t px-4 py-3">
+        <AlertDialogFooter className="mx-0 mb-0">
           <Button
             ref={cancelRef}
             variant="outline"
@@ -594,7 +594,11 @@ export function DeleteWorkspaceFolderDialog({
               {target.relativePath}/
             </p>
             {inspection && (
-              <Badge variant="secondary" className="mt-0.5 w-fit text-[10px]">
+              <Badge
+                variant="secondary"
+                size="compact"
+                className="mt-0.5 w-fit"
+              >
                 {inspection.isEmpty ? "空文件夹" : "包含内容"}
               </Badge>
             )}
@@ -676,7 +680,7 @@ export function DeleteWorkspaceFolderDialog({
             )}
           </FieldGroup>
         </form>
-        <AlertDialogFooter className="mx-0 mb-0 rounded-b-3xl border-t px-4 py-3">
+        <AlertDialogFooter className="mx-0 mb-0">
           <Button
             ref={cancelRef}
             variant="outline"

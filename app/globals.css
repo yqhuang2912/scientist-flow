@@ -240,6 +240,18 @@
   @apply text-sm leading-relaxed font-medium;
 }
 
+/* Chat is distinct from both controls and the document editor. */
+@utility type-chat-response {
+  font-size: 0.9375rem;
+  line-height: calc(var(--spacing) * 6.5);
+  font-weight: var(--font-weight-normal);
+}
+
+@utility type-chat-prompt {
+  @apply text-sm font-medium;
+  line-height: calc(var(--spacing) * 5.5);
+}
+
 @utility type-document {
   font-size: 0.9375rem;
   line-height: 1.75;

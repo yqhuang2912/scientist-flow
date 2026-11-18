@@ -100,15 +100,15 @@ export function ChatComposer({
           <FieldLabel htmlFor={inputId} className="sr-only">
             Message
           </FieldLabel>
-          <InputGroup variant="muted">
+          <InputGroup variant="composer">
             <InputGroupTextarea
               {...form.register("text")}
               id={inputId}
-              size="sm"
+              size="composer"
               aria-invalid={!!error}
               aria-describedby={error ? `${inputId}-error` : undefined}
               placeholder="Message your bot..."
-              className="max-h-48 min-h-16 p-3"
+              className="max-h-48 min-h-13"
               onCompositionStart={() => {
                 composing.current = true
               }}

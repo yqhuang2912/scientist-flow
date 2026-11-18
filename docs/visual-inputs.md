@@ -109,5 +109,5 @@ global constants.
 - No new tests mirror this reversible styling implementation. Checks cover the
   changed components and selected pages, not the entire application.
 
-Next suggested independent pass: Select trigger / menu (reference 09–10).
-Do not continue automatically.
+The subsequent [Select trigger / menu pass](./visual-selects.md) adopts 09–10
+independently; it does not expand this input pass's scope.

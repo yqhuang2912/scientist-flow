@@ -36,7 +36,7 @@ export function GeneralSettingsPanel() {
       className="flex min-w-0 flex-col p-4"
       aria-labelledby="general-settings-title"
     >
-      <h2 id="general-settings-title" className="pr-8 text-[13px] font-medium">
+      <h2 id="general-settings-title" className="pr-8 type-section-title">
         General
       </h2>
       <SettingsRow
@@ -56,11 +56,7 @@ export function GeneralSettingsPanel() {
                 setTheme(value)
             }}
           >
-            <SelectTrigger
-              variant="secondary"
-              className="w-28"
-              aria-label="Theme"
-            >
+            <SelectTrigger className="w-28" aria-label="Theme">
               <SelectValue placeholder="Theme" />
             </SelectTrigger>
             <SelectContent align="end" alignItemWithTrigger={false}>

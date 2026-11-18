@@ -502,7 +502,7 @@ function ResearchWorkspaceInner({
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    aria-label="返回聊天"
+                    aria-label="Back to chat"
                     data-workspace-back
                     onClick={onBack}
                   />
@@ -510,7 +510,7 @@ function ResearchWorkspaceInner({
               >
                 <ArrowLeftIcon />
               </TooltipTrigger>
-              <TooltipContent>返回聊天</TooltipContent>
+              <TooltipContent>Back to chat</TooltipContent>
             </Tooltip>
           )}
           <div className="flex min-w-0 flex-col gap-0">
@@ -545,7 +545,7 @@ function ResearchWorkspaceInner({
                 className={cn("size-4", treeLoading && "animate-spin")}
               />
             </TooltipTrigger>
-            <TooltipContent>刷新文件树</TooltipContent>
+            <TooltipContent>Refresh file tree</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger
@@ -700,7 +700,7 @@ function ResearchWorkspaceInner({
               className="w-fit"
               onClick={() => void loadStatus()}
             >
-              重试
+              Retry
             </Button>
           </div>
         )}
@@ -742,7 +742,7 @@ function ResearchWorkspaceInner({
                   className="w-fit"
                   onClick={handleRefresh}
                 >
-                  重试
+                  Retry
                 </Button>
               </div>
             )}
@@ -761,7 +761,7 @@ function ResearchWorkspaceInner({
             />
             {rootTruncated && (
               <p className="py-1 text-[11px] text-muted-foreground">
-                根目录列表已截断：仅显示前 200 项及本次新建项。
+                Showing the first 200 items and newly created items.
               </p>
             )}
           </div>

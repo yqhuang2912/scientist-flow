@@ -20,7 +20,7 @@ function SourceCode({
     return (
       <code
         className={cn(
-          "rounded-sm bg-muted px-1 py-0.5 font-mono text-[0.95em]",
+          "rounded-sm bg-muted px-1 py-0.5 font-mono text-[0.9333em]",
           className
         )}
         {...props}
@@ -72,7 +72,7 @@ export const DocumentMarkdown = memo(function DocumentMarkdown({
       controls={false}
       parseIncompleteMarkdown={false}
       urlTransform={(url) => (/^(https?:|mailto:)/i.test(url) ? url : "")}
-      className="document-markdown mx-auto min-w-0 max-w-[68ch] text-[14px] wrap-anywhere [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+      className="document-markdown mx-auto max-w-[68ch] min-w-0 type-document wrap-anywhere [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
     >
       {normalizeDisplayMath(content)}
     </Streamdown>

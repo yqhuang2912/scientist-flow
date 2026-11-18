@@ -38,12 +38,14 @@ function ItemSeparator({
 const itemVariants = cva(
   cn(
     compactItemStyles,
-    "group/item flex w-full flex-wrap items-center border border-transparent transition-colors duration-100 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 motion-reduce:transition-none [&:is(a,button)]:hover:bg-highlight"
+    "group/item flex w-full flex-wrap items-center border border-transparent transition-colors duration-100 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 motion-reduce:transition-none [&:is(a,button)]:hover:bg-highlight"
   ),
   {
     variants: {
       variant: {
         default: "border-transparent",
+        resource:
+          "rounded-2xl border-border px-4 py-3 text-sm font-normal [&:is(a,button)]:hover:bg-muted/50",
         outline: "border-border",
         muted: "border-transparent bg-muted/50",
       },
@@ -134,7 +136,7 @@ function ItemTitle({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="item-title"
       className={cn(
-        "line-clamp-1 flex w-fit items-center gap-2 text-[13px] leading-snug font-medium underline-offset-4",
+        "line-clamp-1 flex w-fit items-center gap-2 text-[13px] leading-snug font-medium underline-offset-4 group-data-[variant=resource]/item:type-control group-data-[variant=resource]/item:leading-5",
         className
       )}
       {...props}

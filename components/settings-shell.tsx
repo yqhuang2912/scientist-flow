@@ -3,8 +3,8 @@
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
-  compactItemStyles,
-  compactItemStates,
+  navigationItemStyles,
+  navigationItemStates,
 } from "@/components/ui/compact-styles"
 
 /**
@@ -58,10 +58,10 @@ export function SettingsNavItem({
       aria-current={active ? "page" : undefined}
       data-active={active || undefined}
       className={cn(
-        compactItemStyles,
-        compactItemStates,
-        "w-auto min-w-0 justify-start sm:w-full",
-        !active && "text-muted-foreground"
+        navigationItemStyles,
+        navigationItemStates,
+        "h-7.5 w-auto min-w-0 justify-start gap-1.5 sm:w-full",
+        !active && "text-sidebar-foreground"
       )}
     >
       <span className="flex size-4 shrink-0 items-center justify-center [&_svg]:size-4">
@@ -82,7 +82,7 @@ export function SettingsSection({
   return (
     <div className="flex flex-col">
       {title && (
-        <p className="px-4 pt-4 pb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+        <p className="px-4 pt-4 pb-2 text-xs font-medium text-muted-foreground">
           {title}
         </p>
       )}
@@ -114,9 +114,9 @@ export function SettingsRow({
       )}
     >
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="text-[13px] font-medium">{label}</span>
+        <span className="type-control">{label}</span>
         {description && (
-          <span className="text-[12px] leading-relaxed text-muted-foreground">
+          <span className="text-sm leading-5 text-muted-foreground">
             {description}
           </span>
         )}

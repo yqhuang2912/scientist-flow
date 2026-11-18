@@ -89,9 +89,10 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
     width: 1200,
     height: 800,
   })
-  const [rect, setRect] = useState<WindowRect>(() =>
-    initialDocumentRect(viewport)
-  )
+  const [preferredRect, setRect] = useState<WindowRect | null>(null)
+  const rect = preferredRect
+    ? constrainDocumentRect(preferredRect, viewport)
+    : initialDocumentRect(viewport)
   const [maximized, setMaximized] = useState(false)
   const [minimized, setMinimized] = useState(false)
   const windowRef = useRef<HTMLElement>(null)
@@ -110,11 +111,6 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
     function resize() {
       const view = { width: window.innerWidth, height: window.innerHeight }
       setViewport(view)
-      setRect((previous) =>
-        hadDocument.current
-          ? constrainDocumentRect(previous, view)
-          : initialDocumentRect(view)
-      )
     }
     resize()
     window.addEventListener("resize", resize)
@@ -138,12 +134,7 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
       hadDocument.current = false
       if (returnFocus.current?.isConnected)
         returnFocus.current.focus({ preventScroll: true })
-      setRect(
-        initialDocumentRect({
-          width: window.innerWidth,
-          height: window.innerHeight,
-        })
-      )
+      setRect(null)
       setMaximized(false)
     }
     // Buffer changes must not steal focus from the editor or the background chat.
@@ -261,8 +252,8 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
         tabIndex={-1}
         hidden={minimized}
         className={cn(
-          "fixed z-40 flex flex-col overflow-hidden border bg-background text-foreground shadow-2xl outline-none",
-          !maximized && !small && "rounded-2xl",
+          "fixed z-40 flex flex-col overflow-hidden border bg-background text-foreground shadow-xl outline-none",
+          !maximized && !small && "rounded-3xl",
           minimized && "hidden"
         )}
         style={{
@@ -328,10 +319,11 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
           />
           <span
             id="document-title"
-            className="pointer-events-none flex min-w-0 flex-1 items-center gap-1 text-[13px] font-medium select-none"
-            title={name}
+            className="pointer-events-none flex min-w-0 flex-1 items-center gap-1 text-[13px] leading-[1.5] font-medium select-none"
           >
-            <span className="truncate">{name}</span>
+            <span className="pointer-events-auto truncate select-text" title={name}>
+              {name}
+            </span>
             {dirty && (
               <span
                 className="shrink-0 text-muted-foreground"
@@ -345,6 +337,38 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
             Drag the blank title bar to move. With this toolbar focused, use
             arrow keys to move or Shift and arrow keys to resize.
           </span>
+          <div className="ml-auto flex shrink-0 gap-0.5">
+            <WindowButton
+              label="Minimize file"
+              onClick={() => {
+                setMinimized(true)
+                requestAnimationFrame(() => restoreRef.current?.focus())
+              }}
+            >
+              <MinusIcon />
+            </WindowButton>
+            <WindowButton
+              label={maximized ? "Restore window size" : "Maximize file"}
+              disabled={small}
+              onClick={() => setMaximized((value) => !value)}
+            >
+              {maximized ? <Minimize2Icon /> : <Maximize2Icon />}
+            </WindowButton>
+            <WindowButton
+              label="Close file"
+              disabled={doc.saving || !!state.deletion}
+              onClick={session.requestClose}
+            >
+              <XIcon />
+            </WindowButton>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-1">
+          <p className="max-h-12 min-w-0 flex-[1_0_min(100%,12rem)] overflow-y-auto text-xs leading-4 wrap-anywhere text-muted-foreground">
+            <span className="font-medium">{doc.taskName}</span>
+            <span aria-hidden> / </span>
+            {doc.relativePath}
+          </p>
           <div className="ml-auto flex shrink-0 items-center gap-1">
             {markdown && (
               <ToggleGroup
@@ -379,32 +403,6 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
               )}
               Save
             </Button>
-            <span className="mx-0.5 h-4 w-px bg-border" aria-hidden />
-            <div className="flex shrink-0 gap-0.5">
-              <WindowButton
-                label="Minimize file"
-                onClick={() => {
-                  setMinimized(true)
-                  requestAnimationFrame(() => restoreRef.current?.focus())
-                }}
-              >
-                <MinusIcon />
-              </WindowButton>
-              <WindowButton
-                label={maximized ? "Restore window size" : "Maximize file"}
-                disabled={small}
-                onClick={() => setMaximized((value) => !value)}
-              >
-                {maximized ? <Minimize2Icon /> : <Maximize2Icon />}
-              </WindowButton>
-              <WindowButton
-                label="Close file"
-                disabled={doc.saving || !!state.deletion}
-                onClick={session.requestClose}
-              >
-                <XIcon />
-              </WindowButton>
-            </div>
           </div>
         </div>
         <div className="relative min-h-0 flex-1 overflow-hidden">
@@ -438,10 +436,13 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
             </div>
           )}
         </div>
-        <div className="flex min-h-8 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t px-3 py-1.5 text-[11px] text-muted-foreground">
+        <div className="flex min-h-8 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t px-3 py-1.5 type-meta text-muted-foreground">
           <span
             role="status"
-            className={cn("min-w-0 flex-1", doc.error && "text-destructive")}
+            className={cn(
+              "min-w-0 flex-1 wrap-anywhere",
+              doc.error && "text-destructive"
+            )}
           >
             {status}
           </span>
@@ -468,8 +469,8 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
             </>
           )}
           <span>
-            {workspaceLanguageLabel(language)} · {doc.bom ? "UTF-8 BOM" : "UTF-8"} /{" "}
-            {doc.newline}
+            {workspaceLanguageLabel(language)} ·{" "}
+            {doc.bom ? "UTF-8 BOM" : "UTF-8"} / {doc.newline}
           </span>
           {!small && !maximized && (
             <WindowButton

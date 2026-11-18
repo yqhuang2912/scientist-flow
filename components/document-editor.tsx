@@ -1,8 +1,13 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { EditorState, Compartment, type Extension } from "@codemirror/state"
-import { EditorView, keymap, highlightActiveLine, lineNumbers } from "@codemirror/view"
+import { EditorState, Compartment, Transaction, type Extension } from "@codemirror/state"
+import {
+  EditorView,
+  keymap,
+  highlightActiveLine,
+  lineNumbers,
+} from "@codemirror/view"
 import {
   defaultKeymap,
   history,
@@ -84,55 +89,53 @@ export function DocumentEditor({
   useEffect(() => {
     const parent = host.current
     if (!parent) return
-    let cancelled = false
-    let instance: EditorView | null = null
+    const grammar = new Compartment()
+    const extensions: Extension[] = [
+      history(),
+      indentOnInput(),
+      bracketMatching(),
+      highlightActiveLine(),
+      syntaxHighlighting(editorHighlightStyle, { fallback: true }),
+      keymap.of([
+        {
+          key: "Mod-s",
+          run: () => {
+            handlers.current.onSave()
+            return true
+          },
+        },
+        ...defaultKeymap,
+        ...historyKeymap,
+        indentWithTab,
+      ]),
+      EditorView.lineWrapping,
+      EditorView.updateListener.of((update) => {
+          if (update.transactions.some((tr) => tr.docChanged && !tr.annotation(Transaction.remote)))
+          handlers.current.onChange(update.state.doc.toString())
+      }),
+      EditorView.contentAttributes.of({ "aria-label": label }),
+      editable.current.of(readOnlyExtension(readOnly)),
+    ]
+    extensions.push(grammar.of([]))
+    const instance = new EditorView({
+      state: EditorState.create({ doc: value, extensions }),
+      parent,
+    })
+    view.current = instance
 
     void resolveLanguage(language).then((support) => {
-      if (cancelled || !parent) return
-      const extensions: Extension[] = [
-        history(),
-        indentOnInput(),
-        bracketMatching(),
-        highlightActiveLine(),
-        syntaxHighlighting(editorHighlightStyle, { fallback: true }),
-        keymap.of([
-          {
-            key: "Mod-s",
-            run: () => {
-              handlers.current.onSave()
-              return true
-            },
-          },
-          ...defaultKeymap,
-          ...historyKeymap,
-          indentWithTab,
-        ]),
-        EditorView.lineWrapping,
-        EditorView.updateListener.of((update) => {
-          if (update.docChanged)
-            handlers.current.onChange(update.state.doc.toString())
-        }),
-        EditorView.contentAttributes.of({ "aria-label": label }),
-        editable.current.of(readOnlyExtension(readOnly)),
-      ]
-      if (support) extensions.push(support)
-      // A gutter is worth its width only where it carries something. Code gets
-      // line numbers and folding; markdown has a preview of its own and reads
-      // as prose; plain text and logs have neither structure to fold nor
-      // numbering worth the column, so they get no gutter at all.
-      if (support && language !== "markdown")
-        extensions.push(lineNumbers(), foldGutter())
-
-      instance = new EditorView({
-        state: EditorState.create({ doc: value, extensions }),
-        parent,
+      if (view.current !== instance || !support) return
+      instance.dispatch({
+        effects: grammar.reconfigure(
+          language === "markdown"
+            ? support
+            : [support, lineNumbers(), foldGutter()]
+        ),
       })
-      view.current = instance
     })
 
     return () => {
-      cancelled = true
-      instance?.destroy()
+      instance.destroy()
       if (view.current === instance) view.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -148,6 +151,7 @@ export function DocumentEditor({
     if (current === value) return
     instance.dispatch({
       changes: { from: 0, to: current.length, insert: value },
+      annotations: [Transaction.remote.of(true), Transaction.addToHistory.of(false)],
     })
   }, [value])
 

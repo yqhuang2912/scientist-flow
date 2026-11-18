@@ -106,6 +106,8 @@ None is bulk-applied to existing component call sites in this pass.
 | `type-page-title` | 18 / 28 / 500 | 35 |
 | `type-step` | 15 / 24 / 500 | 23 |
 | `type-composer` | 14 / 22.75 / 500 | 26 |
+| `type-chat-response` | 15 / 26 / 400 | Chat Markdown source, see visual-chat-markdown.md |
+| `type-chat-prompt` | 14 / 22 / 500 | 22's inner text container, not its bubble |
 | `type-document` | 15 / 26.25 / 400 | 30 |
 | `type-diff` | 12 / 19.5 / 400, monospace | 25 |
 

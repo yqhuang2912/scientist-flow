@@ -93,7 +93,7 @@ export function SettingsDialog({
             <GeneralSettingsPanel />
           ) : tab === "bots" ? (
             <div className="flex flex-col p-4">
-              <p className="text-[13px] font-medium">Bots</p>
+              <p className="type-section-title">Bots</p>
               <p className="text-[12px] text-muted-foreground">
                 {bots.length === 0
                   ? "No bots yet."
@@ -111,7 +111,7 @@ export function SettingsDialog({
                       alt={`${bot.name} avatar`}
                       className={compactChatAvatarStyles}
                     />
-                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
+                    <span className="min-w-0 flex-1 truncate type-control">
                       {bot.name}
                     </span>
                     <span
