@@ -4,6 +4,7 @@ import { convertToModelMessages, isStepCount, tool, type ToolSet } from "ai"
 import { z } from "zod"
 
 import {
+  getChatBotMemories,
   getChatSkillBindings,
   getChatToolBindings,
   claimToolPost,
@@ -14,6 +15,7 @@ import {
   prepareBotModelHistory,
   botInstructions,
   resolveReplyBot,
+  transferredSpeaker,
 } from "../lib/chat-bot-context"
 import { botTextTransform } from "../lib/chat-bot-text"
 
@@ -138,40 +140,6 @@ function createHandoffTool(members: TriggerBot[], currentBotId: string) {
   })
 }
 
-type HandoffOutput = {
-  success: true
-  handedOffFrom?: TriggerBot | null
-  handedOffTo: TriggerBot
-}
-
-function isSuccessfulHandoff(value: unknown): value is HandoffOutput {
-  if (!value || typeof value !== "object") {
-    return false
-  }
-
-  const output = value as Partial<HandoffOutput>
-  const source = output.handedOffFrom
-  const target = output.handedOffTo
-
-  return (
-    output.success === true &&
-    (source === undefined ||
-      source === null ||
-      (typeof source === "object" &&
-        typeof source.id === "string" &&
-        typeof source.name === "string" &&
-        typeof source.job === "string" &&
-        (typeof source.instructions === "string" ||
-          source.instructions === null))) &&
-    !!target &&
-    typeof target === "object" &&
-    typeof target.id === "string" &&
-    typeof target.name === "string" &&
-    typeof target.job === "string" &&
-    (typeof target.instructions === "string" || target.instructions === null)
-  )
-}
-
 export const chatAgent = chat.agent({
   id: "chat-agent",
   storage: defaultStorage,
@@ -198,9 +166,10 @@ export const chatAgent = chat.agent({
     const bot = resolveReplyBot(chatContext, clientData?.botId)
     if (!chatContext) throw new Error("Chat not found")
 
-    const [skills, bindings] = await Promise.all([
+    const [skills, bindings, memories] = await Promise.all([
       getChatSkillBindings(chatId),
       getChatToolBindings(chatId),
+      getChatBotMemories(chatId),
     ])
     const turn = skillTurn(skills)
     const messageId = chat.history.all().findLast((m) => m.role === "user")?.id
@@ -253,6 +222,7 @@ export const chatAgent = chat.agent({
         systemInstructions,
         botInstructions(speaker, chatContext, {
           handoffAvailable: allowHandoff,
+          memories,
         }),
         turn.catalog(speaker.id),
         http.names(speaker.id).length
@@ -265,6 +235,14 @@ export const chatAgent = chat.agent({
 
     return streamText({
       model: openrouter("baidu/ernie-5.5-flash-preview:free"),
+      // Provider errors can contain the request body, including private preferences.
+      onError: ({ error }) => {
+        console.error("Chat model request failed", {
+          chatId,
+          botId: responseBotId,
+          errorType: error instanceof Error ? error.name : "UnknownError",
+        })
+      },
       system: instructionsFor(bot, true),
       ...scope(bot.id, true),
       // AI SDK 7 requires explicit opt-in for our server-authored attribution.
@@ -283,19 +261,7 @@ export const chatAgent = chat.agent({
       ],
       stopWhen: isStepCount(6),
       prepareStep: ({ steps, messages }) => {
-        const handoff = [...steps]
-          .reverse()
-          .flatMap((step) => [...step.toolResults].reverse())
-          .find(
-            (result) =>
-              result.toolName === "handoff" &&
-              isSuccessfulHandoff(result.output)
-          )
-
-        const transferred =
-          handoff && isSuccessfulHandoff(handoff.output)
-            ? handoff.output.handedOffTo
-            : null
+        const transferred = transferredSpeaker(steps, chatContext.bots)
         const target = transferred ?? bot
         responseBotId = target.id
         const hasRead = turn.hasRead(target.id)

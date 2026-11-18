@@ -5,6 +5,7 @@ import {
   prepareBotModelHistory,
   botInstructions,
   resolveReplyBot,
+  transferredSpeaker,
   type BotChatContext,
 } from "../lib/chat-bot-context"
 
@@ -21,6 +22,45 @@ const james = {
   instructions: "Teach step by step.",
 }
 const context: BotChatContext = { kind: "group", bots: [coll, james] }
+
+test("first and post-handoff model instructions contain only the actual speaker's preferences", () => {
+  const peer = { ...james, name: coll.name }
+  const group: BotChatContext = { kind: "group", bots: [coll, peer] }
+  const memories = [
+    { botId: coll.id, text: 'Missing cells: "A"\nKeep 0.' },
+    { botId: peer.id, text: "Missing cells: B" },
+  ]
+  const first = resolveReplyBot(group, coll.id)
+  const toolResult = {
+    toolName: "handoff",
+    output: { success: true, handedOffTo: peer, handedOffFrom: first },
+  }
+  const steps = [{ toolResults: [toolResult] }, { toolResults: [] }]
+  for (const [speaker, index] of [
+    [transferredSpeaker([], group.bots) ?? first, 0],
+    [transferredSpeaker(steps, group.bots) ?? first, 1],
+  ] as const) {
+    const instructions = botInstructions(speaker, group, {
+      handoffAvailable: index === 0,
+      memories,
+    })
+    const encoded = JSON.stringify([memories[index].text])
+    assert.equal(instructions.split(encoded).length, 2)
+    assert.ok(!instructions.includes(JSON.stringify(memories[1 - index].text)))
+    assert.match(instructions, /current task takes precedence/)
+  }
+  assert.deepEqual(Object.keys(toolResult.output.handedOffTo).sort(), [
+    "id",
+    "instructions",
+    "job",
+    "name",
+  ])
+  assert.equal(
+    botInstructions(first, group, { memories: [memories[1]] }),
+    botInstructions(first, group)
+  )
+  assert.equal(transferredSpeaker(steps, [first]), null)
+})
 const message = (
   id: string,
   role: "user" | "assistant",

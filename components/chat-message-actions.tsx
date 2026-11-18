@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { CheckIcon, CopyIcon } from "lucide-react"
+import { BookmarkPlusIcon, CheckIcon, CopyIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { MessageFooter } from "@/components/ui/message"
 import {
@@ -11,7 +11,13 @@ import {
 } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/toast"
 
-export function ChatMessageActions({ text }: { text: string }) {
+export function ChatMessageActions({
+  text,
+  remember,
+}: {
+  text: string
+  remember?: { label: string; open: () => void }
+}) {
   const [copied, setCopied] = useState(false)
   useEffect(() => {
     if (!copied) return
@@ -44,6 +50,23 @@ export function ChatMessageActions({ text }: { text: string }) {
         </TooltipTrigger>
         <TooltipContent>{label}</TooltipContent>
       </Tooltip>
+      {remember && text.trim() && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={remember.label}
+                onClick={remember.open}
+              />
+            }
+          >
+            <BookmarkPlusIcon />
+          </TooltipTrigger>
+          <TooltipContent>{remember.label}</TooltipContent>
+        </Tooltip>
+      )}
       <span className="sr-only" aria-live="polite">
         {copied ? "Message copied" : ""}
       </span>

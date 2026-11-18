@@ -9,6 +9,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core"
 import { createInsertSchema } from "drizzle-zod"
 import { z } from "zod"
@@ -160,6 +161,43 @@ export const chats = pgTable("chats", {
     .notNull()
     .defaultNow(),
 })
+
+export const botMemoryLimit = 12
+export const botMemoryTextLimit = 240
+
+export const botMemories = pgTable(
+  "bot_memories",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => nanoid()),
+    botId: text("bot_id")
+      .notNull()
+      .references(() => bots.id, { onDelete: "cascade" }),
+    text: text("text").notNull(),
+    sourceChatId: text("source_chat_id").references(() => chats.id, {
+      onDelete: "set null",
+    }),
+    sourceMessageId: text("source_message_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [uniqueIndex("bot_memories_bot_text_idx").on(t.botId, t.text)]
+)
+
+export const botMemoryFormSchema = createInsertSchema(botMemories, {
+  text: z
+    .string()
+    .trim()
+    .min(1, "Enter a preference to remember.")
+    .refine(
+      (value) => Array.from(value).length <= botMemoryTextLimit,
+      `Choose one preference of ${botMemoryTextLimit} characters or fewer.`
+    ),
+})
+  .pick({ text: true })
+  .strict()
 
 // An admitted POST is never dispatched again for the same user turn and arguments,
 // including after an interrupted worker. No payloads or credentials are stored.

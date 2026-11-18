@@ -4,6 +4,7 @@ import { useState } from "react"
 import { PanelRightIcon } from "lucide-react"
 
 import { BotDialog } from "@/components/bot-dialog"
+import { BotMemoryButton } from "@/components/bot-memory-dialog"
 import { BotName } from "@/components/bot-name"
 import { TaskDialog } from "@/components/task-dialog"
 import type { BotSummary } from "@/queries/bots"
@@ -76,6 +77,13 @@ export function ChatHeader({
             </Button>
           )}
         </div>
+        {chat.kind === "direct" && chat.bot && (
+          <BotMemoryButton
+            key={chat.id}
+            chatId={chat.id}
+            botName={chat.bot.name}
+          />
+        )}
         {onWorkspaceOpenChange && (
           <Tooltip>
             <TooltipTrigger

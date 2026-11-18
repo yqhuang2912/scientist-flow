@@ -132,6 +132,8 @@ function ChatView({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ChatTranscript
+        key={chatId}
+        directChatId={isGroup ? undefined : chatId}
         messages={messages}
         bots={bots}
         isGroup={isGroup}

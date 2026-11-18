@@ -1,6 +1,10 @@
 "use client"
 
-import { memo } from "react"
+import { memo, useState } from "react"
+import {
+  SaveMemoryDialog,
+  type MemoryDraft,
+} from "@/components/bot-memory-dialog"
 import { isToolUIPart, type ChatStatus, type UIMessage } from "ai"
 import { BotIcon, MessageCircleIcon, UserRoundIcon } from "lucide-react"
 import {
@@ -155,6 +159,7 @@ const ChatTurn = memo(function ChatTurn({
   isGroup,
   streaming,
   busy,
+  onRemember,
   onApproval,
 }: {
   message: UIMessage
@@ -162,6 +167,7 @@ const ChatTurn = memo(function ChatTurn({
   isGroup: boolean
   streaming: boolean
   busy: boolean
+  onRemember?: (draft: MemoryDraft) => void
   onApproval?: RespondToApproval
 }) {
   if (message.role === "system") return null
@@ -170,6 +176,10 @@ const ChatTurn = memo(function ChatTurn({
       ? bots.find((bot) => bot.id === getMessageBotId(message))
       : undefined
     const firstText = message.parts.findIndex((part) => part.type === "text")
+    const text = message.parts
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("\n\n")
     return (
       <Message align="end">
         <MessageContent className="gap-2">
@@ -219,10 +229,15 @@ const ChatTurn = memo(function ChatTurn({
             </BubbleContent>
           </Bubble>
           <ChatMessageActions
-            text={message.parts
-              .filter((part) => part.type === "text")
-              .map((part) => part.text)
-              .join("\n\n")}
+            text={text}
+            remember={
+              onRemember && bots[0]
+                ? {
+                    label: "Remember with " + bots[0].name,
+                    open: () => onRemember({ messageId: message.id, text }),
+                  }
+                : undefined
+            }
           />
         </MessageContent>
       </Message>
@@ -282,6 +297,7 @@ const ChatTurn = memo(function ChatTurn({
 })
 
 export function ChatTranscript({
+  directChatId,
   messages,
   bots,
   isGroup,
@@ -289,6 +305,7 @@ export function ChatTranscript({
   pendingBotId,
   onApproval,
 }: {
+  directChatId?: string
   messages: UIMessage[]
   bots: ChatSpeaker[]
   isGroup: boolean
@@ -296,6 +313,7 @@ export function ChatTranscript({
   pendingBotId?: string
   onApproval?: RespondToApproval
 }) {
+  const [draft, setDraft] = useState<MemoryDraft | null>(null)
   const last = messages.at(-1)
   const busy = status === "streaming" || status === "submitted"
   const pendingBot =
@@ -332,6 +350,7 @@ export function ChatTranscript({
                   scrollAnchor={message.role === "user"}
                 >
                   <ChatTurn
+                    onRemember={directChatId && !isGroup ? setDraft : undefined}
                     message={message}
                     bots={bots}
                     isGroup={isGroup}
@@ -365,6 +384,14 @@ export function ChatTranscript({
         </MessageScrollerViewport>
         <MessageScrollerButton aria-label="Scroll to latest message" />
       </MessageScroller>
+      {draft && directChatId && !isGroup && bots[0] && (
+        <SaveMemoryDialog
+          chatId={directChatId}
+          botName={bots[0].name}
+          draft={draft}
+          close={() => setDraft(null)}
+        />
+      )}
     </MessageScrollerProvider>
   )
 }
