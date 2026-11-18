@@ -6,6 +6,7 @@ import {
   ArrowRightLeftIcon,
   ArrowUpRightIcon,
   BrainIcon,
+  BookOpenIcon,
   CircleAlertIcon,
   FileTextIcon,
   GlobeIcon,
@@ -48,6 +49,7 @@ import { Button } from "@/components/ui/button"
 import {
   formatToolValue,
   getToolPresentation,
+  getSkillReadPresentation,
   safeChatImageUrl,
   safeChatUrl,
   type ChatPart,
@@ -123,6 +125,28 @@ function ReasoningStep({
 function ToolStep({ part, active }: { part: ChatToolPart; active: boolean }) {
   const [open, setOpen] = useState<boolean>()
   const tool = getToolPresentation(part, active)
+  const skill = getSkillReadPresentation(part, active)
+  if (skill) {
+    const line = (
+      <TraceLine status={skill.status}>
+        <TraceIcon>
+          <BookOpenIcon />
+        </TraceIcon>
+        <TraceTitle>{skill.title}</TraceTitle>
+      </TraceLine>
+    )
+    return skill.detail ? (
+      <TraceCollapsible
+        open={open ?? skill.status === "error"}
+        onOpenChange={setOpen}
+      >
+        <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+        <TraceCollapsibleContent>{skill.detail}</TraceCollapsibleContent>
+      </TraceCollapsible>
+    ) : (
+      line
+    )
+  }
   const Icon =
     tool.status === "error"
       ? CircleAlertIcon

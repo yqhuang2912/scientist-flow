@@ -2,6 +2,8 @@
 
 import { and, eq, inArray } from "drizzle-orm"
 import { nanoid } from "nanoid"
+import { createHash } from "node:crypto"
+import { z } from "zod"
 
 import { db } from "@/lib/db"
 import {
@@ -9,9 +11,11 @@ import {
   bots,
   chatMembers,
   chats,
-  insertBotSchema,
+  skills,
+  botSkills,
 } from "@/db/schema"
 import { createDevPodSandboxId, deleteDevPodSandbox } from "@/lib/devpod"
+import { isSkillReferenceError } from "@/lib/skill-constraint"
 
 type CreateBotResult =
   | {
@@ -28,8 +32,44 @@ type UpdateBotResult =
 
 type DeleteBotResult = { success: true } | { success: false; error: string }
 
-export async function createBot(input: unknown): Promise<CreateBotResult> {
-  const parsed = insertBotSchema.safeParse(input)
+const missingSkill = {
+  success: false as const,
+  error:
+    "A selected skill no longer exists. Reopen the form to refresh the list.",
+}
+
+async function skillsExist(ids: string[]) {
+  if (!ids.length) return true
+  const rows = await db
+    .select({ id: skills.id })
+    .from(skills)
+    .where(inArray(skills.id, ids))
+  return rows.length === ids.length
+}
+
+function insertBindings(botId: string, ids: string[]) {
+  return ids.length
+    ? [db.insert(botSkills).values(ids.map((skillId) => ({ botId, skillId })))]
+    : []
+}
+
+// One random form key identifies retries. Deriving both IDs lets an atomic
+// create be recovered after a lost response without a second Bot or chat.
+function creationId(key: string, scope: string) {
+  return createHash("sha256")
+    .update(key + ":" + scope)
+    .digest("base64url")
+    .slice(0, 21)
+}
+
+export async function createBot(
+  input: unknown,
+  requestKey: unknown = nanoid()
+): Promise<CreateBotResult> {
+  const parsed = botFormSchema.safeParse(input)
+  const key = z.nanoid().safeParse(requestKey)
+  if (!key.success)
+    return { success: false, error: "Invalid creation request." }
 
   if (!parsed.success) {
     return {
@@ -38,20 +78,26 @@ export async function createBot(input: unknown): Promise<CreateBotResult> {
     }
   }
 
+  const { skillIds, ...fields } = parsed.data
+  const botId = creationId(key.data, "bot")
+  const chatId = creationId(
+    key.data,
+    JSON.stringify([fields, [...skillIds].sort()])
+  )
   try {
-    const botId = nanoid()
-    const chatId = nanoid()
+    if (!(await skillsExist(skillIds))) return missingSkill
     const sandboxId = createDevPodSandboxId(botId)
     const [botRows, chatRows, chatMemberRows] = await db.batch([
       db
         .insert(bots)
-        .values({ ...parsed.data, id: botId, sandboxId })
+        .values({ ...fields, id: botId, sandboxId })
         .returning(),
       db
         .insert(chats)
         .values({ id: chatId, kind: "direct", name: null })
         .returning(),
       db.insert(chatMembers).values({ chatId, botId }).returning(),
+      ...insertBindings(botId, skillIds),
     ])
 
     const bot = botRows[0]
@@ -64,6 +110,34 @@ export async function createBot(input: unknown): Promise<CreateBotResult> {
 
     return { success: true, bot, chat, chatMember }
   } catch (error) {
+    if (isSkillReferenceError(error)) return missingSkill
+    const cause = error instanceof Error ? (error.cause ?? error) : error
+    if (
+      cause &&
+      typeof cause === "object" &&
+      "code" in cause &&
+      cause.code === "23505"
+    ) {
+      try {
+        const [prior] = await db
+          .select({ bot: bots, chat: chats, chatMember: chatMembers })
+          .from(chatMembers)
+          .innerJoin(bots, eq(bots.id, chatMembers.botId))
+          .innerJoin(chats, eq(chats.id, chatMembers.chatId))
+          .where(and(eq(bots.id, botId), eq(chats.id, chatId)))
+          .limit(1)
+        if (prior) return { success: true, ...prior }
+        return {
+          success: false,
+          error: "This form was already submitted. Reopen the bot to edit it.",
+        }
+      } catch {
+        return {
+          success: false,
+          error: "Could not confirm the previous submission.",
+        }
+      }
+    }
     console.error("Failed to create bot", error)
     return { success: false, error: "The bot could not be created." }
   }
@@ -87,14 +161,21 @@ export async function updateBot(
   }
 
   try {
-    const rows = await db
-      .update(bots)
-      .set({
-        ...parsed.data,
-        instructions: parsed.data.instructions?.trim() || null,
-      })
-      .where(eq(bots.id, botId))
-      .returning()
+    const { skillIds, ...fields } = parsed.data
+    if (!(await skillsExist(skillIds))) return missingSkill
+    // Updating the Bot first serializes concurrent full-set replacements.
+    const [rows] = await db.batch([
+      db
+        .update(bots)
+        .set({
+          ...fields,
+          instructions: parsed.data.instructions?.trim() || null,
+        })
+        .where(eq(bots.id, botId))
+        .returning(),
+      db.delete(botSkills).where(eq(botSkills.botId, botId)),
+      ...insertBindings(botId, skillIds),
+    ])
 
     const bot = rows[0]
     if (!bot) {
@@ -103,6 +184,7 @@ export async function updateBot(
 
     return { success: true, bot }
   } catch (error) {
+    if (isSkillReferenceError(error)) return missingSkill
     console.error("Failed to update bot", error)
     return { success: false, error: "The bot could not be updated." }
   }

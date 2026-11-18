@@ -103,7 +103,13 @@ export function AppSidebar({
   const [botDialogOpen, setBotDialogOpen] = useState(false)
   const [taskDialogOpen, setTaskDialogOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
-  const [membersOpen, setMembersOpen] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<"general" | "skills" | null>(null)
+  useEffect(() => {
+    const manageSkills = () => setSettingsTab("skills")
+    window.addEventListener("scientistflow:manage-skills", manageSkills)
+    return () =>
+      window.removeEventListener("scientistflow:manage-skills", manageSkills)
+  }, [])
   const [avatarSeed] = useState(() => nanoid())
   const [mac] = useState(() => isMac())
 
@@ -264,7 +270,7 @@ export function AppSidebar({
               <SidebarMenuButton
                 render={<button type="button" />}
                 className="text-sidebar-foreground group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:px-0"
-                onClick={() => setMembersOpen(true)}
+                onClick={() => setSettingsTab("general")}
                 tooltip="Settings"
               >
                 <SettingsIcon data-icon="inline-start" />
@@ -295,11 +301,13 @@ export function AppSidebar({
 
       {/* Settings — one dialog, panes switch in place */}
       <SettingsDialog
+        key={settingsTab ?? "general"}
+        initialTab={settingsTab ?? "general"}
         bots={bots}
-        open={membersOpen}
-        onOpenChange={setMembersOpen}
+        open={settingsTab !== null}
+        onOpenChange={(open) => setSettingsTab(open ? "general" : null)}
         onManageBots={() => {
-          setMembersOpen(false)
+          setSettingsTab(null)
           setBotDialogOpen(true)
         }}
       />

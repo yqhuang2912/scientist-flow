@@ -69,18 +69,23 @@ export function getAssistantSegments(
     parts: [] as IndexedChatPart[],
   }
 
+  let nextSpeaker: string | null = null
   message.parts.forEach((part, index) => {
-    current.parts.push({ part, index })
-    const handoff = getHandoff(part)
-    if (handoff) {
+    // Calls in the handoff step still run as the sender. Older transcripts
+    // can omit step-start, in which case the next prose begins the reply.
+    if (nextSpeaker && !isToolUIPart(part)) {
       segments.push(current)
-      speakerId = handoff.targetId
+      speakerId = nextSpeaker
+      nextSpeaker = null
       current = {
-        key: `${message.id}:${index + 1}`,
+        key: `${message.id}:${index}`,
         botId: speakerId,
         parts: [],
       }
     }
+    current.parts.push({ part, index })
+    const handoff = getHandoff(part)
+    if (handoff) nextSpeaker = handoff.targetId
   })
   if (current.parts.some(({ part }) => part.type !== "step-start"))
     segments.push(current)
@@ -201,6 +206,41 @@ export function getToolPresentation(part: ChatToolPart, active: boolean) {
       part.state === "output-denied" || part.state === "approval-responded"
         ? part.approval.reason
         : undefined,
+  }
+}
+
+export function getSkillReadPresentation(part: ChatToolPart, active: boolean) {
+  if (getToolName(part) !== "read_skill") return null
+  const output = part.state === "output-available" ? record(part.output) : null
+  const name = output?.name ?? record(part.input)?.name
+  const suffix = typeof name === "string" ? ` · ${name}` : ""
+  if (
+    part.state === "output-available" &&
+    !part.preliminary &&
+    output?.success === true
+  )
+    return {
+      title: "已读取 Skill" + suffix,
+      status: undefined,
+      detail: "Instructions delivered to the bot.",
+    }
+  if (
+    part.state === "output-error" ||
+    part.state === "output-denied" ||
+    output?.success === false
+  )
+    return {
+      title: "Skill 读取失败" + suffix,
+      status: "error" as const,
+      detail:
+        output?.success === false
+          ? "This skill is not assigned to this bot."
+          : "The skill could not be read.",
+    }
+  return {
+    title: (active ? "正在读取 Skill" : "Skill 读取未完成") + suffix,
+    status: active ? ("running" as const) : ("pending" as const),
+    detail: null,
   }
 }
 

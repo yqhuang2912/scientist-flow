@@ -3,13 +3,35 @@ import { chat, defaultStorage } from "@trigger.dev/sdk/ai"
 import { convertToModelMessages, isStepCount, tool, type ToolSet } from "ai"
 import { z } from "zod"
 
-import { getTriggerChatContext, type TriggerBot } from "./bot"
+import {
+  getChatSkillBindings,
+  getTriggerChatContext,
+  type TriggerBot,
+} from "./bot"
 import {
   prepareBotModelHistory,
   botInstructions,
   resolveReplyBot,
 } from "../lib/chat-bot-context"
 import { botTextTransform } from "../lib/chat-bot-text"
+
+import { pastRead, skillTurn } from "../lib/bot-skill-turn"
+
+const readSkillInput = z.object({
+  name: z
+    .string()
+    .min(1)
+    .describe("Exact identifier from your current skill catalog."),
+})
+const readSkillDefinition = {
+  description: "Read an assigned shared skill's SKILL.md for the current task.",
+  inputSchema: readSkillInput,
+  contextSchema: z.object({ botId: z.string() }),
+}
+const readSkillSchema = tool({
+  ...readSkillDefinition,
+  toModelOutput: () => ({ type: "text", value: pastRead }),
+})
 
 const systemInstructions = `You are a bot in Scientist Flow. Use the current bot identity specified below.
 
@@ -41,11 +63,7 @@ const handoffToolSchema = tool({
   inputSchema: handoffInputSchema,
 })
 
-function createHandoffTool(
-  members: TriggerBot[],
-  currentBotId: string | undefined,
-  onHandoff: (botId: string) => void
-) {
+function createHandoffTool(members: TriggerBot[], currentBotId: string) {
   let hasHandedOff = false
 
   return tool({
@@ -92,7 +110,6 @@ function createHandoffTool(
       }
 
       hasHandedOff = true
-      onHandoff(target.id)
 
       const source =
         members.find((member) => member.id === currentBotId) ?? null
@@ -157,51 +174,65 @@ export const chatAgent = chat.agent({
     const chatContext = await getTriggerChatContext(chatId)
 
     if (chatContext?.kind !== "group") {
-      return {}
+      return { read_skill: readSkillSchema }
     }
 
-    return { handoff: handoffToolSchema }
+    return { handoff: handoffToolSchema, read_skill: readSkillSchema }
   },
   run: async ({ messages, chatId, clientData, signal, streamText, tools }) => {
     const chatContext = await getTriggerChatContext(chatId)
     const bot = resolveReplyBot(chatContext, clientData?.botId)
     if (!chatContext) throw new Error("Chat not found")
 
-    let responseBotId = bot?.id
-    const runtimeTools =
-      chatContext?.kind === "group"
-        ? {
-            ...tools,
-            handoff: createHandoffTool(chatContext.bots, bot?.id, (botId) => {
-              responseBotId = botId
-            }),
-          }
-        : tools
-
-    if (responseBotId) {
-      chat.setUIMessageStreamOptions({
-        messageMetadata: () => ({ botId: responseBotId }),
-      })
+    const turn = skillTurn(await getChatSkillBindings(chatId))
+    let responseBotId = bot.id
+    const runtimeTools = {
+      ...tools,
+      ...(chatContext.kind === "group"
+        ? { handoff: createHandoffTool(chatContext.bots, bot.id) }
+        : {}),
+      read_skill: tool({
+        ...readSkillDefinition,
+        execute: ({ name }, { toolCallId, context }) =>
+          turn.read(context.botId, name, toolCallId),
+        toModelOutput: ({ toolCallId, output }) => ({
+          type: "text",
+          value: output.success
+            ? (turn.content(toolCallId) ?? pastRead)
+            : output.message,
+        }),
+      }),
     }
 
-    const system = `${systemInstructions}\n\n${botInstructions(bot, chatContext)}`
+    chat.setUIMessageStreamOptions({
+      messageMetadata: () => ({ botId: responseBotId }),
+    })
+    const instructionsFor = (speaker: TriggerBot, allowHandoff: boolean) =>
+      [
+        systemInstructions,
+        botInstructions(speaker, chatContext, {
+          handoffAvailable: allowHandoff,
+        }),
+        turn.catalog(speaker.id),
+      ].join("\n\n")
 
     return streamText({
       model: openrouter("baidu/ernie-5.5-flash-preview:free"),
-      system,
+      system: instructionsFor(bot, true),
+      toolsContext: { read_skill: { botId: bot.id } },
       // AI SDK 7 requires explicit opt-in for our server-authored attribution.
       allowSystemInMessages: chatContext.kind === "group",
       messages:
         chatContext.kind === "group"
           ? await convertToModelMessages(
               prepareBotModelHistory(chat.history.all(), chatContext.bots),
-              { tools: runtimeTools }
+              { tools }
             )
           : messages,
       tools: runtimeTools,
       experimental_transform: botTextTransform(chatContext.bots),
-      stopWhen: chatContext?.kind === "group" ? isStepCount(3) : undefined,
-      prepareStep: ({ steps }) => {
+      stopWhen: isStepCount(6),
+      prepareStep: ({ steps, messages }) => {
         const handoff = [...steps]
           .reverse()
           .flatMap((step) => [...step.toolResults].reverse())
@@ -211,20 +242,26 @@ export const chatAgent = chat.agent({
               isSuccessfulHandoff(result.output)
           )
 
-        if (!handoff || !isSuccessfulHandoff(handoff.output)) {
-          return {}
-        }
-
-        const target = handoff.output.handedOffTo
+        const transferred =
+          handoff && isSuccessfulHandoff(handoff.output)
+            ? handoff.output.handedOffTo
+            : null
+        const target = transferred ?? bot
         responseBotId = target.id
+        const hasRead = turn.hasRead(target.id)
+        const scopedMessages = transferred
+          ? turn.forSpeaker(messages, target.id)
+          : messages
 
         return {
-          system: `${systemInstructions}\n\n${botInstructions(
-            target,
-            chatContext,
-            { handoffAvailable: false }
-          )}`,
-          activeTools: [],
+          instructions:
+            instructionsFor(target, !transferred) +
+            (hasRead
+              ? "\nYour read_skill result contains the working procedure for this answer. Deliver the requested artifact using its exact template, including any required literal wording in your visible response. Verify completeness before sending."
+              : ""),
+          ...(scopedMessages !== messages && { messages: scopedMessages }),
+          toolsContext: { read_skill: { botId: target.id } },
+          ...(transferred && { activeTools: ["read_skill"] }),
         }
       },
       abortSignal: signal,

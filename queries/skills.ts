@@ -2,7 +2,13 @@
 
 import { desc, eq, asc } from "drizzle-orm"
 import { z } from "zod"
-import { skills, type SkillSummary, type Skill } from "@/db/schema"
+import {
+  bots,
+  botSkills,
+  skills,
+  type SkillSummary,
+  type Skill,
+} from "@/db/schema"
 import { db } from "@/lib/db"
 import type { SkillResult } from "@/lib/skill-definition"
 
@@ -38,5 +44,27 @@ export async function getSkill(id: unknown): Promise<SkillResult<Skill>> {
       : { success: false, error: "This skill no longer exists." }
   } catch {
     return { success: false, error: "Could not load this skill." }
+  }
+}
+
+export async function getBotSkillIds(
+  id: unknown
+): Promise<SkillResult<string[]>> {
+  const parsed = z.nanoid().safeParse(id)
+  if (!parsed.success) return { success: false, error: "Invalid bot ID." }
+  try {
+    const rows = await db
+      .select({ id: botSkills.skillId })
+      .from(bots)
+      .leftJoin(botSkills, eq(bots.id, botSkills.botId))
+      .where(eq(bots.id, parsed.data))
+    if (!rows.length)
+      return { success: false, error: "This bot no longer exists." }
+    return {
+      success: true,
+      data: rows.flatMap((row) => (row.id ? [row.id] : [])),
+    }
+  } catch {
+    return { success: false, error: "Could not load this bot’s skills." }
   }
 }

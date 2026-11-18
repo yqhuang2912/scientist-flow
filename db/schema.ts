@@ -89,6 +89,22 @@ export const bots = pgTable("bots", {
 
 export const chatKind = pgEnum("chat_kind", ["direct", "group"])
 
+export const botSkills = pgTable(
+  "bot_skills",
+  {
+    botId: text("bot_id")
+      .notNull()
+      .references(() => bots.id, { onDelete: "cascade" }),
+    skillId: text("skill_id")
+      .notNull()
+      .references(() => skills.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.botId, table.skillId] }),
+    index("bot_skills_skill_id_idx").on(table.skillId),
+  ]
+)
+
 export const chats = pgTable("chats", {
   id: text("id")
     .primaryKey()
@@ -157,7 +173,9 @@ export const botFormSchema = insertBotSchema
     name: z.string().trim().min(1, "Name is required"),
     job: z.string().trim().min(1, "Job is required"),
     instructions: z.string().trim().optional(),
+    skillIds: z.array(z.nanoid()).transform((ids) => [...new Set(ids)]),
   })
+  .strict()
 
 export const insertTaskSchema = createInsertSchema(chats, {
   name: z.string().trim().min(1, "Name is required"),

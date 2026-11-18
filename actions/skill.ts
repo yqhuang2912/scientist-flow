@@ -4,6 +4,7 @@ import { eq, sql } from "drizzle-orm"
 import { z } from "zod"
 import { skills, skillFormSchema } from "@/db/schema"
 import { db } from "@/lib/db"
+import { isSkillReferenceError } from "@/lib/skill-constraint"
 import type { SkillResult } from "@/lib/skill-definition"
 
 type WriteResult = SkillResult<{ id: string }>
@@ -79,7 +80,13 @@ export async function deleteSkill(id: unknown): Promise<WriteResult> {
     return row
       ? { success: true, data: row }
       : { success: false, error: "This skill no longer exists." }
-  } catch {
+  } catch (error) {
+    if (isSkillReferenceError(error)) {
+      return {
+        success: false,
+        error: "This skill is in use by a bot. Unbind it before deleting.",
+      }
+    }
     return {
       success: false,
       error: "Could not delete this skill. Please try again.",
