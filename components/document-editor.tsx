@@ -61,6 +61,8 @@ export function DocumentEditor({
   language,
   readOnly,
   label,
+  inputId,
+  invalid,
   onChange,
   onSave,
 }: {
@@ -68,6 +70,8 @@ export function DocumentEditor({
   language: string
   readOnly: boolean
   label: string
+  inputId?: string
+  invalid?: boolean
   onChange: (value: string) => void
   onSave: () => void
 }) {
@@ -140,6 +144,13 @@ export function DocumentEditor({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [language, label])
+
+  useEffect(() => {
+    const input = view.current?.contentDOM
+    if (!input || !inputId) return
+    input.setAttribute("id", inputId)
+    input.setAttribute("aria-invalid", String(!!invalid))
+  }, [inputId, invalid, label, language])
 
   // Reload from disk, discard, and conflict resolution all replace the buffer
   // from outside. Only a genuine difference is written back, so this never

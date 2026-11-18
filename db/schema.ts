@@ -11,6 +11,66 @@ import {
 import { createInsertSchema } from "drizzle-zod"
 import { z } from "zod"
 
+export const skills = pgTable("skills", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => nanoid()),
+  name: text("name").notNull().unique(),
+  displayName: text("display_name"),
+  description: text("description").notNull(),
+  instructions: text("instructions").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+})
+
+export const skillNameSchema = z
+  .string()
+  .min(1, "Enter a skill identifier.")
+  .max(64, "Use 64 characters or fewer.")
+  .regex(
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+    "Use lowercase letters, numbers and single hyphens between words."
+  )
+
+export const skillFormSchema = createInsertSchema(skills, {
+  name: skillNameSchema,
+  displayName: z
+    .string()
+    .trim()
+    .nullish()
+    .transform((value) => value || null),
+  description: z
+    .string()
+    .trim()
+    .min(1, "Describe when to use this skill.")
+    .max(1024, "Use 1,024 characters or fewer."),
+  instructions: z
+    .string()
+    .refine((value) => value.trim().length > 0, "Enter Markdown instructions.")
+    .refine((value) => {
+      const header = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(
+        value.trimStart()
+      )
+      return !header || !/^(?:name|description):/m.test(header[1])
+    }, "Enter the instructions only. The skill header is generated for you."),
+})
+  .pick({
+    name: true,
+    displayName: true,
+    description: true,
+    instructions: true,
+  })
+  .strict()
+
+export type Skill = typeof skills.$inferSelect
+export type SkillSummary = Omit<Skill, "instructions" | "createdAt">
+export type SkillInput = z.input<typeof skillFormSchema>
+export type SkillValues = z.output<typeof skillFormSchema>
+
 export const bots = pgTable("bots", {
   id: text("id")
     .primaryKey()

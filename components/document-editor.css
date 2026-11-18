@@ -55,11 +55,11 @@
   scrollbar-width: thin;
 }
 .cm-host .cm-content {
-  padding: 20px 0 40vh;
+  padding: var(--editor-content-padding, 20px 0 40vh);
   caret-color: var(--foreground);
 }
 .cm-host .cm-line {
-  padding-inline: 20px;
+  padding-inline: var(--editor-line-inset, 20px);
 }
 .cm-host .cm-cursor,
 .cm-host .cm-dropCursor {
