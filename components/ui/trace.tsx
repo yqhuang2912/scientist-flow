@@ -12,8 +12,12 @@ function Trace({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="trace"
+      // Rows stack directly: each TraceLine's own vertical padding sets the
+      // rhythm, as in the reference. A gap here would add it twice and make a
+      // long run of steps read as a loose list. The negative margin trims the
+      // first and last row's padding so the run sits flush with its neighbours.
       className={cn(
-        "flex w-full min-w-0 flex-col gap-2 *:has-[>[data-slot=trace-line]]:flex *:has-[>[data-slot=trace-line]]:w-fit *:has-[>[data-slot=trace-line]]:max-w-full *:has-[>[data-slot=trace-line]]:min-w-0 *:has-[>[data-slot=trace-line]]:rounded-md *:has-[>[data-slot=trace-line]]:text-left *:has-[>[data-slot=trace-line]]:outline-none *:has-[>[data-slot=trace-line]]:focus-visible:ring-3 *:has-[>[data-slot=trace-line]]:focus-visible:ring-ring/30",
+        "flex w-full min-w-0 flex-col *:has-[>[data-slot=trace-line]]:flex *:has-[>[data-slot=trace-line]]:w-fit *:has-[>[data-slot=trace-line]]:max-w-full *:has-[>[data-slot=trace-line]]:min-w-0 *:has-[>[data-slot=trace-line]]:rounded-md *:has-[>[data-slot=trace-line]]:text-left *:has-[>[data-slot=trace-line]]:outline-none *:has-[>[data-slot=trace-line]]:focus-visible:ring-3 *:has-[>[data-slot=trace-line]]:focus-visible:ring-ring/30 -my-2",
         className
       )}
       {...props}
@@ -139,7 +143,7 @@ function TraceCollapsibleContent({
       <div
         data-slot="trace-collapsible-content-inner"
         className={cn(
-          "mt-2 mb-1 ml-[calc(--spacing(2)-1px)] min-w-0 border-l pr-1 pl-4 text-[13px] leading-relaxed wrap-break-word text-muted-foreground",
+          "mt-0 mb-1 ml-[7px] min-w-0 border-l-2 pr-1 pl-4 text-[13px] leading-relaxed wrap-break-word text-muted-foreground",
           className
         )}
       >
