@@ -38,12 +38,13 @@ import {
   type SettingsLeaveGuard,
 } from "@/components/settings-form-guard"
 import {
-  skillFormSchema,
+  skillEditorSchema,
   type Skill,
   type SkillSummary,
-  type SkillInput,
-  type SkillValues,
+  type SkillEditorInput,
+  type SkillEditorValues,
 } from "@/db/schema"
+import { skillSlug } from "@/lib/name-slug"
 
 export function SkillForm({
   skill,
@@ -56,8 +57,11 @@ export function SkillForm({
 }) {
   const formId = useId()
   const [skillId, setSkillId] = useState(skill?.id)
-  const form = useForm<SkillInput, unknown, SkillValues>({
-    resolver: zodResolver(skillFormSchema),
+  // Editing the identifier by hand stops it from tracking the name. State,
+  // not a ref: the change handlers read it while React is rendering the field.
+  const [nameEdited, setNameEdited] = useState(!!skill)
+  const form = useForm<SkillEditorInput, unknown, SkillEditorValues>({
+    resolver: zodResolver(skillEditorSchema),
     defaultValues: {
       displayName: skill?.displayName ?? "",
       name: skill?.name ?? "",
@@ -70,7 +74,14 @@ export function SkillForm({
   const load = useCallback(() => getSkill(skill?.id), [skill])
   const accept = useCallback(
     ({ name, displayName, description, instructions }: Skill) => {
-      reset({ name, displayName: displayName ?? "", description, instructions })
+      reset({
+        name,
+        // The editor requires a name, so a legacy row without one falls back
+        // to its identifier rather than showing an empty required field.
+        displayName: displayName ?? name,
+        description,
+        instructions,
+      })
     },
     [reset]
   )
@@ -104,7 +115,7 @@ export function SkillForm({
               : await createSkill(values)
             if (!result.success) setError(result.error)
             else {
-              form.reset({ ...values, displayName: values.displayName ?? "" })
+              form.reset(values)
               setSkillId(result.data.id)
             }
           } catch {
@@ -129,38 +140,49 @@ export function SkillForm({
       <SettingsFormBody id={formId} onSubmit={submit} className="flex flex-col">
         <fieldset disabled={pending} className="flex min-w-0 flex-1 flex-col">
           <FieldGroup className="flex-1">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field data-invalid={!!errors.displayName}>
-                <FieldLabel htmlFor={formId + "-display"}>
-                  Display name{" "}
-                  <span className="font-normal text-muted-foreground">
-                    (optional)
-                  </span>
-                </FieldLabel>
-                <Input
-                  id={formId + "-display"}
-                  readOnly={!ready}
-                  aria-invalid={!!errors.displayName}
-                  {...form.register("displayName")}
-                />
-                <FieldError errors={[errors.displayName]} />
-              </Field>
-              <Field data-invalid={!!errors.name}>
-                <FieldLabel htmlFor={formId + "-name"}>
-                  Skill identifier
-                </FieldLabel>
-                <Input
-                  id={formId + "-name"}
-                  readOnly={!ready}
-                  placeholder="literature-review"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  aria-invalid={!!errors.name}
-                  {...form.register("name")}
-                />
-                <FieldError errors={[errors.name]} />
-              </Field>
-            </div>
+            <Field data-invalid={!!errors.displayName}>
+              <FieldLabel htmlFor={formId + "-display"}>Name</FieldLabel>
+              <Input
+                id={formId + "-display"}
+                readOnly={!ready}
+                placeholder="Literature review"
+                aria-invalid={!!errors.displayName}
+                {...form.register("displayName", {
+                  onChange: (event) => {
+                    // Keep the identifier in step with the name until the user
+                    // edits the identifier itself.
+                    if (nameEdited) return
+                    form.setValue("name", skillSlug(event.target.value), {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })
+                  },
+                })}
+              />
+              <FieldError errors={[errors.displayName]} />
+            </Field>
+            <Field data-invalid={!!errors.name}>
+              <FieldLabel htmlFor={formId + "-name"}>Identifier</FieldLabel>
+              <Input
+                id={formId + "-name"}
+                readOnly={!ready}
+                placeholder="literature-review"
+                autoCapitalize="none"
+                spellCheck={false}
+                aria-invalid={!!errors.name}
+                aria-describedby={formId + "-name-help"}
+                {...form.register("name", {
+                  onChange: () => {
+                    setNameEdited(true)
+                  },
+                })}
+              />
+              <FieldDescription id={formId + "-name-help"}>
+                The model calls this skill by this name. Also its file path at
+                /skills/&lt;identifier&gt;/SKILL.md.
+              </FieldDescription>
+              <FieldError errors={[errors.name]} />
+            </Field>
             <Field data-invalid={!!errors.description}>
               <FieldLabel htmlFor={formId + "-description"}>
                 Description

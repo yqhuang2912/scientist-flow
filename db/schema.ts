@@ -97,6 +97,20 @@ export type SkillSummary = Omit<Skill, "instructions" | "createdAt">
 export type SkillInput = z.input<typeof skillFormSchema>
 export type SkillValues = z.output<typeof skillFormSchema>
 
+// The editor treats the name as the primary field and derives the identifier
+// from it, so the storage schema's optional display name does not apply here.
+// Storage keeps it nullable because SKILL.md only carries name and description.
+export const skillEditorSchema = skillFormSchema.extend({
+  displayName: z
+    .string()
+    .trim()
+    .min(1, "Enter a name.")
+    .max(160, "Use 160 characters or fewer."),
+})
+
+export type SkillEditorInput = z.input<typeof skillEditorSchema>
+export type SkillEditorValues = z.output<typeof skillEditorSchema>
+
 export const bots = pgTable("bots", {
   id: text("id")
     .primaryKey()

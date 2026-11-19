@@ -14,7 +14,7 @@ import { createTool, deleteTool, updateTool } from "@/actions/tool"
 import type { ToolSummary } from "@/db/schema"
 import {
   formatToolInput,
-  toolEditorSchema,
+  toolFormSchema,
   type ToolEditorFields,
   type ToolValues,
 } from "@/db/tool-form-schema"
@@ -35,6 +35,7 @@ import {
 } from "@/components/settings-shell"
 import {
   Field,
+  FieldDescription,
   FieldLabel,
   FieldGroup,
   FieldError,
@@ -42,6 +43,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { NativeSelect } from "@/components/ui/native-select"
 import { Textarea } from "@/components/ui/textarea"
+import { toolSlug } from "@/lib/name-slug"
 
 const inputExample = `{
   "type": "object",
@@ -59,7 +61,9 @@ function editorValues(
 ): ToolEditorFields {
   const config = tool?.config
   return {
-    displayName: tool?.displayName ?? "",
+    // The editor requires a name, so a legacy row without one falls back to
+    // its identifier rather than showing an empty required field.
+    displayName: tool?.displayName ?? tool?.name ?? "",
     name: tool?.name ?? "",
     description: tool?.description ?? "",
     method: config?.method ?? "GET",
@@ -81,10 +85,13 @@ export function ToolForm({
 }) {
   const id = useId()
   const form = useForm<ToolEditorFields, unknown, ToolValues>({
-    resolver: zodResolver(toolEditorSchema),
+    resolver: zodResolver(toolFormSchema),
     defaultValues: editorValues(tool),
   })
   const [toolId, setToolId] = useState(tool?.id)
+  // Editing the function name by hand stops it from tracking the name. State,
+  // not a ref: the change handlers read it while React is rendering the field.
+  const [nameEdited, setNameEdited] = useState(!!tool)
   const { errors, isDirty, defaultValues } = form.formState
   const { reset } = form
   const accept = useCallback(
@@ -139,36 +146,46 @@ export function ToolForm({
       >
         <fieldset disabled={pending} className="flex min-w-0 flex-1 flex-col">
           <FieldGroup className="flex-1 gap-2 [&_[data-slot=field]]:gap-1">
-            <div className="grid grid-cols-2 gap-2 sm:gap-3">
-              <Field data-invalid={!!errors.displayName}>
-                <FieldLabel htmlFor={id + "-display"}>
-                  Display name{" "}
-                  <span className="font-normal text-muted-foreground max-sm:sr-only">
-                    (optional)
-                  </span>
-                </FieldLabel>
-                <Input
-                  id={id + "-display"}
-                  readOnly={!read.ready}
-                  aria-invalid={!!errors.displayName}
-                  {...form.register("displayName")}
-                />
-                <FieldError errors={[errors.displayName]} />
-              </Field>
-              <Field data-invalid={!!errors.name}>
-                <FieldLabel htmlFor={id + "-name"}>Tool identifier</FieldLabel>
-                <Input
-                  id={id + "-name"}
-                  readOnly={!read.ready}
-                  placeholder="paper_search"
-                  spellCheck={false}
-                  autoCapitalize="none"
-                  aria-invalid={!!errors.name}
-                  {...form.register("name")}
-                />
-                <FieldError errors={[errors.name]} />
-              </Field>
-            </div>
+            <Field data-invalid={!!errors.displayName}>
+              <FieldLabel htmlFor={id + "-display"}>Name</FieldLabel>
+              <Input
+                id={id + "-display"}
+                readOnly={!read.ready}
+                placeholder="Paper search"
+                aria-invalid={!!errors.displayName}
+                {...form.register("displayName", {
+                  onChange: (event) => {
+                    if (nameEdited) return
+                    form.setValue("name", toolSlug(event.target.value), {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })
+                  },
+                })}
+              />
+              <FieldError errors={[errors.displayName]} />
+            </Field>
+            <Field data-invalid={!!errors.name}>
+              <FieldLabel htmlFor={id + "-name"}>Function name</FieldLabel>
+              <Input
+                id={id + "-name"}
+                readOnly={!read.ready}
+                placeholder="paper_search"
+                spellCheck={false}
+                autoCapitalize="none"
+                aria-invalid={!!errors.name}
+                aria-describedby={id + "-name-help"}
+                {...form.register("name", {
+                  onChange: () => {
+                    setNameEdited(true)
+                  },
+                })}
+              />
+              <FieldDescription id={id + "-name-help"}>
+                The model calls this tool by this function name.
+              </FieldDescription>
+              <FieldError errors={[errors.name]} />
+            </Field>
             <Field data-invalid={!!errors.description}>
               <FieldLabel htmlFor={id + "-description"}>Description</FieldLabel>
               <Controller
