@@ -5,12 +5,15 @@ import {
   inspectFileInWorkspace,
   deleteFileInWorkspace,
   uploadFileToWorkspace,
+  inspectEntryForRename,
+  renameWorkspaceEntry as renameEntryInWorkspace,
 } from "./workspace-file.server"
-import {
-  ensureUploadsDirectory,
-} from "./workspace-directory.server"
+import { ensureUploadsDirectory } from "./workspace-directory.server"
 import { UPLOADS_DIR } from "./workspace-validation"
-import type { FileDeletionConfirmation } from "./workspace-validation"
+import type {
+  FileDeletionConfirmation,
+  RenameWorkspaceEntryConfirmation,
+} from "./workspace-validation"
 
 import fs from "node:fs/promises"
 import path from "node:path"
@@ -439,6 +442,29 @@ export async function deleteWorkspaceFile(
   return withDirectoryWrite(chatId, async () => {
     const binding = await requireWorkspaceBinding(chatId)
     return deleteFileInWorkspace(binding.taskDir, relativePath, confirmation)
+  })
+}
+
+export async function inspectWorkspaceEntryForRename(
+  chatId: string,
+  relativePath: string
+) {
+  const binding = await requireWorkspaceBinding(chatId)
+  return inspectEntryForRename(binding.taskDir, relativePath)
+}
+
+export async function renameWorkspaceEntry(
+  chatId: string,
+  relativePath: string,
+  confirmation: RenameWorkspaceEntryConfirmation
+) {
+  return withDirectoryWrite(chatId, async () => {
+    const binding = await requireWorkspaceBinding(chatId)
+    return renameEntryInWorkspace(
+      binding.taskDir,
+      relativePath,
+      confirmation
+    )
   })
 }
 

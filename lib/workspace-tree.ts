@@ -73,6 +73,52 @@ export function removeWorkspaceSubtree(
     )
 }
 
+/**
+ * Rename one entry in place. The entry keeps its position and children; only
+ * its own last segment and the cached paths beneath it change. A rename never
+ * moves an entry between folders, so no branch needs reloading.
+ */
+export function renameWorkspaceNode(
+  nodes: WorkspaceTreeNode[],
+  relative: string,
+  newName: string
+): WorkspaceTreeNode[] {
+  return nodes.map((node) => {
+    if (node.entry.relPath === relative) {
+      const parent = relative.split("/").slice(0, -1).join("/")
+      const relPath = parent ? `${parent}/${newName}` : newName
+      return rebaseNode(node, relative, relPath, newName)
+    }
+    if (node.children && isWorkspaceSubtree(relative, node.entry.relPath))
+      return {
+        ...node,
+        children: renameWorkspaceNode(node.children, relative, newName),
+      }
+    return node
+  })
+}
+
+function rebaseNode(
+  node: WorkspaceTreeNode,
+  from: string,
+  to: string,
+  name: string
+): WorkspaceTreeNode {
+  return {
+    ...node,
+    entry: { ...node.entry, relPath: to, name },
+    children: node.children
+      ? node.children.map((child) => ({
+          ...child,
+          entry: {
+            ...child.entry,
+            relPath: `${to}${child.entry.relPath.slice(from.length)}`,
+          },
+        }))
+      : null,
+  }
+}
+
 export function selectionAfterDirectoryDeletion(
   selected: string | null,
   relative: string

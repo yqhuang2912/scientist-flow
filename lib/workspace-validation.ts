@@ -120,6 +120,25 @@ export type FileDeletionInspection = {
   identity: string
 }
 
+// A rename keeps the entry in place and only changes its last segment, so the
+// old and new names share one validation rule and one confirmation shape.
+export const renameWorkspaceEntrySchema = z
+  .object({
+    confirmed: z.literal(true),
+    identity: z.string().regex(/^[a-f0-9]{64}$/),
+    name: workspaceEntryNameSchema,
+  })
+  .strict()
+
+// The dialog only edits the name; the identity is captured separately.
+export const renameWorkspaceNameSchema = z.object({
+  name: workspaceEntryNameSchema,
+})
+
+export type RenameWorkspaceEntryConfirmation = z.infer<
+  typeof renameWorkspaceEntrySchema
+>
+
 export const deleteWorkspaceDirectorySchema = z.discriminatedUnion("mode", [
   z
     .object({

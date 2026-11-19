@@ -13,6 +13,8 @@ import {
   createWorkspaceFile,
   uploadWorkspaceFile,
   saveChatAttachment,
+  inspectWorkspaceEntryForRename,
+  renameWorkspaceEntry,
   inspectWorkspaceFileForDeletion,
   deleteWorkspaceFile,
 } from "@/lib/workspace.server"
@@ -33,6 +35,7 @@ import {
   workspaceFileTargetSchema,
   deleteWorkspaceFileSchema,
   uploadWorkspaceFileSchema,
+  renameWorkspaceEntrySchema,
   type FileDeletionConfirmation,
 } from "@/lib/workspace-validation"
 import { fileError } from "@/lib/workspace-file.server"
@@ -295,6 +298,46 @@ export async function saveChatAttachmentAction(chatId: string, file: File) {
   } catch (error) {
     const failure = fileError(error)
     return { success: false as const, error: failure.error }
+  }
+}
+
+export async function inspectWorkspaceEntryForRenameAction(
+  chatId: string,
+  relativePath: string
+) {
+  try {
+    workspaceChatIdSchema.parse(chatId)
+    const target = workspaceFileTargetSchema.parse(relativePath)
+    return await inspectWorkspaceEntryForRename(chatId, target)
+  } catch (error) {
+    throw new Error(fileError(error).error)
+  }
+}
+
+export async function renameWorkspaceEntryAction(
+  chatId: string,
+  relativePath: string,
+  name: string,
+  identity: string
+) {
+  const input = renameWorkspaceEntrySchema.safeParse({
+    confirmed: true,
+    identity,
+    name,
+  })
+  if (!input.success)
+    return {
+      success: false as const,
+      code: "INVALID",
+      error: input.error.issues[0].message,
+    }
+  try {
+    workspaceChatIdSchema.parse(chatId)
+    const target = workspaceFileTargetSchema.parse(relativePath)
+    const entry = await renameWorkspaceEntry(chatId, target, input.data)
+    return { success: true as const, entry }
+  } catch (error) {
+    return { success: false as const, ...fileError(error) }
   }
 }
 

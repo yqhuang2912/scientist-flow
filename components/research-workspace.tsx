@@ -37,6 +37,7 @@ import {
   CreateWorkspaceEntryDialog,
   DeleteWorkspaceFolderDialog,
   DeleteWorkspaceFileDialog,
+  RenameWorkspaceEntryDialog,
 } from "@/components/workspace-folder-dialogs"
 import { cn } from "@/lib/utils"
 import { useWorkspaceDocument } from "@/components/workspace-document-provider"
@@ -46,6 +47,7 @@ import {
   initialiseWorkspaceAction,
   inspectWorkspaceDirectoryForDeletionAction,
   inspectWorkspaceFileForDeletionAction,
+  inspectWorkspaceEntryForRenameAction,
   uploadWorkspaceFileAction,
   type WorkspaceStatus,
 } from "@/actions/workspace"
@@ -53,6 +55,7 @@ import {
   findWorkspaceNode,
   mergeWorkspaceChildren,
   removeWorkspaceSubtree,
+  renameWorkspaceNode,
   selectionAfterDirectoryDeletion,
   updateWorkspaceNode,
   WorkspaceDirectoryReads,
@@ -76,6 +79,7 @@ type Operation = { chatId: string; relativePath: string } & (
   | { kind: "inspect" | "inspect-file" }
   | { kind: "delete"; inspection: DirectoryDeletionInspection }
   | { kind: "delete-file"; inspection: FileDeletionInspection }
+  | { kind: "rename"; name: string; identity: string; isDir: boolean }
 )
 
 async function fetchChildren(
@@ -461,6 +465,28 @@ function ResearchWorkspaceInner({
     }
     if (kind === "upload") {
       beginUpload(relativePath)
+      return
+    }
+    if (kind === "rename") {
+      // The tree does not carry an identity, so read it now: the confirmation
+      // the server checks is captured against the entry as it is right here.
+      try {
+        const inspection = await inspectWorkspaceEntryForRenameAction(
+          chatId,
+          relativePath
+        )
+        if (!mounted.current) return
+        setOperation({
+          kind: "rename",
+          chatId,
+          relativePath,
+          name: inspection.name,
+          identity: inspection.identity,
+          isDir: inspection.isDir,
+        })
+      } catch {
+        if (mounted.current) showNotice("无法重命名", "请重试。", "error")
+      }
       return
     }
     operationLocked.current = true
@@ -865,6 +891,28 @@ function ResearchWorkspaceInner({
           onStart={startMutation}
           onCreated={(entry) => void handleCreated(operation, entry)}
           onSettled={finishMutation}
+        />
+      )}
+      {(operation?.kind === "rename") && (
+        <RenameWorkspaceEntryDialog
+          target={operation}
+          onClose={closeOperation}
+          onSettled={finishMutation}
+          onRenamed={(relativePath, name) => {
+            // Rename keeps the entry where it was, so only its own name and
+            // the paths below it change: no branch reload is needed.
+            setTree((current) =>
+              renameWorkspaceNode(current, operation.relativePath, name)
+            )
+            if (
+              selectedRel === operation.relativePath ||
+              selectedRel?.startsWith(`${operation.relativePath}/`)
+            )
+              setSelectedRel(
+                relativePath + (selectedRel?.slice(operation.relativePath.length) ?? "")
+              )
+            closeOperation()
+          }}
         />
       )}
       {operation?.kind === "delete-file" && (

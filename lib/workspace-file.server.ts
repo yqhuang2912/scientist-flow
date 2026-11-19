@@ -14,6 +14,7 @@ import {
   workspaceParentPath,
   deleteWorkspaceFileSchema,
   uploadWorkspaceFileSchema,
+  renameWorkspaceEntrySchema,
   type FileDeletionInspection,
 } from "./workspace-validation"
 
@@ -157,4 +158,111 @@ export async function deleteFileInWorkspace(
   // unlink removes only this directory entry. It never recursively deletes a
   // directory or follows a final symlink. Parent checks are shared with folders.
   await fs.unlink(target.absolute)
+}
+
+/**
+ * Read the identity a rename must confirm against. A file uses the file
+ * resolver; a directory uses the directory resolver, because its identity is
+ * the directory's own rather than a child's.
+ */
+export async function inspectEntryForRename(
+  taskDir: string,
+  rawRelative: unknown
+) {
+  const relativePath = workspaceFileTargetSchema.parse(rawRelative)
+  const parent = await resolveWorkspaceDirectory(
+    taskDir,
+    workspaceParentPath(relativePath)
+  )
+  const name = relativePath.split("/").at(-1)!
+  const stat = await fs.lstat(path.join(parent.absolute, name), {
+    bigint: true,
+  })
+  if (stat.isSymbolicLink())
+    throw new WorkspaceDirectoryError(
+      "LINK",
+      "Symbolic links cannot be renamed."
+    )
+  if (stat.isDirectory()) {
+    const target = await resolveWorkspaceDirectory(taskDir, relativePath)
+    return {
+      relativePath,
+      name,
+      isDir: true as const,
+      identity: target.identity,
+    }
+  }
+  const target = await resolveWorkspaceFile(taskDir, relativePath)
+  return {
+    relativePath,
+    name,
+    isDir: false as const,
+    identity: target.identity,
+  }
+}
+
+/**
+ * Rename one entry in place. Only the final segment changes: the parent is the
+ * same resolved directory for both the old and the new name, so a rename can
+ * never move an entry out of the task or across folders.
+ */
+export async function renameWorkspaceEntry(
+  taskDir: string,
+  rawRelative: unknown,
+  rawConfirmation: unknown
+) {
+  const confirmation = renameWorkspaceEntrySchema.parse(rawConfirmation)
+  const relativePath = workspaceFileTargetSchema.parse(rawRelative)
+  if (relativePath.split("/").at(-1) === confirmation.name)
+    return { name: confirmation.name, relativePath }
+
+  const parentRelative = workspaceParentPath(relativePath)
+  const parent = await resolveWorkspaceDirectory(taskDir, parentRelative)
+  const current = relativePath.split("/").at(-1)!
+  const source = path.join(parent.absolute, current)
+  const destination = path.join(parent.absolute, confirmation.name)
+
+  // Reuse the file resolver when the entry is a file, so the same identity
+  // check and symlink refusal applies. A directory is resolved separately,
+  // because its identity is the directory's own, not a child's.
+  const stat = await fs.lstat(source, { bigint: true })
+  if (stat.isSymbolicLink())
+    throw new WorkspaceDirectoryError(
+      "LINK",
+      "Symbolic links cannot be renamed."
+    )
+  const fileIdentity = stat.isFile()
+    ? (await resolveWorkspaceFile(taskDir, relativePath)).identity
+    : null
+  const directoryIdentity = stat.isDirectory()
+    ? (await resolveWorkspaceDirectory(taskDir, relativePath)).identity
+    : null
+  if (
+    fileIdentity !== confirmation.identity &&
+    directoryIdentity !== confirmation.identity
+  )
+    throw new WorkspaceDirectoryError(
+      "CHANGED",
+      "文件或文件夹已变化，请核对后重新操作。"
+    )
+
+  // rename replaces the destination on POSIX, so check first: a rename must
+  // never silently destroy a different entry that already holds the new name.
+  try {
+    await fs.lstat(destination, { bigint: true })
+    throw new WorkspaceDirectoryError(
+      "CONFLICT",
+      "同名文件或文件夹已存在，请使用其他名称。"
+    )
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+  }
+
+  await fs.rename(source, destination)
+  return {
+    name: confirmation.name,
+    relativePath: parentRelative
+      ? `${parentRelative}/${confirmation.name}`
+      : confirmation.name,
+  }
 }

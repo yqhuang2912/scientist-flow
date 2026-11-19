@@ -23,11 +23,13 @@ import {
   createWorkspaceFileAction,
   deleteWorkspaceFileAction,
   inspectWorkspaceFileForDeletionAction,
+  renameWorkspaceEntryAction,
 } from "@/actions/workspace"
 import {
   createWorkspaceDirectorySchema,
   createWorkspaceFileSchema,
   deleteWorkspaceDirectorySchema,
+  renameWorkspaceNameSchema,
   type DirectoryDeletionConfirmation,
   type DirectoryDeletionInspection,
   type WorkspaceEntry,
@@ -89,6 +91,168 @@ const creationErrors: Record<string, string> = {
   LINK: "Cannot create items through a symbolic link or junction.",
   NOT_DIRECTORY: "The destination is not a folder.",
   CHANGED: "The destination has changed. Reopen this dialog and try again.",
+}
+
+const renameErrors: Record<string, string> = {
+  CONFLICT: "A file or folder with this name already exists.",
+  NOT_FOUND: "This item no longer exists.",
+  INACCESSIBLE: "Cannot rename this item. Check permissions and try again.",
+  INVALID: "The name or path is invalid or too long.",
+  UNSAFE_PATH: "The item must stay inside this task's workspace.",
+  LINK: "Cannot rename a symbolic link or junction.",
+  CHANGED: "This item changed since the dialog opened. Reopen it and retry.",
+}
+
+export function RenameWorkspaceEntryDialog({
+  target,
+  onClose,
+  onRenamed,
+  onSettled,
+}: {
+  target: {
+    chatId: string
+    relativePath: string
+    name: string
+    identity: string
+    isDir: boolean
+  }
+  onClose: () => void
+  onRenamed: (relativePath: string, name: string) => void
+  onSettled: () => void
+}) {
+  const [pending, startTransition] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+  const life = useDialogLifetime()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const parentRelative = target.relativePath.split("/").slice(0, -1).join("/")
+  const location = parentRelative ? `root: ${parentRelative}/` : "root: /"
+  const EntryIcon = target.isDir ? FolderIcon : FileIcon
+  const form = useForm<{ name: string }>({
+    resolver: zodResolver(renameWorkspaceNameSchema),
+    defaultValues: { name: target.name },
+  })
+  const currentName = useWatch({ control: form.control, name: "name" })
+  const name = form.register("name")
+  const unchanged = currentName === target.name
+  const submit = form.handleSubmit(({ name }) => {
+    if (life.submitting.current || life.isComposing() || unchanged) return
+    life.beginSubmit()
+    setError(null)
+    startTransition(async () => {
+      let completed = false
+      try {
+        const result = await renameWorkspaceEntryAction(
+          target.chatId,
+          target.relativePath,
+          name,
+          target.identity
+        )
+        if (!life.mounted.current) return
+        if (result.success) {
+          completed = true
+          onRenamed(result.entry.relativePath, result.entry.name)
+        } else
+          setError(
+            renameErrors[result.code] ??
+              "Could not rename this item. Refresh the workspace and try again."
+          )
+      } catch {
+        if (life.mounted.current)
+          setError(
+            "The request failed. Refresh the workspace to check its status before retrying."
+          )
+      } finally {
+        life.endSubmit()
+        if (life.mounted.current && !completed) onSettled()
+      }
+    })
+  })
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !life.submitting.current && !life.isComposing()) onClose()
+      }}
+    >
+      <DialogContent
+        className="max-h-[calc(100dvh-2rem)] gap-0 overflow-x-hidden overflow-y-auto p-0 sm:max-w-md"
+        showCloseButton={false}
+        initialFocus={inputRef}
+      >
+        <DialogHeader className="gap-1 px-4 pt-4">
+          <div className="flex items-center gap-2">
+            <EntryIcon className="size-4 shrink-0" aria-hidden="true" />
+            <DialogTitle>
+              Rename {target.isDir ? "folder" : "file"}
+            </DialogTitle>
+          </div>
+          <DialogDescription className="min-w-0 font-mono text-xs leading-5 [overflow-wrap:anywhere]">
+            {location.split(/(?<=[\\/])/).map((part, index) => (
+              <Fragment key={index}>
+                {part}
+                <wbr />
+              </Fragment>
+            ))}
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          id="workspace-rename-entry"
+          className="p-4"
+          onSubmit={submit}
+          {...life.compositionProps}
+        >
+          <FieldGroup className="gap-0">
+            <Field
+              className="min-w-0 gap-1.5"
+              data-invalid={!!form.formState.errors.name}
+            >
+              <FieldLabel htmlFor="workspace-rename-name">Name</FieldLabel>
+              <Input
+                id="workspace-rename-name"
+                autoComplete="off"
+                disabled={pending}
+                aria-invalid={!!form.formState.errors.name}
+                aria-describedby={
+                  form.formState.errors.name
+                    ? "workspace-rename-name-error"
+                    : undefined
+                }
+                {...name}
+                ref={(element) => {
+                  name.ref(element)
+                  inputRef.current = element
+                }}
+              />
+              <FieldError
+                id="workspace-rename-name-error"
+                errors={[form.formState.errors.name]}
+              />
+            </Field>
+            {error && (
+              <Alert variant="destructive" className="mt-3">
+                <TriangleAlertIcon />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+          </FieldGroup>
+        </form>
+        <DialogFooter className="mx-0 mb-0 flex-row justify-end">
+          <Button variant="outline" disabled={pending} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            form="workspace-rename-entry"
+            type="submit"
+            disabled={pending || unchanged}
+            className="sm:min-w-24"
+          >
+            {pending && <Spinner data-icon="inline-start" />}
+            {pending ? "Renaming…" : "Rename"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 function useDialogLifetime() {

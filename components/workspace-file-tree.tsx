@@ -9,6 +9,7 @@ import {
   FolderIcon,
   FolderPlusIcon,
   MoreHorizontalIcon,
+  PencilIcon,
   Trash2Icon,
   FolderOpenIcon,
   UploadIcon,
@@ -51,6 +52,7 @@ export type WorkspaceEntryAction =
   | "delete-file"
   | "open"
   | "upload"
+  | "rename"
 
 type TreeProps = {
   nodes: WorkspaceTreeNode[]
@@ -106,6 +108,10 @@ function EntryMenuItems({
           <Separator />
         </>
       )}
+      <Item disabled={disabled} onClick={() => onAction("rename")}>
+        <PencilIcon />
+        Rename
+      </Item>
       <Item
         disabled={disabled}
         variant="destructive"
