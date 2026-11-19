@@ -8,7 +8,6 @@ import {
   BrainIcon,
   BookOpenIcon,
   CircleAlertIcon,
-  FileTextIcon,
   GlobeIcon,
   ShieldCheckIcon,
   WrenchIcon,
@@ -46,6 +45,13 @@ import {
   AttachmentTrigger,
 } from "@/components/ui/attachment"
 import { Button } from "@/components/ui/button"
+import { useParams } from "next/navigation"
+import { useWorkspaceDocument } from "@/components/workspace-document-provider"
+import { formatAttachmentSize } from "@/lib/chat-composer"
+import { workspaceImageSource } from "@/lib/workspace-document"
+import { workspaceOpenPolicy } from "@/lib/workspace-open-policy"
+import { ImagePreview } from "@/components/image-preview"
+import { FileTypeIcon } from "@/components/file-type-icon"
 import { ChatMarkdown } from "@/components/chat-markdown"
 import {
   formatToolValue,
@@ -232,7 +238,7 @@ export function ChatActivity({
     return (
       <TraceLine>
         <TraceIcon>
-          <FileTextIcon />
+          <FileTypeIcon filename={part.filename || part.title} mediaType={part.mediaType} />
         </TraceIcon>
         <TraceTitle title={part.filename || part.title}>
           {part.title}
@@ -324,25 +330,72 @@ export function ChatApproval({
   )
 }
 
-export function ChatFile({ part }: { part: FileUIPart }) {
-  const imageUrl = safeChatImageUrl(part.url, part.mediaType)
+function SavedDocumentTrigger({
+  relativePath,
+  name,
+}: {
+  relativePath: string
+  name: string
+}) {
+  const { open } = useWorkspaceDocument()
+  const { chatId } = useParams<{ chatId: string }>()
+  return (
+    <AttachmentTrigger
+      aria-label={`Open ${name}`}
+      onClick={() => void open({ chatId, relativePath })}
+    />
+  )
+}
+
+export function ChatFile({
+  part,
+  savedPath,
+  referenceSize,
+}: {
+  part: FileUIPart
+  savedPath?: unknown
+  referenceSize?: number
+}) {
+  const { chatId } = useParams<{ chatId: string }>()
+  const relative =
+    typeof savedPath === "string" && savedPath.startsWith("uploads/")
+      ? savedPath
+      : undefined
+  const kind = relative && workspaceOpenPolicy(relative).kind
+  const diskImage =
+    relative && kind === "internal-image" && referenceSize !== undefined
+      ? workspaceImageSource({ chatId, relativePath: relative })
+      : undefined
+  const imageUrl = diskImage?.url ?? safeChatImageUrl(part.url, part.mediaType)
   const url = safeChatUrl(part.url)
   const name = part.filename || (imageUrl ? "Generated image" : "Attached file")
   if (imageUrl)
     return (
       <figure className="flex max-w-full flex-col gap-2">
-        {/* Model-produced images have arbitrary hosts; do not proxy them through Next. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={imageUrl}
-          alt={name}
-          loading="lazy"
-          referrerPolicy="no-referrer"
-          className="max-h-96 max-w-full rounded-xl object-contain"
+        <ImagePreview
+          source={{ url: imageUrl, name, workspace: diskImage?.workspace }}
+          trigger={
+            <button
+              type="button"
+              aria-label={`Preview ${name}`}
+              className="block max-w-full cursor-zoom-in self-center rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              {/* Model-produced images have arbitrary hosts; do not proxy them through Next. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={imageUrl}
+                alt={name}
+                loading="lazy"
+                referrerPolicy="no-referrer"
+                className="max-h-96 max-w-full rounded-xl object-contain"
+              />
+            </button>
+          }
         />
         {part.filename && (
-          <figcaption className="text-xs text-muted-foreground">
-            {part.filename}
+          <figcaption className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <FileTypeIcon filename={part.filename} mediaType={part.mediaType} className="size-3.5 shrink-0" />
+            <span className="min-w-0 [overflow-wrap:anywhere]">{part.filename}</span>
           </figcaption>
         )}
       </figure>
@@ -350,17 +403,25 @@ export function ChatFile({ part }: { part: FileUIPart }) {
   return (
     <Attachment state="done" size="sm">
       <AttachmentMedia variant="icon">
-        <FileTextIcon />
+        <FileTypeIcon filename={part.filename || relative} mediaType={part.mediaType} />
       </AttachmentMedia>
       <AttachmentContent>
         <AttachmentTitle>{name}</AttachmentTitle>
-        <AttachmentDescription>{part.mediaType}</AttachmentDescription>
+        <AttachmentDescription>
+          {referenceSize === undefined
+            ? part.mediaType
+            : `${formatAttachmentSize(referenceSize)} · Workspace attachment`}
+        </AttachmentDescription>
       </AttachmentContent>
-      {url && (
-        <AttachmentTrigger
-          render={<a href={url} target="_blank" rel="noreferrer" />}
-          aria-label={`Open ${name} (opens in a new tab)`}
-        />
+      {relative && (kind === "external" || kind === "internal-text") ? (
+        <SavedDocumentTrigger relativePath={relative} name={name} />
+      ) : (
+        url && (
+          <AttachmentTrigger
+            render={<a href={url} target="_blank" rel="noreferrer" />}
+            aria-label={`Open ${name} (opens in a new tab)`}
+          />
+        )
       )}
     </Attachment>
   )

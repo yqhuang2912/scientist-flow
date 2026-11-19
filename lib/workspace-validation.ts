@@ -47,24 +47,21 @@ export const createWorkspaceFileSchema = z.object({
 // them easy to find and to clear out.
 export const UPLOADS_DIR = "uploads"
 
-// An uploaded file keeps its own name, so it is validated by the same entry
-// rules as a hand-typed one. The byte limit matches what the editor can open
-// and re-save, so an upload never lands in a state the workbench cannot read.
-export const MAX_UPLOAD_BYTES = 256 * 1024
-
+// Uploads use decimal MB. Text editing and image previews have independent limits.
+export const MAX_UPLOAD_BYTES = 200_000_000
+export const UPLOAD_SIZE_ERROR = "Files must be 200 MB or smaller."
 export const uploadWorkspaceFileSchema = z.object({
   name: workspaceFileNameSchema,
-  bytes: z
-    .instanceof(Uint8Array)
-    .refine(
-      (bytes) => bytes.byteLength > 0,
-      "The selected file is empty."
-    )
-    .refine(
-      (bytes) => bytes.byteLength <= MAX_UPLOAD_BYTES,
-      "Files must be 256 KiB or smaller."
-    ),
+  size: z.number().int().positive("The selected file is empty.").max(MAX_UPLOAD_BYTES, UPLOAD_SIZE_ERROR),
 })
+
+export type UploadedEntry = {
+  name: string
+  relPath: string
+  size: number
+  isDir: false
+  isFile: true
+}
 
 export const createWorkspaceDirectorySchema = z.object({
   name: workspaceDirectoryNameSchema,

@@ -11,8 +11,6 @@ import {
 import { useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import {
-  FolderIcon,
-  FileIcon,
   Trash2Icon,
   TriangleAlertIcon,
 } from "lucide-react"
@@ -64,6 +62,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { useWorkspaceDocument } from "@/components/workspace-document-provider"
+import { FileTypeIcon, FolderTypeIcon } from "@/components/file-type-icon"
 import type { DocumentTarget } from "@/lib/workspace-document"
 
 function useDocumentDeletion(
@@ -126,7 +125,6 @@ export function RenameWorkspaceEntryDialog({
   const inputRef = useRef<HTMLInputElement>(null)
   const parentRelative = target.relativePath.split("/").slice(0, -1).join("/")
   const location = parentRelative ? `root: ${parentRelative}/` : "root: /"
-  const EntryIcon = target.isDir ? FolderIcon : FileIcon
   const form = useForm<{ name: string }>({
     resolver: zodResolver(renameWorkspaceNameSchema),
     defaultValues: { name: target.name },
@@ -181,7 +179,11 @@ export function RenameWorkspaceEntryDialog({
       >
         <DialogHeader className="gap-1 px-4 pt-4">
           <div className="flex items-center gap-2">
-            <EntryIcon className="size-4 shrink-0" aria-hidden="true" />
+            {target.isDir ? (
+              <FolderTypeIcon name={target.name} className="size-4" />
+            ) : (
+              <FileTypeIcon filename={target.name} className="size-4 shrink-0" />
+            )}
             <DialogTitle>
               Rename {target.isDir ? "folder" : "file"}
             </DialogTitle>
@@ -322,7 +324,7 @@ export function CreateWorkspaceEntryDialog({
   const parentDirectory = target.relativePath
     ? `root: ${target.relativePath}/`
     : "root: /"
-  const EntryIcon = isFile ? FileIcon : FolderIcon
+  const EntryIcon = isFile ? FileTypeIcon : FolderTypeIcon
   const form = useForm<{ name: string }>({
     resolver: zodResolver(
       isFile ? createWorkspaceFileSchema : createWorkspaceDirectorySchema
@@ -380,7 +382,7 @@ export function CreateWorkspaceEntryDialog({
       >
         <DialogHeader className="gap-1 px-4 pt-4">
           <div className="flex items-center gap-2">
-            <EntryIcon className="size-4 shrink-0" aria-hidden="true" />
+            <EntryIcon className="size-4" />
             <DialogTitle>{isFile ? "New file" : "New folder"}</DialogTitle>
           </div>
           <DialogDescription className="min-w-0 font-mono text-xs leading-5 [overflow-wrap:anywhere]">
@@ -557,9 +559,9 @@ export function DeleteWorkspaceFileDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="mx-4 mt-3 flex min-w-0 items-start gap-2.5 rounded-xl bg-muted px-2.5 py-2">
-          <FileIcon
-            className="mt-px size-3.5 shrink-0 text-muted-foreground"
-            aria-hidden="true"
+          <FileTypeIcon
+            filename={initialInspection.name}
+            className="mt-px size-3.5 shrink-0"
           />
           <div className="flex min-w-0 flex-col gap-0.5">
             <p className="text-[13px] font-medium break-all">
@@ -746,9 +748,9 @@ export function DeleteWorkspaceFolderDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="mx-4 mt-3 flex min-w-0 items-start gap-2.5 rounded-xl bg-muted px-2.5 py-2">
-          <FolderIcon
-            className="mt-px size-3.5 shrink-0 text-muted-foreground"
-            aria-hidden="true"
+          <FolderTypeIcon
+            name={initialInspection.name}
+            className="mt-px size-3.5"
           />
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <p className="text-[13px] font-medium break-all">

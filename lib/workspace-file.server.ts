@@ -1,8 +1,9 @@
 import "server-only"
 
+import { constants } from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import {
   directoryError,
   resolveWorkspaceDirectory,
@@ -14,6 +15,9 @@ import {
   workspaceParentPath,
   deleteWorkspaceFileSchema,
   uploadWorkspaceFileSchema,
+  MAX_UPLOAD_BYTES,
+  UPLOAD_SIZE_ERROR,
+  type UploadedEntry,
   renameWorkspaceEntrySchema,
   type FileDeletionInspection,
 } from "./workspace-validation"
@@ -98,37 +102,99 @@ export async function createFileInWorkspace(
 
 export async function uploadFileToWorkspace(
   taskDir: string,
-  rawParent: unknown,
-  rawName: unknown,
-  rawBytes: unknown
-) {
-  const input = uploadWorkspaceFileSchema.parse({
-    name: rawName,
-    bytes: rawBytes,
-  })
-  // The destination is the folder the upload started from. It must already
-  // exist: uploading never creates a directory the user did not ask for.
+  rawParent: string,
+  input: { name: string; size: number },
+  body: ReadableStream<Uint8Array>,
+  attachment = false
+): Promise<UploadedEntry> {
+  const { name, size } = uploadWorkspaceFileSchema.parse(input)
   const parent = await resolveWorkspaceDirectory(taskDir, rawParent)
-  const absolute = path.join(parent.absolute, input.name)
-  // Opening exclusively first means a collision fails before any bytes are
-  // written, so an existing file is never truncated by a failed upload.
-  const file = await fs.open(absolute, "wx")
-  try {
-    await file.writeFile(input.bytes)
-  } catch (error) {
-    // Do not leave a partial file behind under the requested name.
-    await file.close().catch(() => undefined)
-    await fs.unlink(absolute).catch(() => undefined)
-    throw error
+  if (!attachment) {
+    const existing = await fs
+      .lstat(path.join(parent.absolute, name))
+      .catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") throw error
+        return null
+      })
+    if (existing)
+      throw new WorkspaceDirectoryError(
+        "CONFLICT",
+        "A file or folder with this name already exists."
+      )
   }
-  await file.close()
-  const stat = await fs.stat(absolute)
-  return {
-    name: input.name,
-    isDir: false as const,
-    isFile: true as const,
-    relPath: parent.relativePath ? `${parent.relativePath}/${input.name}` : input.name,
-    size: stat.size,
+  const staging = path.join(parent.absolute, `.sf-upload-${randomUUID()}.tmp`)
+  const temp = await fs.open(staging, "wx", 0o600)
+  try {
+    const reader = body.getReader()
+    let received = 0
+    try {
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done) break
+        received += value.byteLength
+        if (received > MAX_UPLOAD_BYTES)
+          throw new WorkspaceDirectoryError("TOO_LARGE", UPLOAD_SIZE_ERROR)
+        if (received > size)
+          throw new WorkspaceDirectoryError(
+            "INVALID",
+            "Upload exceeded the declared file size."
+          )
+        await temp.writeFile(value)
+      }
+      if (received !== size)
+        throw new WorkspaceDirectoryError(
+          "INVALID",
+          "Upload was incomplete. Please retry."
+        )
+    } finally {
+      if (received !== size) await reader.cancel().catch(() => {})
+      reader.releaseLock()
+    }
+    const current = await resolveWorkspaceDirectory(taskDir, rawParent)
+    if (current.identity !== parent.identity)
+      throw new WorkspaceDirectoryError(
+        "CHANGED",
+        "The destination folder changed during upload."
+      )
+    // An exclusive hard link publishes the completed file without overwriting
+    // another writer. Filesystems without hard links use exclusive copy.
+    const ext = path.extname(name)
+    const stem = path.basename(name, ext)
+    for (let copy = 0; ; copy++) {
+      const suffix = copy ? ` (${copy})` : ""
+      const finalName =
+        stem.slice(0, 255 - suffix.length - ext.length) + suffix + ext
+      const target = path.join(parent.absolute, finalName)
+      try {
+        try {
+          await fs.link(staging, target)
+        } catch (error) {
+          if (
+            !["ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EPERM"].includes(
+              (error as NodeJS.ErrnoException).code ?? ""
+            )
+          )
+            throw error
+          await fs.copyFile(staging, target, constants.COPYFILE_EXCL)
+        }
+      } catch (error) {
+        if (!attachment || (error as NodeJS.ErrnoException).code !== "EEXIST")
+          throw error
+        continue
+      }
+      return {
+        name: finalName,
+        relPath: [parent.relativePath, finalName].filter(Boolean).join("/"),
+        size,
+        isDir: false,
+        isFile: true,
+      }
+    }
+  } finally {
+    await temp.close()
+    // Never clean up through a parent that has been replaced by a link.
+    const current = await resolveWorkspaceDirectory(taskDir, rawParent)
+    if (current.identity === parent.identity) await fs.unlink(staging)
   }
 }
 
@@ -264,5 +330,64 @@ export async function renameWorkspaceEntry(
     relativePath: parentRelative
       ? `${parentRelative}/${confirmation.name}`
       : confirmation.name,
+  }
+}
+
+/** Bounded reads, verified file descriptor and path identity before AND after IO. */
+export async function readWorkspaceFileBytes(
+  taskDir: string,
+  relative: string,
+  limit: number,
+  sizeError: string
+) {
+  const target = await resolveWorkspaceFile(taskDir, relative)
+  if (target.stat.size > BigInt(limit))
+    throw new WorkspaceDirectoryError("TOO_LARGE", sizeError)
+  const handle = await fs.open(
+    target.absolute,
+    constants.O_RDONLY |
+      (process.platform === "win32" ? 0 : constants.O_NOFOLLOW)
+  )
+  try {
+    const before = await handle.stat({ bigint: true })
+    if (
+      !before.isFile() ||
+      before.ino !== target.stat.ino ||
+      before.dev !== target.stat.dev ||
+      before.size !== target.stat.size
+    )
+      throw new WorkspaceDirectoryError(
+        "CONFLICT",
+        "The file changed while it was being read. Please reload."
+      )
+    const bytes = Buffer.alloc(Number(target.stat.size) + 1)
+    let length = 0
+    while (length < bytes.length) {
+      const chunk = await handle.read(
+        bytes,
+        length,
+        bytes.length - length,
+        length
+      )
+      if (!chunk.bytesRead) break
+      length += chunk.bytesRead
+    }
+    if (length > limit)
+      throw new WorkspaceDirectoryError("TOO_LARGE", sizeError)
+    const after = await resolveWorkspaceFile(taskDir, relative)
+    const end = await handle.stat({ bigint: true })
+    if (
+      target.identity !== after.identity ||
+      before.mtimeNs !== end.mtimeNs ||
+      before.ctimeNs !== end.ctimeNs ||
+      before.size !== end.size
+    )
+      throw new WorkspaceDirectoryError(
+        "CONFLICT",
+        "The file changed while it was being read. Please reload."
+      )
+    return { target, raw: bytes.subarray(0, length) }
+  } finally {
+    await handle.close()
   }
 }

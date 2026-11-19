@@ -41,3 +41,11 @@ export function sameDocument(a: DocumentTarget, b: DocumentTarget) {
   // Workspace names follow the host Windows semantics. Server paths are canonicalized.
   return a.chatId === b.chatId && a.relativePath === b.relativePath
 }
+
+export function workspaceImageSource({ chatId, relativePath }: DocumentTarget) {
+  return {
+    name: relativePath,
+    url: `/api/workspace/${encodeURIComponent(chatId)}/image?${new URLSearchParams({ path: relativePath })}`,
+    workspace: true,
+  }
+}

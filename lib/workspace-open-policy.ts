@@ -2,6 +2,7 @@ import { workspaceFileTargetSchema } from "./workspace-validation"
 
 export type WorkspaceOpenPolicy =
   | { kind: "internal-text"; markdown: boolean }
+  | { kind: "internal-image" }
   | { kind: "external" }
   | { kind: "blocked" | "unsupported"; reason: string }
 
@@ -68,18 +69,20 @@ const TEXT_EXTENSIONS = [
   ".sql",
   ".log",
 ]
-// SVG / HTML and macro-enabled Office documents are deliberately excluded.
-const EXTERNAL_EXTENSIONS = [
+const IMAGE_EXTENSIONS = new Set([
   ".png",
   ".jpg",
   ".jpeg",
-  ".gif",
   ".webp",
+  ".gif",
+  ".avif",
   ".bmp",
+  ".ico",
   ".tif",
   ".tiff",
-  ".avif",
-  ".ico",
+])
+// SVG and macro-enabled Office formats are deliberately excluded.
+const EXTERNAL_EXTENSIONS = [
   ".pdf",
   ".doc",
   ".docx",
@@ -111,6 +114,8 @@ export function workspaceOpenPolicy(rawPath: string): WorkspaceOpenPolicy {
       markdown: /\.(md|markdown)$/.test(relative),
     }
   }
+  if (IMAGE_EXTENSIONS.has(relative.slice(relative.lastIndexOf("."))))
+    return { kind: "internal-image" }
   if (EXTERNAL_EXTENSIONS.some((extension) => relative.endsWith(extension)))
     return { kind: "external" }
   return { kind: "unsupported", reason: "This file format is not supported." }

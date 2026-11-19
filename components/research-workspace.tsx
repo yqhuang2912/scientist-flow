@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from "react"
 import {
   FolderPlusIcon,
-  FolderOpenIcon,
   FilePlusIcon,
   GitBranchIcon,
   WorkflowIcon,
@@ -23,7 +22,9 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
+import { CHAT_UPLOAD_EVENT, uploadFiles } from "@/lib/workspace-upload-client"
 import { toast } from "@/components/ui/toast"
+import { FolderTypeIcon } from "@/components/file-type-icon"
 import {
   Tooltip,
   TooltipContent,
@@ -48,7 +49,6 @@ import {
   inspectWorkspaceDirectoryForDeletionAction,
   inspectWorkspaceFileForDeletionAction,
   inspectWorkspaceEntryForRenameAction,
-  uploadWorkspaceFileAction,
   type WorkspaceStatus,
 } from "@/actions/workspace"
 import {
@@ -286,6 +286,20 @@ function ResearchWorkspaceInner({
     locatePath.current = null
   }, [tree, operation])
 
+  useEffect(() => {
+    const syncUploads = async (event: Event) => {
+      if ((event as CustomEvent<string>).detail !== chatId) return
+      if (status?.state !== "ready") {
+        await loadStatus()
+        return
+      }
+      await refreshBranch("")
+      await refreshBranch("uploads")
+    }
+    window.addEventListener(CHAT_UPLOAD_EVENT, syncUploads)
+    return () => window.removeEventListener(CHAT_UPLOAD_EVENT, syncUploads)
+  }, [chatId, status, loadStatus, refreshBranch])
+
   function invalidate(relative: string) {
     reads.current.invalidate(relative)
     setTreeLoading(false)
@@ -346,7 +360,7 @@ function ResearchWorkspaceInner({
   function finishMutation() {
     if (!mounted.current) return
     // Any read started before the completed mutation must not restore old nodes.
-    if (mutationPath.current) invalidate(mutationPath.current)
+    if (mutationPath.current !== null) invalidate(mutationPath.current)
     mutationPath.current = null
     setMutationPending(false)
   }
@@ -367,34 +381,18 @@ function ResearchWorkspaceInner({
     }
     operationLocked.current = true
     startMutation(parent)
-    const uploaded: string[] = []
+    let last: WorkspaceEntry | undefined
     try {
-      // Sequential so the first collision or oversized file stops the batch
-      // with a clear report, and the tree is not refreshed to a half state.
-      for (const file of Array.from(files)) {
-        const result = await uploadWorkspaceFileAction(chatId, parent, file)
-        if (!result.success) {
-          showNotice(
-            `${file.name} 上传失败`,
-            result.error,
-            "error"
-          )
-          break
-        }
-        uploaded.push(result.entry.name)
-      }
-      if (uploaded.length)
-        showNotice(
-          uploaded.length === 1 ? "已上传 1 个文件" : `已上传 ${uploaded.length} 个文件`,
-          uploaded.join("、")
-        )
+      await uploadFiles({ chatId, parent }, Array.from(files), (entry) => {
+        last = entry
+      })
     } catch {
-      showNotice("上传失败", "请重试。", "error")
+      // uploadFiles keeps the failing filename and any partial success in the toast.
     } finally {
       if (uploadInput.current) uploadInput.current.value = ""
       operationLocked.current = false
       finishMutation()
-      if (uploaded.length) await refreshBranch(parent)
+      if (last) await refreshBranch(parent, last)
     }
   }
 
@@ -754,7 +752,7 @@ function ResearchWorkspaceInner({
           <Empty className="px-4 py-8">
             <EmptyHeader>
               <EmptyMedia variant="icon">
-                <FolderOpenIcon aria-hidden />
+                <FolderTypeIcon expanded />
               </EmptyMedia>
               <EmptyTitle>No workspace directory</EmptyTitle>
               <EmptyDescription>
@@ -775,7 +773,7 @@ function ResearchWorkspaceInner({
           <Empty className="px-4 py-8" aria-busy={initPending}>
             <EmptyHeader>
               <EmptyMedia variant="icon">
-                <FolderOpenIcon aria-hidden />
+                <FolderTypeIcon expanded />
               </EmptyMedia>
               <EmptyTitle>No workspace yet</EmptyTitle>
               <EmptyDescription>

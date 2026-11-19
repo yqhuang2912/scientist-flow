@@ -9,7 +9,7 @@ import {
   renameWorkspaceEntry as renameEntryInWorkspace,
 } from "./workspace-file.server"
 import { ensureUploadsDirectory } from "./workspace-directory.server"
-import { UPLOADS_DIR } from "./workspace-validation"
+import { UPLOADS_DIR, workspaceParentPath } from "./workspace-validation"
 import type {
   FileDeletionConfirmation,
   RenameWorkspaceEntryConfirmation,
@@ -239,10 +239,17 @@ export async function getWorkspaceBinding(
 
 // ─── Public: initialise ───────────────────────────────────────────────────────
 
-export async function initialiseWorkspace(chatId: string): Promise<{
-  taskDir: string
-  created: boolean
-}> {
+let pendingInitialisation: Promise<unknown> = Promise.resolve()
+
+export function initialiseWorkspace(chatId: string) {
+  // Different chats can attach their first files simultaneously. Both bindings
+  // live in the same config file, so serialize its read/modify/write cycle.
+  const next = pendingInitialisation.then(() => initialiseTaskDirectory(chatId))
+  pendingInitialisation = next.catch(() => {})
+  return next
+}
+
+async function initialiseTaskDirectory(chatId: string) {
   assertSafeChatId(chatId)
 
   const file = await readLocalFile()
@@ -263,32 +270,27 @@ export async function initialiseWorkspace(chatId: string): Promise<{
 
   const taskDir = path.join(rootDir, chatId)
 
-  // Check for a plain file at the expected location.
-  try {
-    const stat = await fs.stat(taskDir)
-    if (!stat.isDirectory()) {
-      throw new Error(
-        `A file already exists at ${taskDir}. Remove it before initialising this workspace.`
+  // First uploads and explicit initialisation use the same checked parent paths.
+  for (const suffix of [
+    "",
+    "/src",
+    "/data",
+    "/docs",
+    "/outputs",
+    "/outputs/figures",
+    "/outputs/checkpoints",
+  ]) {
+    const relative = chatId + suffix
+    try {
+      await createDirectoryInWorkspace(
+        rootDir,
+        workspaceParentPath(relative),
+        path.posix.basename(relative)
       )
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== "EEXIST") throw error
+      await resolveWorkspaceDirectory(rootDir, relative)
     }
-  } catch (err: unknown) {
-    if (!isNodeError(err) || err.code !== "ENOENT") {
-      throw err
-    }
-  }
-
-  const subdirs = [
-    "src",
-    "data",
-    "docs",
-    "outputs",
-    path.join("outputs", "figures"),
-    path.join("outputs", "checkpoints"),
-  ]
-
-  await fs.mkdir(taskDir, { recursive: true })
-  for (const sub of subdirs) {
-    await fs.mkdir(path.join(taskDir, sub), { recursive: true })
   }
 
   const binding: WorkspaceBinding = {
@@ -393,36 +395,37 @@ export async function createWorkspaceFile(
 
 export async function uploadWorkspaceFile(
   chatId: string,
-  parentRelativePath: string,
-  name: string,
-  bytes: Uint8Array
+  parent: string,
+  input: { name: string; size: number },
+  body: ReadableStream<Uint8Array>,
+  attachment: boolean
 ) {
   return withDirectoryWrite(chatId, async () => {
-    const binding = await requireWorkspaceBinding(chatId)
+    let binding
+    try {
+      binding = await requireWorkspaceBinding(chatId)
+    } catch (error) {
+      if (
+        !attachment ||
+        !(error instanceof WorkspaceDirectoryError) ||
+        error.code !== "NOT_INITIALISED"
+      )
+        throw error
+      if (!(await getWorkspaceConfig())?.rootDir)
+        throw new WorkspaceDirectoryError(
+          "NOT_INITIALISED",
+          "Choose a workspace root in Settings → General before attaching files."
+        )
+      binding = await initialiseWorkspace(chatId)
+    }
+    if (attachment) await ensureUploadsDirectory(binding.taskDir)
     return uploadFileToWorkspace(
       binding.taskDir,
-      parentRelativePath,
-      name,
-      bytes
+      attachment ? UPLOADS_DIR : parent,
+      input,
+      body,
+      attachment
     )
-  })
-}
-
-/**
- * Store a chat attachment in the task's uploads folder. The folder is created
- * on first use; the file keeps its own name and never overwrites an existing
- * one, so a repeated attachment name gets a distinct copy rather than
- * destroying the earlier upload.
- */
-export async function saveChatAttachment(
-  chatId: string,
-  name: string,
-  bytes: Uint8Array
-) {
-  return withDirectoryWrite(chatId, async () => {
-    const binding = await requireWorkspaceBinding(chatId)
-    await ensureUploadsDirectory(binding.taskDir)
-    return uploadFileToWorkspace(binding.taskDir, UPLOADS_DIR, name, bytes)
   })
 }
 
@@ -478,7 +481,9 @@ export async function listWorkspaceDir(
     relPath
   )
 
-  const names = await fs.readdir(absTarget)
+  const names = (await fs.readdir(absTarget)).filter(
+    (name) => !/^\.sf-upload-[a-f0-9-]{36}\.tmp$/i.test(name)
+  )
   const entries: FsEntry[] = []
   const truncated = names.length > MAX_ENTRIES
 

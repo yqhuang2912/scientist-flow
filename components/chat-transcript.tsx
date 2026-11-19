@@ -42,6 +42,7 @@ import {
   ChatFile,
   type RespondToApproval,
 } from "@/components/chat-activity"
+import { storedAttachmentSchema } from "@/lib/chat-composer"
 import { cleanBotText } from "@/lib/chat-bot-text"
 import { cn } from "@/lib/utils"
 import {
@@ -181,10 +182,20 @@ const ChatTurn = memo(function ChatTurn({
     const addressedBot = isGroup
       ? bots.find((bot) => bot.id === getMessageBotId(message))
       : undefined
-    const firstText = message.parts.findIndex((part) => part.type === "text")
+    const paths = (
+      message.metadata as
+        { workspaceFiles?: Record<string, unknown> } | undefined
+    )?.workspaceFiles
+    const saved = message.parts.map(
+      (_, index) => storedAttachmentSchema.safeParse(paths?.[index]).data
+    )
+    const firstText = message.parts.findIndex(
+      (part, index) => part.type === "text" && !saved[index]
+    )
     const text = message.parts
-      .filter((part) => part.type === "text")
-      .map((part) => part.text)
+      .flatMap((part, index) =>
+        part.type === "text" && !saved[index] ? [part.text] : []
+      )
       .join("\n\n")
     return (
       <Message align="end">
@@ -201,8 +212,35 @@ const ChatTurn = memo(function ChatTurn({
             <BubbleContent>
               <div className="flex min-w-0 flex-col gap-2">
                 {message.parts.map((part, index) => {
+                  const attachment = saved[index]
                   if (part.type === "file")
-                    return <ChatFile key={index} part={part} />
+                    return (
+                      <ChatFile
+                        key={index}
+                        part={part}
+                        savedPath={
+                          attachment?.relativePath ??
+                          paths?.[index] ??
+                          ("workspacePath" in part
+                            ? part.workspacePath
+                            : undefined)
+                        }
+                      />
+                    )
+                  if (part.type === "text" && attachment)
+                    return (
+                      <ChatFile
+                        key={index}
+                        part={{
+                          type: "file",
+                          filename: attachment.name,
+                          mediaType: attachment.mediaType,
+                          url: "",
+                        }}
+                        savedPath={attachment.relativePath}
+                        referenceSize={attachment.size}
+                      />
+                    )
                   if (part.type !== "text") return null
                   return (
                     <div

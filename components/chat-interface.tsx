@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useChat } from "@ai-sdk/react"
 import {
   useLoadTranscript,
@@ -15,7 +15,7 @@ import { CircleAlertIcon } from "lucide-react"
 import { useRouter } from "next/navigation"
 
 import { ChatTranscript } from "@/components/chat-transcript"
-import { fileToDataUrl, type ChatComposerMessage } from "@/lib/chat-composer"
+import { chatAttachmentParts, type ChatComposerMessage } from "@/lib/chat-composer"
 import { ChatComposer } from "@/components/chat-composer"
 import {
   loadChatTranscript,
@@ -23,7 +23,8 @@ import {
   startChatSession,
   prepareChatTurn,
 } from "@/actions/chat"
-import { saveChatAttachmentAction } from "@/actions/workspace"
+import { CHAT_UPLOAD_EVENT, uploadFiles } from "@/lib/workspace-upload-client"
+import type { UploadedEntry } from "@/lib/workspace-validation"
 import type { chatAgent } from "@/trigger/chat"
 import type { ChatWithBot } from "@/queries/chats"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -73,6 +74,7 @@ export function ChatInterface({
 
   return (
     <ChatView
+      key={chatId}
       chatId={chatId}
       bots={bots}
       isGroup={isGroup}
@@ -95,6 +97,7 @@ function ChatView({
   initialMessages: UIMessage[]
   transport: ReturnType<typeof useTriggerChatTransport>
 }) {
+  const uploaded = useRef(new WeakMap<File, UploadedEntry>())
   const recipients = useSubAgentMessages()
   const [selectedBotId, setSelectedBotId] = useState(bots[0]?.id ?? "")
   const router = useRouter()
@@ -139,30 +142,37 @@ function ChatView({
     if (problem) return { error: problem }
     router.refresh()
 
-    const metadata = selectedBotId ? { botId: selectedBotId } : undefined
-    // Attachments are saved into the task's uploads folder first, so the file
-    // outlives this tab and the model can reach it from its workspace. The
-    // message then carries the same bytes as file parts for the model to read
-    // directly, and the stored path so the answer can refer to it.
-    const saved = await Promise.all(
-      files.map(async (file) => {
-        const url = await fileToDataUrl(file)
-        const result = await saveChatAttachmentAction(chatId, file)
-        return {
-          type: "file" as const,
-          mediaType: file.type || "application/octet-stream",
-          filename: file.name,
-          url,
-          ...(result.success ? { workspacePath: result.entry.relPath } : {}),
-        }
-      })
+    const entries: UploadedEntry[] = []
+    try {
+      await uploadFiles(
+        { chatId, attachment: true },
+        files,
+        (entry) => {
+          entries.push(entry)
+          window.dispatchEvent(
+            new CustomEvent(CHAT_UPLOAD_EVENT, { detail: chatId })
+          )
+        },
+        uploaded.current
+      )
+    } catch (error) {
+      return {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Could not upload the attachment.",
+      }
+    }
+    const { parts, workspaceFiles } = await chatAttachmentParts(
+      files,
+      entries,
+      text
     )
-    const parts = [
-      ...(text.trim() ? [{ type: "text" as const, text }] : []),
-      ...saved,
-    ]
-
-    await sendMessage({ parts, metadata }, metadata ? { metadata } : undefined)
+    const metadata = {
+      ...(selectedBotId && { botId: selectedBotId }),
+      ...(files.length > 0 && { workspaceFiles }),
+    }
+    await sendMessage({ parts, metadata }, { metadata })
   }
 
   return (

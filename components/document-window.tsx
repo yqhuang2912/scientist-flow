@@ -9,7 +9,6 @@ import {
   type ReactNode,
 } from "react"
 import {
-  FileTextIcon,
   EyeIcon,
   PencilIcon,
   Maximize2Icon,
@@ -21,6 +20,7 @@ import {
   GripIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { FileTypeIcon } from "@/components/file-type-icon"
 import {
   Tooltip,
   TooltipTrigger,
@@ -248,7 +248,7 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
           onClick={() => session.activate()}
           aria-label={`Restore ${name}`}
         >
-          <FileTextIcon data-icon="inline-start" />
+          <FileTypeIcon filename={name} data-icon="inline-start" />
           <span className="truncate">{name}</span>
           {dirty && <span aria-label="Unsaved changes">•</span>}
           <Maximize2Icon data-icon="inline-end" />
@@ -335,7 +335,7 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
                 aria-label={identity}
                 id="document-title"
               >
-                <FileTextIcon aria-hidden />
+                <FileTypeIcon filename={name} data-icon="inline-start" />
                 {!compact && (
                   <span className="max-w-[45%] truncate text-muted-foreground">
                     {doc.taskName} / {parentPath}

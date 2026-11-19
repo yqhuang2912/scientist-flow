@@ -1,6 +1,13 @@
 "use client"
 
-import { memo, type ComponentProps } from "react"
+import { useParams } from "next/navigation"
+import { ImagePreview } from "@/components/image-preview"
+import { workspaceImageSource } from "@/lib/workspace-document"
+import { workspaceOpenPolicy } from "@/lib/workspace-open-policy"
+import { safeChatUrl, safeChatImageUrl } from "@/lib/chat-presentation"
+import type { Root } from "hast"
+import { visit } from "unist-util-visit"
+import { memo, useState, type ComponentProps } from "react"
 import { cjk } from "@streamdown/cjk"
 import { code } from "@streamdown/code"
 import { math } from "@streamdown/math"
@@ -9,6 +16,7 @@ import {
   Streamdown,
   defaultComponents,
   defaultRemarkPlugins,
+  defaultRehypePlugins,
   type ExtraProps,
 } from "streamdown"
 import {
@@ -50,7 +58,106 @@ function MarkdownCode({
   )
 }
 
-const components = { code: MarkdownCode }
+function workspaceImagePath(src: string) {
+  try {
+    const path = decodeURIComponent(src).replace(/^\.\//, "")
+    if (workspaceOpenPolicy(path).kind === "internal-image") return path
+  } catch {
+    /* Malformed Markdown URL. */
+  }
+}
+
+// Streamdown's URL filter requires an absolute URL. Only validated workspace
+// images get a local renderer, after sanitization and before URL filtering.
+function rehypeWorkspaceImages() {
+  return (tree: Root) => {
+    visit(tree, "element", (node) => {
+      if (node.tagName !== "img") return
+      if (
+        typeof node.properties.src === "string" &&
+        workspaceImagePath(node.properties.src)
+      )
+        node.tagName = "workspace-image"
+    })
+  }
+}
+const chatRehypePlugins = [
+  defaultRehypePlugins.raw,
+  defaultRehypePlugins.sanitize,
+  rehypeWorkspaceImages,
+  defaultRehypePlugins.harden,
+]
+
+function MarkdownImage(props: ComponentProps<"img"> & ExtraProps) {
+  const [open, setOpen] = useState(false)
+  const params = useParams<{ chatId?: string }>()
+  const DefaultImage = defaultComponents.img
+  const src = typeof props.src === "string" ? props.src : ""
+  if (!src || src.startsWith("streamdown:")) return <DefaultImage {...props} />
+  const name = props.alt || "Image"
+  const remote =
+    safeChatUrl(src) ??
+    safeChatImageUrl(src, src.match(/^data:(image\/[a-z]+);base64,/)?.[1] ?? "")
+  let source
+  if (remote) source = { name, url: remote }
+  else if (params?.chatId) {
+    const relativePath = workspaceImagePath(src)
+    if (relativePath)
+      source = workspaceImageSource({ chatId: params.chatId, relativePath })
+  }
+  if (!source) return <>{props.alt}</>
+  return (
+    <>
+      <DefaultImage
+        {...props}
+        src={source.url}
+        className={cn(
+          props.className,
+          "cursor-zoom-in focus-visible:ring-2 focus-visible:ring-ring"
+        )}
+        role="button"
+        tabIndex={0}
+        aria-label={`Preview ${name}`}
+        aria-haspopup="dialog"
+        onClick={(event) => {
+          if (!event.currentTarget.closest("a")) setOpen(true)
+        }}
+        onKeyDown={(event) => {
+          if (
+            (event.key === "Enter" || event.key === " ") &&
+            !event.currentTarget.closest("a")
+          ) {
+            event.preventDefault()
+            setOpen(true)
+          }
+        }}
+      />
+      {open && <ImagePreview source={source} onClose={() => setOpen(false)} />}
+    </>
+  )
+}
+
+function MarkdownParagraph(props: ComponentProps<"p"> & ExtraProps) {
+  // Streamdown renders a block around its image download controls.
+  const { node, ...rest } = props
+  if (
+    node?.children.some(
+      (child) =>
+        child.type === "element" &&
+        ["workspace-image", "img"].includes(child.tagName)
+    )
+  )
+    return <div {...rest} />
+  const DefaultParagraph = defaultComponents.p
+  return <DefaultParagraph {...props} />
+}
+
+const components = {
+  p: MarkdownParagraph,
+  code: MarkdownCode,
+  img: MarkdownImage,
+  "workspace-image": MarkdownImage,
+}
 const plugins = { cjk, code, math, mermaid }
 const reasoningPlugins = { cjk, math }
 const reasoningComponents = {
@@ -124,6 +231,7 @@ export const ChatMarkdown = memo(function ChatMarkdown({
       )}
       plugins={reasoning ? reasoningPlugins : plugins}
       components={reasoning ? reasoningComponents : components}
+      rehypePlugins={reasoning ? undefined : chatRehypePlugins}
       remarkPlugins={reasoning ? reasoningRemarkPlugins : undefined}
       parseMarkdownIntoBlocksFn={reasoning ? wholeThought : undefined}
       skipHtml={reasoning}

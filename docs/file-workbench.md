@@ -14,8 +14,12 @@ The existing Base File Tree selects on click and opens on double-click, Enter,
 or its shared Open menu action. `lib/workspace-open-policy.ts` owns all routing:
 
 - UTF-8 Markdown, plain text, common source and configuration files open inside.
-- Listed raster images, PDF and ordinary Word/Excel/PowerPoint files request the
-  local desktop adapter. SVG and macro-enabled Office formats are not allowed.
+- Chat image attachments, Markdown images in messages, and workspace raster files
+  open in the image preview. Relative Markdown image paths use the current task.
+  Fit to window and Actual size share the same source. Workspace images are limited
+  to 32 MiB. TIFF previews show the first page at up to 4096 pixels per side.
+- PDF and ordinary Word/Excel/PowerPoint files use the local desktop adapter.
+  SVG and macro-enabled Office formats are excluded.
 - `data/**`, `outputs/checkpoints/**`, the listed dataset extensions and model
   weights take precedence over every supported file type. Their bodies are not
   read to classify them.
@@ -43,6 +47,20 @@ available for copying; Save cannot recreate it. Submitted deletion results reach
 the persistent session even if the tree has unmounted during chat navigation.
 An explicit tree refresh checks the active document without replacing its draft.
 There is no background polling or file watcher.
+
+## Uploads
+
+Workspace and chat accept individual files up to 200 MB (200,000,000 bytes).
+The browser streams each file to the task's upload route and reports transfer
+progress until the server confirms the write. Workspace uploads target the
+selected destination and reject name collisions. Composer attachments go into
+`uploads/` and receive a numbered suffix on collision.
+
+The composer accepts Word, Excel, PowerPoint, PDF, supported raster images,
+plain text, Markdown, CSV and JSON. Small model-compatible attachments can travel
+inline, with a shared raw-byte budget of 350 KiB per message. Office files and
+attachments exceeding the available budget display “Workspace link” in the
+composer. These messages carry the saved path. Their file contents stay on disk.
 
 ## Filesystem boundary and writes
 
@@ -84,7 +102,8 @@ npm run start -- --hostname 127.0.0.1
 ```
 
 Use a localhost/127.0.0.1 browser URL. The action refuses nonlocal origins,
-forwarded/proxied requests, CI and Vercel environments. Next.js also checks action
+nonlocal forwarded addresses, proxy chains, CI and Vercel environments. The
+loopback peer and matching host supplied by Next.js are accepted. Next.js also checks action
 origins. The helper checks `UserInteractive` and refuses Windows session 0.
 Loopback Host/Origin headers alone do not prove locality behind a tunnel or proxy;
 do not enable the flag when exposing or forwarding the service to remote clients.

@@ -7,7 +7,6 @@ import type { ChatStatus } from "ai"
 import {
   ArrowUpIcon,
   ChevronDownIcon,
-  FileTextIcon,
   PlusIcon,
   SquareIcon,
   XIcon,
@@ -48,12 +47,14 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { ChatAvatar } from "@/components/chat-avatar"
+import { FileTypeIcon } from "@/components/file-type-icon"
 import { compactChatAvatarStyles } from "@/components/ui/compact-styles"
 import {
   chatComposerSchema,
   shouldSubmitChatMessage,
   attachmentRejection,
   formatAttachmentSize,
+  inlineAttachmentFlags,
   type ChatComposerInput,
   type ChatComposerMessage,
 } from "@/lib/chat-composer"
@@ -90,6 +91,7 @@ export function ChatComposer({
   const text = useWatch({ control: form.control, name: "text" })
   const files = useWatch({ control: form.control, name: "files" }) ?? []
   const busy = status === "submitted" || status === "streaming"
+  const inline = inlineAttachmentFlags(files)
   const pending = form.formState.isSubmitting
   const canSend =
     (text.trim().length > 0 || files.length > 0) && !busy && !pending
@@ -99,6 +101,7 @@ export function ChatComposer({
 
   function addFiles(incoming: FileList | File[] | null) {
     if (!incoming) return
+    form.clearErrors("root")
     const accepted: File[] = []
     for (const file of Array.from(incoming)) {
       const rejection = attachmentRejection(file)
@@ -152,7 +155,9 @@ export function ChatComposer({
     }
     if (problem) {
       if (!form.getValues("text")) form.setValue("text", message.text)
-      form.setValue("files", message.files)
+      form.setValue("files", [
+        ...new Set([...message.files, ...(form.getValues("files") ?? [])]),
+      ])
       form.setError("root", { message: problem })
     }
   }
@@ -198,19 +203,26 @@ export function ChatComposer({
           </FieldLabel>
           {files.length > 0 && (
             <div className="flex flex-wrap gap-2">
-              {files.map((file) => (
+              {files.map((file, index) => (
                 <Attachment
                   key={`${file.name}:${file.size}:${file.lastModified}`}
                   size="sm"
                   state="done"
                 >
                   <AttachmentMedia variant="icon">
-                    <FileTextIcon />
+                    <FileTypeIcon filename={file.name} mediaType={file.type} />
                   </AttachmentMedia>
                   <AttachmentContent>
                     <AttachmentTitle>{file.name}</AttachmentTitle>
-                    <AttachmentDescription>
+                    <AttachmentDescription
+                      title={
+                        inline[index]
+                          ? undefined
+                          : "The model receives the workspace path. The file contents stay in the workspace."
+                      }
+                    >
                       {formatAttachmentSize(file.size)}
+                      {!inline[index] && " · Workspace link"}
                     </AttachmentDescription>
                   </AttachmentContent>
                   <AttachmentAction

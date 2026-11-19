@@ -52,8 +52,29 @@ test("central policy blocks dataset regions before otherwise supported extension
     "x.bib",
   ])
     assert.equal(workspaceOpenPolicy(name).kind, "internal-text", name)
-  for (const name of ["x.pdf", "x.png", "x.docx", "x.xlsx", "x.pptx"])
+  for (const name of [
+    "x.pdf",
+    "x.doc",
+    "x.docx",
+    "x.xls",
+    "x.xlsx",
+    "x.ppt",
+    "x.pptx",
+  ])
     assert.equal(workspaceOpenPolicy(name).kind, "external", name)
+  for (const name of [
+    "uploads/截图.PNG",
+    "x.JpEg",
+    "x.jpg",
+    "x.webp",
+    "x.avif",
+    "x.gif",
+    "x.tiff",
+    "x.tif",
+    "x.ico",
+    "x.bmp",
+  ])
+    assert.equal(workspaceOpenPolicy(name).kind, "internal-image", name)
   for (const name of ["x.exe", "x.lnk", "x.url", "x.bin", "x.docm", "x.svg"])
     assert.equal(workspaceOpenPolicy(name).kind, "unsupported", name)
 })
@@ -260,6 +281,22 @@ test("external adapter is disabled unless explicitly local, and rejects proxies/
   })
   assert.equal(isLocalDesktopRequest(local), false)
   process.env.WORKSPACE_DESKTOP_OPEN = "1"
+  const nextLocal = new Headers(local)
+  nextLocal.set("x-forwarded-for", "::ffff:127.0.0.1")
+  nextLocal.set("x-forwarded-host", "localhost:3000")
+  assert.equal(
+    isLocalDesktopRequest(nextLocal),
+    process.platform === "win32" && !process.env.CI && !process.env.VERCEL
+  )
+  for (const [key, value] of [
+    ["x-forwarded-for", "127.0.0.1, 127.0.0.1"],
+    ["x-forwarded-host", "example.org"],
+    ["forwarded", "for=127.0.0.1"],
+  ]) {
+    const proxy = new Headers(nextLocal)
+    proxy.set(key, value)
+    assert.equal(isLocalDesktopRequest(proxy), false)
+  }
   assert.equal(
     isLocalDesktopRequest(
       new Headers({ origin: "https://server.example", host: "server.example" })

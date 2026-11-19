@@ -5,6 +5,7 @@ import { DocumentSessionStore, type DocumentIO } from "@/lib/document-session"
 import { workspaceOpenPolicy } from "@/lib/workspace-open-policy"
 import {
   documentTargetSchema,
+  workspaceImageSource,
   type DocumentTarget,
 } from "@/lib/workspace-document"
 import {
@@ -13,6 +14,7 @@ import {
   openWorkspaceExternalAction,
 } from "@/actions/workspace-document"
 import { toast } from "@/components/ui/toast"
+import { ImagePreview } from "@/components/image-preview"
 import { DocumentWindow } from "@/components/document-window"
 
 const defaultIO: DocumentIO = {
@@ -34,6 +36,7 @@ export function WorkspaceDocumentProvider({
   children: ReactNode
   io?: DocumentIO
 }) {
+  const [image, setImage] = useState<DocumentTarget | null>(null)
   const [workbench] = useState<Workbench>(() => {
     const session = new DocumentSessionStore(io)
     const launching = new Set<string>()
@@ -46,6 +49,10 @@ export function WorkspaceDocumentProvider({
         const policy = workspaceOpenPolicy(target.relativePath)
         if (policy.kind === "internal-text") {
           await session.open(target)
+          return
+        }
+        if (policy.kind === "internal-image") {
+          setImage(target)
           return
         }
         if (policy.kind !== "external") {
@@ -77,6 +84,12 @@ export function WorkspaceDocumentProvider({
     <Context.Provider value={workbench}>
       {children}
       <DocumentWindow session={workbench.session} />
+      {image && (
+        <ImagePreview
+          source={workspaceImageSource(image)}
+          onClose={() => setImage(null)}
+        />
+      )}
     </Context.Provider>
   )
 }

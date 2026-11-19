@@ -146,10 +146,14 @@ export function isLocalDesktopRequest(headers: {
     process.env.VERCEL
   )
     return false
+  // Next supplies these headers even for a direct connection to its loopback listener.
+  const peer = headers.get("x-forwarded-for")
+  const forwardedHost = headers.get("x-forwarded-host")
   if (
     headers.get("forwarded") ||
-    headers.get("x-forwarded-for") ||
-    headers.get("x-forwarded-host")
+    (peer !== null &&
+      !["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(peer)) ||
+    (forwardedHost !== null && forwardedHost !== headers.get("host"))
   )
     return false
   try {

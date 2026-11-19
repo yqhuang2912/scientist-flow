@@ -4,9 +4,7 @@ import { useState } from "react"
 import {
   AlertCircleIcon,
   ChevronRightIcon,
-  FileIcon,
   FilePlusIcon,
-  FolderIcon,
   FolderPlusIcon,
   MoreHorizontalIcon,
   PencilIcon,
@@ -15,6 +13,7 @@ import {
   UploadIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { FileTypeIcon, FolderTypeIcon } from "@/components/file-type-icon"
 import { Spinner } from "@/components/ui/spinner"
 import {
   Collapsible,
@@ -163,7 +162,7 @@ function FileTreeRow({
         }
       }}
       className={cn(
-        "w-full min-w-0 justify-start group-hover/tree-row:bg-sidebar-accent group-hover/tree-row:text-sidebar-accent-foreground",
+        "relative w-full min-w-0 justify-start ps-1.5 group-hover/tree-row:bg-sidebar-accent group-hover/tree-row:text-sidebar-accent-foreground",
         hasActions && "pr-8",
         selected || menuOpen
           ? "bg-sidebar-accent text-sidebar-accent-foreground aria-expanded:bg-sidebar-accent"
@@ -172,18 +171,25 @@ function FileTreeRow({
     >
       {node.entry.isDir ? (
         <>
-          {node.loading ? (
-            <Spinner />
-          ) : (
-            <ChevronRightIcon className="transition-transform group-data-panel-open/button:rotate-90 motion-reduce:transition-none" />
-          )}
-          <FolderIcon />
+          {/* Keep the disclosure in the indent gutter, within the same button. */}
+          <span
+            aria-hidden
+            className="absolute inset-y-0 end-full grid w-6 place-items-center"
+          >
+            {node.loading ? (
+              <Spinner />
+            ) : (
+              <ChevronRightIcon className="transition-transform group-data-panel-open/button:rotate-90 motion-reduce:transition-none" />
+            )}
+          </span>
+          <FolderTypeIcon
+            name={node.entry.name}
+            expanded={node.expanded}
+            data-icon="inline-start"
+          />
         </>
       ) : (
-        <>
-          <span aria-hidden className="size-4 shrink-0" />
-          <FileIcon />
-        </>
+        <FileTypeIcon filename={node.entry.name} data-icon="inline-start" />
       )}
       <span className="min-w-0 truncate" title={node.entry.name}>
         {node.entry.name}
@@ -192,7 +198,7 @@ function FileTreeRow({
   )
 
   const rowContent = (
-    <div className="group/tree-row relative min-w-0">
+    <div className="group/tree-row relative ms-6.5 min-w-0">
       {node.entry.isDir ? <CollapsibleTrigger render={button} /> : button}
 
       {/* A sibling control: opening a menu never toggles the folder. */}

@@ -1,4 +1,11 @@
 import { z } from "zod"
+import type { FileUIPart, TextUIPart } from "ai"
+import {
+  uploadWorkspaceFileSchema,
+  workspaceFileNameSchema,
+  workspaceFileTargetSchema,
+  type UploadedEntry,
+} from "./workspace-validation"
 
 export const chatComposerSchema = z
   .object({
@@ -33,45 +40,118 @@ export function shouldSubmitChatMessage({
   return key === "Enter" && !shiftKey && !isComposing && keyCode !== 229
 }
 
-// The composer holds a File object per attachment; the transcript and the
-// model only ever see a URL and media type.
-export const ACCEPTED_UPLOAD_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "image/gif",
-  "image/avif",
-  "application/pdf",
-  "text/plain",
-  "text/markdown",
-  "text/csv",
-  "application/json",
-]
+// Small, model-compatible attachments fit in the chat transport. Larger files
+// travel directly to workspace storage and leave a durable reference in chat.
+export const INLINE_ATTACHMENT_BUDGET = 350 * 1024
+const formats: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+  avif: "image/avif",
+  pdf: "application/pdf",
+  txt: "text/plain",
+  md: "text/markdown",
+  markdown: "text/markdown",
+  csv: "text/csv",
+  json: "application/json",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+export function attachmentMediaType(file: Pick<File, "name" | "type">) {
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? ""
+  return Object.hasOwn(formats, extension)
+    ? formats[extension]
+    : Object.values(formats).includes(file.type)
+      ? file.type
+      : undefined
+}
 
-export const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024
+export function inlineAttachmentFlags(files: File[]) {
+  // Leave room for base64 expansion and message metadata in Trigger's 512 KiB turn.
+  let remaining = INLINE_ATTACHMENT_BUDGET
+  return files.map((file) => {
+    const mime = attachmentMediaType(file)
+    if (
+      !mime ||
+      !/^(image\/|text\/|application\/(pdf|json)$)/.test(mime) ||
+      file.size > remaining
+    )
+      return false
+    remaining -= file.size
+    return true
+  })
+}
+
+export const storedAttachmentSchema = z.object({
+  name: workspaceFileNameSchema,
+  relativePath: workspaceFileTargetSchema.refine((p) =>
+    p.startsWith("uploads/")
+  ),
+  mediaType: z.string(),
+  size: z.number().int().positive(),
+})
+export type StoredAttachment = z.infer<typeof storedAttachmentSchema>
+
+export async function chatAttachmentParts(
+  files: File[],
+  entries: UploadedEntry[],
+  text: string
+) {
+  const parts: (TextUIPart | FileUIPart)[] = text.trim()
+    ? [{ type: "text", text }]
+    : []
+  const workspaceFiles: Record<number, StoredAttachment> = {}
+  const inline = inlineAttachmentFlags(files)
+  for (const [i, file] of files.entries()) {
+    const mediaType = attachmentMediaType(file)!
+    const info = {
+      name: file.name,
+      relativePath: entries[i].relPath,
+      size: file.size,
+      mediaType,
+    }
+    workspaceFiles[parts.length] = info
+    if (inline[i]) {
+      parts.push({
+        type: "file",
+        filename: file.name,
+        mediaType,
+        url: await fileToDataUrl(file, mediaType),
+      })
+    } else {
+      parts.push({
+        type: "text",
+        text: `Workspace attachment: ${JSON.stringify(info.relativePath)}. File contents are stored in the task workspace and are not included in this message.`,
+      })
+    }
+  }
+  return { parts, workspaceFiles }
+}
 
 export function formatAttachmentSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes < 1000) return `${bytes} B`
+  if (bytes < 1_000_000) return `${Math.round(bytes / 1000)} KB`
+  return `${(bytes / 1_000_000).toFixed(1)} MB`
 }
 
 /** Files the picker or a drop may accept, in the composer's own terms. */
 export function attachmentRejection(file: File): string | undefined {
-  if (file.size === 0) return "This file is empty."
-  if (file.size > MAX_ATTACHMENT_BYTES)
-    return `Files must be ${formatAttachmentSize(MAX_ATTACHMENT_BYTES)} or smaller.`
-  if (file.type && !ACCEPTED_UPLOAD_TYPES.includes(file.type))
-    return "This file type cannot be attached."
+  const result = uploadWorkspaceFileSchema.safeParse({
+    name: file.name,
+    size: file.size,
+  })
+  if (!result.success) return result.error.issues[0].message
+  if (!attachmentMediaType(file)) return "This file type cannot be attached."
   return undefined
 }
 
-/**
- * A file part carries a URL, and the browser holds the bytes. Converting here
- * keeps the whole attachment in the message the user sends; nothing is written
- * to disk, so an attachment never lands in the task workspace unasked.
- */
-export function fileToDataUrl(file: File): Promise<string> {
+function fileToDataUrl(file: File, mediaType: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () =>
@@ -79,6 +159,6 @@ export function fileToDataUrl(file: File): Promise<string> {
         ? resolve(reader.result)
         : reject(new Error("Could not read the file."))
     reader.onerror = () => reject(new Error("Could not read the file."))
-    reader.readAsDataURL(file)
+    reader.readAsDataURL(file.slice(0, file.size, mediaType))
   })
 }

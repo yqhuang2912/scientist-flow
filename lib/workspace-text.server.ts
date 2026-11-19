@@ -1,9 +1,8 @@
 import "server-only"
 import fs from "node:fs/promises"
-import { constants } from "node:fs"
 import path from "node:path"
 import { createHash, randomUUID } from "node:crypto"
-import { resolveWorkspaceFile } from "./workspace-file.server"
+import { readWorkspaceFileBytes } from "./workspace-file.server"
 import {
   resolveWorkspaceDirectory,
   WorkspaceDirectoryError,
@@ -58,63 +57,19 @@ function decode(bytes: Buffer): Omit<TextDocument, "version"> {
   return { content: content.replace(/\r\n|\r/g, "\n"), bom, newline }
 }
 
-/** Bounded reads, verified file descriptor and path identity before AND after IO. */
 async function readSnapshot(taskDir: string, relative: string) {
-  assertText(relative) // Must precede file access, including format detection.
-  const target = await resolveWorkspaceFile(taskDir, relative)
-  if (target.stat.size > BigInt(MAX_DOCUMENT_BYTES))
-    fail("TOO_LARGE", "Text files are limited to 256 KiB.")
-  const handle = await fs.open(
-    target.absolute,
-    constants.O_RDONLY |
-      (process.platform === "win32" ? 0 : constants.O_NOFOLLOW)
+  assertText(relative)
+  const { target, raw } = await readWorkspaceFileBytes(
+    taskDir,
+    relative,
+    MAX_DOCUMENT_BYTES,
+    "Text files are limited to 256 KiB."
   )
-  try {
-    const before = await handle.stat({ bigint: true })
-    if (
-      !before.isFile() ||
-      before.ino !== target.stat.ino ||
-      before.dev !== target.stat.dev
-    )
-      fail(
-        "CONFLICT",
-        "The file changed while it was being read. Please reload."
-      )
-    const bytes = Buffer.alloc(MAX_DOCUMENT_BYTES + 1)
-    let length = 0
-    while (length < bytes.length) {
-      const chunk = await handle.read(
-        bytes,
-        length,
-        bytes.length - length,
-        length
-      )
-      if (!chunk.bytesRead) break
-      length += chunk.bytesRead
-    }
-    if (length > MAX_DOCUMENT_BYTES)
-      fail("TOO_LARGE", "Text files are limited to 256 KiB.")
-    const after = await resolveWorkspaceFile(taskDir, relative)
-    const end = await handle.stat({ bigint: true })
-    if (
-      target.identity !== after.identity ||
-      before.mtimeNs !== end.mtimeNs ||
-      before.ctimeNs !== end.ctimeNs ||
-      before.size !== end.size
-    )
-      fail(
-        "CONFLICT",
-        "The file changed while it was being read. Please reload."
-      )
-    const raw = bytes.subarray(0, length)
-    const version = createHash("sha256")
-      .update(target.identity)
-      .update(raw)
-      .digest("hex")
-    return { target, raw, document: { ...decode(raw), version } }
-  } finally {
-    await handle.close()
-  }
+  const version = createHash("sha256")
+    .update(target.identity)
+    .update(raw)
+    .digest("hex")
+  return { target, raw, document: { ...decode(raw), version } }
 }
 
 export async function readTextInWorkspace(

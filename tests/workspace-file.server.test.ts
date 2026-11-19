@@ -5,6 +5,7 @@ import os from "node:os"
 import path from "node:path"
 import {
   createFileInWorkspace,
+  uploadFileToWorkspace,
   inspectFileInWorkspace,
   deleteFileInWorkspace,
   fileError,
@@ -33,6 +34,66 @@ async function fixture(t: TestContext) {
   })
   return { root, outside, temp }
 }
+
+test("streams every byte and keeps separate copies of same-name chat attachments", async (t) => {
+  const { root } = await fixture(t)
+  const input = { name: "评审 意见.docx", size: 4 }
+  const body = () =>
+    new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(Uint8Array.of(0, 255))
+        c.enqueue(Uint8Array.of(12, 34))
+        c.close()
+      },
+    })
+  const entry = await uploadFileToWorkspace(root, "", input, body())
+  assert.deepEqual(
+    await fs.readFile(path.join(root, entry.name)),
+    Buffer.from([0, 255, 12, 34])
+  )
+  await assert.rejects(uploadFileToWorkspace(root, "", input, body()), {
+    code: "CONFLICT",
+  })
+  const copy = await uploadFileToWorkspace(root, "", input, body(), true)
+  assert.equal(copy.relPath, "评审 意见 (1).docx")
+})
+
+test("invalid lengths, interrupted transfers and linked parents leave no uploaded file", async (t) => {
+  const { root, outside } = await fixture(t)
+  const upload = (
+    size: number,
+    stream: ReadableStream<Uint8Array>,
+    parent = ""
+  ) => uploadFileToWorkspace(root, parent, { name: "文件.pdf", size }, stream)
+  const body = () => new Blob(["1234"]).stream()
+  await assert.rejects(upload(3, body()), /exceeded/)
+  await assert.rejects(upload(5, body()), /incomplete/)
+  await assert.rejects(upload(200_000_001, body()), /200 MB/)
+  let delivered = false
+  await assert.rejects(
+    upload(
+      4,
+      new ReadableStream({
+        pull(c) {
+          if (delivered) c.error(new Error("disconnected"))
+          else {
+            delivered = true
+            c.enqueue(Uint8Array.of(1))
+          }
+        },
+      })
+    ),
+    /disconnected/
+  )
+  assert.deepEqual(await fs.readdir(root), [])
+  await fs.symlink(
+    outside,
+    path.join(root, "outside"),
+    process.platform === "win32" ? "junction" : "dir"
+  )
+  await assert.rejects(upload(4, body(), "outside"), { code: "LINK" })
+  assert.deepEqual(await fs.readdir(outside), [])
+})
 
 test("file names preserve Chinese, spaces, extensions and extensionless names", () => {
   for (const name of [
