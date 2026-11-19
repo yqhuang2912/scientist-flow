@@ -48,6 +48,7 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
+import { SettingsFormError } from "@/components/settings-shell"
 import { taskFormSchema, type TaskFormValues } from "@/db/schema"
 import type { BotSummary } from "@/queries/bots"
 import type { ChatWithBot } from "@/queries/chats"
@@ -258,11 +259,7 @@ export function TaskDialog({
             />
           </FieldGroup>
 
-          {serverError && (
-            <p className="text-[13px] text-destructive" role="alert">
-              {serverError}
-            </p>
-          )}
+          <SettingsFormError error={serverError ?? ""} />
         </form>
 
         <DialogFooter className="mx-0 mt-0 mb-0 flex-row flex-wrap justify-end">
@@ -298,11 +295,7 @@ export function TaskDialog({
                     This permanently deletes the task from the app. Workspace
                     files remain on disk. This action cannot be undone.
                   </AlertDialogDescription>
-                  {deleteError && (
-                    <p className="text-[13px] text-destructive" role="alert">
-                      {deleteError}
-                    </p>
-                  )}
+                  <SettingsFormError error={deleteError ?? ""} />
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel disabled={isPending}>

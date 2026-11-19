@@ -30,6 +30,7 @@ import {
 import { SettingsDeleteAction } from "@/components/settings-detail-actions"
 import {
   SettingsFormBody,
+  SettingsFormError,
   SettingsFormFooter,
 } from "@/components/settings-shell"
 import {
@@ -296,11 +297,7 @@ export function ToolForm({
             )}
           </FieldGroup>
         </fieldset>
-        {error && (
-          <p role="alert" className="mt-3 text-sm text-destructive">
-            {error}
-          </p>
-        )}
+        <SettingsFormError error={error} className="mt-3" />
       </SettingsFormBody>
       <SettingsFormFooter
         formId={id}

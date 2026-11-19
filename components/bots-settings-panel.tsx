@@ -6,7 +6,7 @@ import { BotForm } from "@/components/bot-dialog"
 import { ChatAvatar } from "@/components/chat-avatar"
 import type { SettingsLeaveGuard } from "@/components/settings-form-guard"
 import { SettingsList, SettingsListHeader } from "@/components/settings-list"
-import { SettingsPane } from "@/components/settings-shell"
+import { SettingsPane, SettingsEditorPane } from "@/components/settings-shell"
 import { compactChatAvatarStyles } from "@/components/ui/compact-styles"
 import type { BotSummary } from "@/queries/bots"
 
@@ -23,10 +23,7 @@ export function BotsSettingsPanel({
   const [editor, setEditor] = useState<{ bot?: BotSummary } | null>(null)
   if (editor) {
     return (
-      <section
-        aria-label="Bots"
-        className="flex min-h-0 min-w-0 flex-col [&>form]:flex-1"
-      >
+      <SettingsEditorPane label="Bots">
         <BotForm
           key={editor.bot?.id ?? "new"}
           bot={editor.bot}
@@ -34,7 +31,7 @@ export function BotsSettingsPanel({
           onManageLibrary={onManageLibrary}
           onClose={() => setEditor(null)}
         />
-      </section>
+      </SettingsEditorPane>
     )
   }
   const query = search.trim().toLowerCase()

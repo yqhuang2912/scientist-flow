@@ -165,25 +165,6 @@ export function SettingsNavItem({
   )
 }
 
-export function SettingsSection({
-  title,
-  children,
-}: {
-  title?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="flex flex-col">
-      {title && (
-        <p className="px-4 pt-4 pb-2 text-xs font-medium text-muted-foreground">
-          {title}
-        </p>
-      )}
-      <div className="flex flex-col px-4">{children}</div>
-    </div>
-  )
-}
-
 /**
  * One settings row: label and description on the left, control on the right.
  * Rows carry a bottom hairline and drop it on the last child.
@@ -219,27 +200,40 @@ export function SettingsRow({
   )
 }
 
-/** A control pill sized to the shared 30px row scale. */
-export function SettingsControl({
+/** The editor pane that replaces the list once a row is opened. */
+export function SettingsEditorPane({
+  label,
   children,
-  onClick,
-  disabled,
-  className,
 }: {
+  label: string
   children: React.ReactNode
-  onClick?: () => void
-  disabled?: boolean
-  className?: string
 }) {
   return (
-    <Button
-      type="button"
-      variant="secondary"
-      onClick={onClick}
-      disabled={disabled}
-      className={cn("min-w-[5.5rem] justify-between gap-2 px-2.5", className)}
+    <section
+      aria-label={label}
+      className="flex min-h-0 min-w-0 flex-col [&>form]:flex-1"
     >
       {children}
-    </Button>
+    </section>
+  )
+}
+
+/**
+ * The one server-action failure line used by every editor, so a save error
+ * reads identically in Settings, the task dialog and bot memory. Call sites
+ * own their own spacing.
+ */
+export function SettingsFormError({
+  error,
+  className,
+}: {
+  error: string
+  className?: string
+}) {
+  if (!error) return null
+  return (
+    <p role="alert" className={cn("text-sm text-destructive", className)}>
+      {error}
+    </p>
   )
 }

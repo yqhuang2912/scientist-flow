@@ -2,7 +2,10 @@
 
 import { useEffect, useState, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
-import { SettingsPane } from "@/components/settings-shell"
+import {
+  SettingsEditorPane,
+  SettingsPane,
+} from "@/components/settings-shell"
 import { SettingsList, SettingsListHeader } from "@/components/settings-list"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -138,13 +141,9 @@ export function SharedLibraryPanel<S extends Summary>({
   const label = "Shared " + title.toLowerCase()
   if (editor) {
     return (
-      <section
-        key={editor.entry?.id ?? "new"}
-        aria-label={label}
-        className="flex min-h-0 min-w-0 flex-col [&>form]:flex-1"
-      >
+      <SettingsEditorPane key={editor.entry?.id ?? "new"} label={label}>
         {renderForm(editor.entry, () => setEditor(null))}
-      </section>
+      </SettingsEditorPane>
     )
   }
   return (

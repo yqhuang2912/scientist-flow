@@ -33,6 +33,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { toast } from "@/components/ui/toast"
 import { Spinner } from "@/components/ui/spinner"
+import { SettingsFormError } from "@/components/settings-shell"
 import {
   Tooltip,
   TooltipContent,
@@ -113,11 +114,7 @@ export function SaveMemoryDialog({
               <FieldError errors={[invalid]} />
             </Field>
           </FieldGroup>
-          {error && (
-            <p role="alert" className="mt-2 text-sm text-destructive">
-              {error}
-            </p>
-          )}
+          <SettingsFormError error={error} className="mt-2" />
         </form>
         <DialogFooter>
           <Button
@@ -179,7 +176,7 @@ function MemoryList({ chatId }: { chatId: string }) {
     })
   }
   return (
-    <div className="min-h-0 space-y-2">
+    <div className="flex min-h-0 flex-col gap-2">
       {error && (
         <div
           role="alert"
