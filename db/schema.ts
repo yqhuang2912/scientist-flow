@@ -14,6 +14,62 @@ import {
 } from "drizzle-orm/pg-core"
 import { createInsertSchema } from "drizzle-zod"
 import { z } from "zod"
+import {
+  modelChoiceSchema,
+  type CatalogModel,
+  type ConnectionState,
+  type ModelChoice,
+} from "../lib/model-catalog"
+
+import type { UIMessage } from "ai"
+import type { ExecutionStatus, Delegation } from "../lib/bot-execution"
+
+export const modelConnections = pgTable(
+  "model_connections",
+  {
+    id: text("id").primaryKey(),
+    owner: text("owner").notNull(),
+    nickname: text("nickname").notNull(),
+    revision: text("revision").notNull(),
+    credential: text("credential"),
+    state: text("state").$type<ConnectionState>().notNull(),
+    catalog: jsonb("catalog").$type<CatalogModel[]>().notNull(),
+  },
+  (t) => [index("model_connections_owner_idx").on(t.owner)]
+)
+
+export const connectionFormSchema = createInsertSchema(modelConnections, {
+  nickname: z.string().trim().min(1, "Enter a nickname.").max(80),
+})
+  .pick({ nickname: true })
+  .extend({
+    provider: z.literal("openrouter"),
+    apiKey: z.string().trim().min(1, "Enter an OpenRouter API key.").max(1024),
+  })
+  .strict()
+
+export const modelRequests = pgTable(
+  "model_requests",
+  {
+    id: text("id").primaryKey(),
+    chatId: text("chat_id").notNull(),
+    runId: text("run_id").notNull(),
+    executionId: text("execution_id"),
+    step: integer("step").notNull(),
+    botId: text("bot_id").notNull(),
+    connection: text("connection").notNull(),
+    revision: text("revision"),
+    model: text("model").notNull(),
+    effort: text("effort"),
+    httpStatus: integer("http_status"),
+    responseModel: text("response_model"),
+    responseId: text("response_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("model_requests_chat_idx").on(t.chatId)]
+)
 
 export const toolDefinitions = pgTable("tools", {
   id: text("id")
@@ -123,6 +179,7 @@ export const bots = pgTable("bots", {
   job: text("job").notNull(),
   instructions: text("instructions"),
   sandboxId: text("sandbox_id"),
+  modelChoice: jsonb("model_choice").$type<ModelChoice>(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -178,6 +235,32 @@ export const chats = pgTable("chats", {
 })
 
 export const botMemoryLimit = 12
+
+export const botExecutions = pgTable(
+  "bot_executions",
+  {
+    id: text("id").primaryKey(),
+    chatId: text("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    userMessageId: text("user_message_id").notNull(),
+    slot: integer("slot").notNull(),
+    runId: text("run_id").notNull(),
+    botId: text("bot_id").notNull(),
+    messageId: text("message_id").notNull().unique(),
+    parentExecutionId: text("parent_execution_id"),
+    status: text("status").$type<ExecutionStatus>().notNull(),
+    delegation: jsonb("delegation").$type<Delegation>(),
+    message: jsonb("message").$type<UIMessage>(),
+  },
+  (t) => [
+    uniqueIndex("bot_execution_turn_slot_idx").on(
+      t.chatId,
+      t.userMessageId,
+      t.slot
+    ),
+  ]
+)
 
 export const projectDecisions = pgTable(
   "project_decisions",
@@ -323,6 +406,12 @@ export const insertBotSchema = createInsertSchema(bots, {
 export const botFormSchema = insertBotSchema
   .pick({ avatar: true, name: true, job: true, instructions: true })
   .extend({
+    modelChoice: modelChoiceSchema
+      .nullable()
+      .refine(
+        (value) => Boolean(value),
+        "Select a model connection and model."
+      ),
     avatar: z.string().min(1, "Face is required"),
     name: z.string().trim().min(1, "Name is required"),
     job: z.string().trim().min(1, "Job is required"),

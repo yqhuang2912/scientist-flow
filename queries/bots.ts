@@ -10,7 +10,7 @@ import { db } from "@/lib/db"
 export type BotSummary = Pick<
   typeof bots.$inferSelect,
   "id" | "name" | "avatar" | "job" | "instructions"
->
+> & Partial<Pick<typeof bots.$inferSelect, "modelChoice">>
 
 export interface SidebarChat {
   id: string

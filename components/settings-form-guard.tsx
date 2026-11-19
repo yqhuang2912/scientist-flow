@@ -22,7 +22,7 @@ export function useSettingsFormGuard(
   guard: Ref<SettingsLeaveGuard>,
   isDirty: boolean,
   saving: RefObject<boolean>,
-  noun: "bot" | "skill" | "tool"
+  noun: "bot" | "skill" | "tool" | "connection"
 ) {
   const [leaveAction, setLeaveAction] = useState<(() => void) | null>(null)
 

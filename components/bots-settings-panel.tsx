@@ -17,7 +17,7 @@ export function BotsSettingsPanel({
 }: {
   bots: BotSummary[]
   guard: Ref<SettingsLeaveGuard>
-  onManageLibrary: (tab: "skills" | "tools") => void
+  onManageLibrary: (tab: "skills" | "tools" | "connections") => void
 }) {
   const [search, setSearch] = useState("")
   const [editor, setEditor] = useState<{ bot?: BotSummary } | null>(null)
@@ -52,7 +52,9 @@ export function BotsSettingsPanel({
         items={matches.map((bot) => ({
           id: bot.id,
           name: bot.name,
-          description: bot.job,
+          description: bot.modelChoice
+            ? bot.job
+            : bot.job + " · Needs configuration",
           icon: (
             <ChatAvatar
               seed={bot.avatar}

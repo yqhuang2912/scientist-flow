@@ -1,5 +1,6 @@
 "use server"
 
+import { hydrateExecutions } from "@/lib/bot-execution.server"
 import { auth } from "@trigger.dev/sdk"
 import { chat, defaultStorage } from "@trigger.dev/sdk/ai"
 import { and, eq, inArray } from "drizzle-orm"
@@ -8,6 +9,12 @@ import { nanoid } from "nanoid"
 import { taskFormSchema, bots, chatMembers, chats } from "@/db/schema"
 import { db } from "@/lib/db"
 import { getChat } from "@/queries/chats"
+import { assertInstallationRequest } from "@/lib/installation-request.server"
+import {
+  chatMemberChoice,
+  validateChoice,
+} from "@/lib/model-connections.server"
+import { ModelConnectionError } from "@/lib/model-credentials.server"
 
 const createChatSession = chat.createStartSessionAction("chat-agent")
 const readChatTranscript = chat.createLoadTranscriptAction(defaultStorage)
@@ -22,11 +29,15 @@ export async function startChatSession(params: {
   chatId: string
   clientData?: unknown
 }) {
+  if (process.env.SCIENTISTFLOW_INSTALLATION_ID)
+    await assertInstallationRequest()
   await assertChatExists(params.chatId)
   return createChatSession(params)
 }
 
 export async function mintChatAccessToken(chatId: string) {
+  if (process.env.SCIENTISTFLOW_INSTALLATION_ID)
+    await assertInstallationRequest()
   await assertChatExists(chatId)
 
   return auth.createPublicToken({
@@ -43,25 +54,30 @@ export async function loadChatTranscript(params: {
   limit?: number
 }) {
   await assertChatExists(params.chatId)
-  return readChatTranscript(params)
+  const transcript = await readChatTranscript(params)
+  return {
+    ...transcript,
+    messages: await hydrateExecutions(params.chatId, transcript.messages),
+  }
 }
 
-export async function touchChatActivity(chatId: string): Promise<boolean> {
-  if (typeof chatId !== "string" || !chatId.trim()) {
-    return false
-  }
-
+export async function prepareChatTurn(chatId: string, botId: string) {
   try {
+    if (process.env.SCIENTISTFLOW_INSTALLATION_ID)
+      await assertInstallationRequest()
+    const choice = await chatMemberChoice(chatId, botId)
+    await validateChoice(choice)
     const rows = await db
       .update(chats)
       .set({ lastMessageAt: new Date() })
       .where(eq(chats.id, chatId))
       .returning({ id: chats.id })
 
-    return Boolean(rows[0])
+    return rows.length ? null : "This chat is unavailable."
   } catch (error) {
-    console.error("Failed to update chat activity", error)
-    return false
+    return error instanceof ModelConnectionError
+      ? error.message
+      : "Could not prepare the conversation. Try again."
   }
 }
 

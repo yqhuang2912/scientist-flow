@@ -71,7 +71,9 @@ export function ChatComposer({
   bots: ComposerBot[]
   selectedBotId: string
   onBotChange: (id: string) => void
-  onSubmit: (message: ChatComposerMessage) => void | Promise<void>
+  onSubmit: (
+    message: ChatComposerMessage
+  ) => void | Promise<void | { error: string }>
   status: ChatStatus
   onStop: () => void
 }) {
@@ -80,11 +82,7 @@ export function ChatComposer({
   const submitting = useRef(false)
   const fileInput = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
-  const form = useForm<
-    ChatComposerInput,
-    unknown,
-    ChatComposerMessage
-  >({
+  const form = useForm<ChatComposerInput, unknown, ChatComposerMessage>({
     resolver: zodResolver(chatComposerSchema),
     defaultValues: { text: "", files: [] },
     reValidateMode: "onSubmit",
@@ -93,7 +91,8 @@ export function ChatComposer({
   const files = useWatch({ control: form.control, name: "files" }) ?? []
   const busy = status === "submitted" || status === "streaming"
   const pending = form.formState.isSubmitting
-  const canSend = (text.trim().length > 0 || files.length > 0) && !busy && !pending
+  const canSend =
+    (text.trim().length > 0 || files.length > 0) && !busy && !pending
   const error = form.formState.errors.text ?? form.formState.errors.root
   const selectedBot = bots.find((bot) => bot.id === selectedBotId)
   const label = busy ? "Stop response" : "Send message"
@@ -142,16 +141,19 @@ export function ChatComposer({
     // Clear only the submitted revision, preserving input typed during a reply.
     form.setValue("text", "")
     form.setValue("files", [])
+    let problem: string | undefined
     try {
-      await onSubmit(message)
+      const result = await onSubmit(message)
+      problem = result?.error
     } catch {
-      if (!form.getValues("text")) form.setValue("text", message.text)
-      form.setValue("files", message.files)
-      form.setError("root", {
-        message: "Could not send the message. Please try again.",
-      })
+      problem = "Could not send the message. Please try again."
     } finally {
       submitting.current = false
+    }
+    if (problem) {
+      if (!form.getValues("text")) form.setValue("text", message.text)
+      form.setValue("files", message.files)
+      form.setError("root", { message: problem })
     }
   }
 
@@ -175,7 +177,9 @@ export function ChatComposer({
         setDragging(false)
         addFiles(event.dataTransfer.files)
       }}
-      className={cn(dragging && "rounded-2xl ring-2 ring-ring/40 ring-offset-2")}
+      className={cn(
+        dragging && "rounded-2xl ring-2 ring-ring/40 ring-offset-2"
+      )}
     >
       <input
         ref={fileInput}

@@ -44,6 +44,8 @@ export function renderProjectDecisions(rows: ProjectDecision[]) {
         evidence: {
           report: row.sourceRole === "user" ? "user report" : "bot report",
           author: row.sourceAuthor,
+          messageId: row.sourceMessageId,
+          part: row.sourcePart,
           quote: row.quote,
         },
         pendingNextStep: row.nextStep,

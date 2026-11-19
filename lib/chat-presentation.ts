@@ -55,6 +55,15 @@ export function getAssistantSegments(
   message: UIMessage,
   fallbackBotId: string | null
 ) {
+  if (typeof record(message.metadata)?.executionId === "string") {
+    return [
+      {
+        key: message.id,
+        botId: getMessageBotId(message),
+        parts: message.parts.map((part, index) => ({ part, index })),
+      },
+    ]
+  }
   // Stream metadata ends with the recipient's id. Earlier parts still belong
   // to the sender, so derive the starting identity from the handoff result.
   const firstHandoff = message.parts.map(getHandoff).find(Boolean)

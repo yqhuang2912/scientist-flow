@@ -28,7 +28,7 @@ export async function getTriggerBotById(botId: string) {
   return rows[0] ?? null
 }
 
-export async function getChatSkillBindings(chatId: string) {
+export async function getChatSkillBindings(chatId: string, botId: string) {
   return db
     .select({
       botId: chatMembers.botId,
@@ -41,17 +41,17 @@ export async function getChatSkillBindings(chatId: string) {
     .from(chatMembers)
     .innerJoin(botSkills, eq(chatMembers.botId, botSkills.botId))
     .innerJoin(skills, eq(botSkills.skillId, skills.id))
-    .where(eq(chatMembers.chatId, chatId))
+    .where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.botId, botId)))
     .orderBy(asc(skills.name))
 }
 
-export async function getChatBotMemories(chatId: string) {
+export async function getChatBotMemories(chatId: string, botId: string) {
   try {
     return await db
       .select({ botId: botMemories.botId, text: botMemories.text })
       .from(chatMembers)
       .innerJoin(botMemories, eq(botMemories.botId, chatMembers.botId))
-      .where(eq(chatMembers.chatId, chatId))
+      .where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.botId, botId)))
       .orderBy(asc(botMemories.createdAt), asc(botMemories.id))
   } catch {
     console.error("Could not read bot memory for chat", chatId)
@@ -104,7 +104,7 @@ export async function getTriggerChatContext(
 }
 export function getChatToolBindings(
   chatId: string,
-  member?: { botId: string; toolId: string }
+  member?: { botId: string; toolId?: string }
 ) {
   return db
     .select({
@@ -120,7 +120,7 @@ export function getChatToolBindings(
       and(
         eq(chatMembers.chatId, chatId),
         member && eq(chatMembers.botId, member.botId),
-        member && eq(toolDefinitions.id, member.toolId)
+        member?.toolId ? eq(toolDefinitions.id, member.toolId) : undefined
       )
     )
 }

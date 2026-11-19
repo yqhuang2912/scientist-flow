@@ -49,6 +49,13 @@ import type { SkillSummary, ToolSummary } from "@/db/schema"
 import { getSkills, getBotSkillIds } from "@/queries/skills"
 import { BotBindingPicker } from "@/components/bot-binding-picker"
 import { getTools, getBotToolIds } from "@/queries/tools"
+import { getModelConnections } from "@/actions/model-connections"
+import { BotModelFields } from "./bot-model-fields"
+import {
+  choiceProblem,
+  type ConnectionSummary,
+  type ModelChoice,
+} from "@/lib/model-catalog"
 
 const defaultInstructions =
   "Answer briefly, cite sources, and ask before running anything destructive."
@@ -61,6 +68,7 @@ interface BotDialogProps {
     name: string
     job: string
     instructions: string | null
+    modelChoice?: ModelChoice | null
   }
   open?: boolean
   onOpenChange?: (open: boolean) => void
@@ -130,7 +138,7 @@ export function BotForm({
   initialAvatarSeed?: string
   standalone?: boolean
   guard: Ref<SettingsLeaveGuard>
-  onManageLibrary: (tab: "skills" | "tools") => void
+  onManageLibrary: (tab: "skills" | "tools" | "connections") => void
   onClose: () => void
 }) {
   const formId = useId()
@@ -146,6 +154,7 @@ export function BotForm({
   const [serverError, setServerError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   const defaultValues = {
+    modelChoice: bot?.modelChoice ?? null,
     skillIds: [] as string[],
     toolIds: [] as string[],
     avatar: initialSeed,
@@ -165,11 +174,16 @@ export function BotForm({
     "bot"
   )
   const selection = useController({ control: form.control, name: "skillIds" })
+  const modelSelection = useController({
+    control: form.control,
+    name: "modelChoice",
+  })
   const toolSelection = useController({
     control: form.control,
     name: "toolIds",
   })
   const [options, setOptions] = useState<{
+    connections: ConnectionSummary[]
     skills: SkillSummary[]
     tools: ToolSummary[]
   } | null>(null)
@@ -181,14 +195,17 @@ export function BotForm({
     let current = true
     async function load() {
       try {
-        const [catalog, binding, toolCatalog, toolBinding] = await Promise.all([
-          getSkills(),
-          botId ? getBotSkillIds(botId) : null,
-          getTools(),
-          botId ? getBotToolIds(botId) : null,
-        ])
+        const [catalog, binding, toolCatalog, toolBinding, connections] =
+          await Promise.all([
+            getSkills(),
+            botId ? getBotSkillIds(botId) : null,
+            getTools(),
+            botId ? getBotToolIds(botId) : null,
+            getModelConnections(),
+          ])
         if (!current) return
         if (
+          !connections.success ||
           !catalog.success ||
           (binding && !binding.success) ||
           !toolCatalog.success ||
@@ -203,7 +220,11 @@ export function BotForm({
         if (toolIds.some((id) => !toolCatalog.data.some((t) => t.id === id)))
           throw new Error()
         resetField("toolIds", { defaultValue: [...toolIds].sort() })
-        setOptions({ skills: catalog.data, tools: toolCatalog.data })
+        setOptions({
+          skills: catalog.data,
+          tools: toolCatalog.data,
+          connections: connections.data,
+        })
       } catch {
         if (current) setLoadError("Could not load bot bindings.")
       }
@@ -357,6 +378,12 @@ export function BotForm({
                 )
               })}
             </div>
+            <BotModelFields
+              connections={options?.connections ?? null}
+              choice={modelSelection.field.value ?? null}
+              onChange={modelSelection.field.onChange}
+              manage={() => requestLeave(() => onManageLibrary("connections"))}
+            />
             <Field
               className="flex-1"
               data-invalid={!!form.formState.errors.instructions}
@@ -389,7 +416,19 @@ export function BotForm({
         editing={isEditing}
         dirty={isDirty}
         pending={isPending}
-        ready={!!options}
+        ready={
+          !!options &&
+          !!modelSelection.field.value &&
+          !(
+            modelSelection.field.value &&
+            choiceProblem(
+              modelSelection.field.value,
+              options.connections.find(
+                (c) => c.id === modelSelection.field.value?.connectionId
+              )
+            )
+          )
+        }
         onCancel={() => requestLeave(onClose)}
       >
         {savedBot && (

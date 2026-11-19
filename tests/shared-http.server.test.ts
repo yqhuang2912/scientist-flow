@@ -39,7 +39,17 @@ const ok = () => ({
 })
 
 test("Bot forms distinguish absent tool IDs from clearing and deduplicate selected tool IDs", () => {
-  const base = { name: "A", job: "B", avatar: "C", skillIds: [] },
+  const base = {
+      modelChoice: {
+        connectionId: "a".repeat(21),
+        modelId: "fixture",
+        effort: null,
+      },
+      name: "A",
+      job: "B",
+      avatar: "C",
+      skillIds: [],
+    },
     id = "a".repeat(21)
   assert.equal(botFormSchema.safeParse(base).success, false)
   assert.equal(

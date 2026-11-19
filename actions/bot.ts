@@ -6,6 +6,9 @@ import { createHash } from "node:crypto"
 import { z } from "zod"
 
 import { db } from "@/lib/db"
+import { validateChoice } from "@/lib/model-connections.server"
+import { ModelConnectionError } from "@/lib/model-credentials.server"
+import { assertInstallationRequest } from "@/lib/installation-request.server"
 import {
   botFormSchema,
   bots,
@@ -118,6 +121,10 @@ export async function createBot(
     JSON.stringify([fields, [...skillIds].sort(), [...toolIds].sort()])
   )
   try {
+    if (!fields.modelChoice)
+      return { success: false, error: "Select a model connection and model." }
+    await assertInstallationRequest()
+    await validateChoice(fields.modelChoice)
     const missing = await missingBinding(skillIds, toolIds)
     if (missing) return missing
     const sandboxId = createDevPodSandboxId(botId)
@@ -145,6 +152,8 @@ export async function createBot(
 
     return { success: true, bot, chat, chatMember }
   } catch (error) {
+    if (error instanceof ModelConnectionError)
+      return { success: false, error: error.message }
     if (isToolReferenceError(error)) return missingTool
     if (isSkillReferenceError(error)) return missingSkill
     const cause = error instanceof Error ? (error.cause ?? error) : error
@@ -198,6 +207,10 @@ export async function updateBot(
 
   try {
     const { skillIds, toolIds, ...fields } = parsed.data
+    if (!fields.modelChoice)
+      return { success: false, error: "Select a model connection and model." }
+    await assertInstallationRequest()
+    await validateChoice(fields.modelChoice)
     const missing = await missingBinding(skillIds, toolIds)
     if (missing) return missing
     // Updating the Bot first serializes concurrent full-set replacements.
@@ -223,6 +236,8 @@ export async function updateBot(
 
     return { success: true, bot }
   } catch (error) {
+    if (error instanceof ModelConnectionError)
+      return { success: false, error: error.message }
     if (isToolReferenceError(error)) return missingTool
     if (isSkillReferenceError(error)) return missingSkill
     console.error("Failed to update bot", error)

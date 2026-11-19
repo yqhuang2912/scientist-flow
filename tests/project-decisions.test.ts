@@ -5,7 +5,6 @@ import {
   getAssistantSegments,
   getToolPresentation,
 } from "../lib/chat-presentation"
-import { transferredSpeaker } from "../lib/chat-bot-context"
 import { projectEvidence } from "../lib/project-evidence"
 import {
   projectContextForSteps,
@@ -65,7 +64,7 @@ test("citations resolve only visible passages from the accepted group history, b
   )
 })
 
-test("prepareStep reads committed project state after parallel recording and handoff, failures and withdrawal", async () => {
+test("a fresh recipient execution reads committed decisions and excludes failed or withdrawn writes", async () => {
   const row: ProjectDecision = {
     id: "D-aaaaaaaaaaaaaaaa",
     chatId: "P",
@@ -81,12 +80,12 @@ test("prepareStep reads committed project state after parallel recording and han
     createdAt: new Date(),
     withdrawnAt: null,
   }
-  const group = [a, b]
+
   for (const commit of [false, true]) {
     let db: ProjectDecision[] = []
     const contextForStep = projectContextForSteps(db, async () => db)
     assert(!(await contextForStep(0)).includes(row.id))
-    const results = await Promise.all([
+    await Promise.all([
       Promise.resolve().then(() => ({ toolName: "handoff", output: handoff })),
       Promise.resolve().then(() => {
         if (commit) db = [row]
@@ -96,11 +95,7 @@ test("prepareStep reads committed project state after parallel recording and han
         }
       }),
     ])
-    assert.equal(
-      transferredSpeaker([{ toolResults: results }], group)?.id,
-      b.id
-    )
-    const receiver = await contextForStep(1)
+    const receiver = await projectContextForSteps(db, async () => db)(0)
     for (const value of [row.id, row.quote, row.decision, row.nextStep!])
       assert.equal(receiver.includes(value), commit)
     db = []

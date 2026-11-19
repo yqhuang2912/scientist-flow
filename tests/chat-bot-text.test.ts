@@ -2,17 +2,14 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 import {
   simulateReadableStream,
-  convertToModelMessages,
   streamText,
   type TextStreamPart,
   type ToolSet,
 } from "ai"
 import { MockLanguageModelV3 } from "ai/test"
 import { cleanBotText, botTextTransform } from "../lib/chat-bot-text"
-import {
-  prepareBotModelHistory,
-  botInstructions,
-} from "../lib/chat-bot-context"
+import { botInstructions } from "../lib/chat-bot-context"
+import { publicModelHistory } from "../lib/bot-execution"
 
 const bots = [
   { name: "Coll", job: "Writing editor" },
@@ -152,29 +149,28 @@ test("AI SDK response text and persisted UI response contain only cleaned text",
     model,
     system: botInstructions(members[1], { kind: "group", bots: members }),
     allowSystemInMessages: true,
-    messages: await convertToModelMessages(
-      prepareBotModelHistory(
-        [
-          {
-            id: "old",
-            role: "assistant",
-            metadata: { botId: "James" },
-            parts: [
-              {
-                type: "text",
-                text: marker + "\n" + wrapper + "Previous reply",
-              },
-            ],
-          },
-          {
-            id: "new",
-            role: "user",
-            metadata: { botId: "James" },
-            parts: [{ type: "text", text: "hi" }],
-          },
-        ],
-        members
-      )
+    messages: await publicModelHistory(
+      [
+        {
+          id: "old",
+          role: "assistant",
+          metadata: { botId: "James" },
+          parts: [
+            {
+              type: "text",
+              text: marker + "\n" + wrapper + "Previous reply",
+            },
+          ],
+        },
+        {
+          id: "new",
+          role: "user",
+          metadata: { botId: "James" },
+          parts: [{ type: "text", text: "hi" }],
+        },
+      ],
+      members,
+      "James"
     ),
     experimental_transform: botTextTransform(bots),
   })

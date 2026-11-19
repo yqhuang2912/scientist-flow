@@ -4,6 +4,7 @@ import { asc, eq } from "drizzle-orm"
 
 import { bots, chatMembers, chats } from "@/db/schema"
 import { db } from "@/lib/db"
+import type { ModelChoice } from "@/lib/model-catalog"
 
 export interface ChatWithBot {
   id: string
@@ -18,6 +19,7 @@ export interface ChatWithBot {
     avatar: string
     job: string
     instructions: string | null
+    modelChoice?: ModelChoice | null
   }[]
   bot: {
     id: string
@@ -25,6 +27,7 @@ export interface ChatWithBot {
     avatar: string
     job: string
     instructions: string | null
+    modelChoice?: ModelChoice | null
   } | null
 }
 
@@ -42,6 +45,7 @@ export async function getChat(chatId: string): Promise<ChatWithBot | null> {
       botAvatar: bots.avatar,
       botJob: bots.job,
       botInstructions: bots.instructions,
+      modelChoice: bots.modelChoice,
     })
     .from(chats)
     .leftJoin(chatMembers, eq(chatMembers.chatId, chats.id))
@@ -67,6 +71,7 @@ export async function getChat(chatId: string): Promise<ChatWithBot | null> {
         avatar: currentRow.botAvatar,
         job: currentRow.botJob,
         instructions: currentRow.botInstructions,
+        modelChoice: currentRow.modelChoice,
       })
     }
     return allBots

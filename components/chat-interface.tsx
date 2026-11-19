@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useChat } from "@ai-sdk/react"
 import {
   useLoadTranscript,
+  useSubAgentMessages,
   useTriggerChatTransport,
 } from "@trigger.dev/sdk/chat/react"
 import {
@@ -14,16 +15,13 @@ import { CircleAlertIcon } from "lucide-react"
 import { useRouter } from "next/navigation"
 
 import { ChatTranscript } from "@/components/chat-transcript"
-import {
-  fileToDataUrl,
-  type ChatComposerMessage,
-} from "@/lib/chat-composer"
+import { fileToDataUrl, type ChatComposerMessage } from "@/lib/chat-composer"
 import { ChatComposer } from "@/components/chat-composer"
 import {
   loadChatTranscript,
   mintChatAccessToken,
   startChatSession,
-  touchChatActivity,
+  prepareChatTurn,
 } from "@/actions/chat"
 import { saveChatAttachmentAction } from "@/actions/workspace"
 import type { chatAgent } from "@/trigger/chat"
@@ -97,6 +95,7 @@ function ChatView({
   initialMessages: UIMessage[]
   transport: ReturnType<typeof useTriggerChatTransport>
 }) {
+  const recipients = useSubAgentMessages()
   const [selectedBotId, setSelectedBotId] = useState(bots[0]?.id ?? "")
   const router = useRouter()
   const {
@@ -111,21 +110,33 @@ function ChatView({
     id: chatId,
     messages: initialMessages,
     transport,
+    onData: recipients.onData,
     resume: initialMessages.length > 0,
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
   })
 
+  const persistedIds = new Set(messages.map((m) => m.id))
+  const displayMessages = messages.flatMap((m) => {
+    const id = (m.metadata as { executionId?: string } | undefined)?.executionId
+    const reply = id ? recipients.get(id) : undefined
+    return reply && !persistedIds.has(reply.id) ? [m, reply] : [m]
+  })
   function stop() {
     stopChat()
     void transport.stopGeneration(chatId)
   }
 
   async function handleSubmit({ text, files }: ChatComposerMessage) {
-    if ((!text.trim() && files.length === 0) || status === "submitted" || status === "streaming") {
+    if (
+      (!text.trim() && files.length === 0) ||
+      status === "submitted" ||
+      status === "streaming"
+    ) {
       return
     }
 
-    await touchChatActivity(chatId)
+    const problem = await prepareChatTurn(chatId, selectedBotId)
+    if (problem) return { error: problem }
     router.refresh()
 
     const metadata = selectedBotId ? { botId: selectedBotId } : undefined
@@ -146,20 +157,23 @@ function ChatView({
         }
       })
     )
-    const parts = [...(text.trim() ? [{ type: "text" as const, text }] : []), ...saved]
+    const parts = [
+      ...(text.trim() ? [{ type: "text" as const, text }] : []),
+      ...saved,
+    ]
 
-    await sendMessage(
-      { parts, metadata },
-      metadata ? { metadata } : undefined
-    )
+    await sendMessage({ parts, metadata }, metadata ? { metadata } : undefined)
   }
 
   return (
-    <div data-project-chat={isGroup ? chatId : undefined} className="flex min-h-0 flex-1 flex-col">
+    <div
+      data-project-chat={isGroup ? chatId : undefined}
+      className="flex min-h-0 flex-1 flex-col"
+    >
       <ChatTranscript
         key={chatId}
         directChatId={isGroup ? undefined : chatId}
-        messages={messages}
+        messages={displayMessages}
         bots={bots}
         isGroup={isGroup}
         status={status}

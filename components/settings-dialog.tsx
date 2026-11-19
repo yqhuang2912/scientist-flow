@@ -1,7 +1,8 @@
 "use client"
 
 import { useRef, useState } from "react"
-import { BookOpenIcon, SettingsIcon, WrenchIcon, UsersIcon } from "lucide-react"
+import { BookOpenIcon, CableIcon, SettingsIcon, WrenchIcon, UsersIcon } from "lucide-react"
+import { ModelConnectionsPanel } from "./model-connections-panel"
 
 import { BotsSettingsPanel } from "@/components/bots-settings-panel"
 import { GeneralSettingsPanel } from "@/components/general-settings-panel"
@@ -21,7 +22,7 @@ import {
 } from "@/components/ui/dialog"
 import type { BotSummary } from "@/queries/bots"
 
-type SettingsTab = "general" | "bots" | "skills" | "tools"
+type SettingsTab = "general" | "bots" | "skills" | "tools" | "connections"
 
 export function SettingsDialog({
   bots,
@@ -100,11 +101,14 @@ export function SettingsDialog({
               >
                 Tools
               </SettingsNavItem>
+              <SettingsNavItem active={tab==="connections"} icon={<CableIcon/>} onClick={()=>selectTab("connections")}>Model connections</SettingsNavItem>
             </>
           }
         >
           {tab === "general" ? (
             <GeneralSettingsPanel onWorkspaceSaved={onWorkspaceSaved} />
+          ) : tab === "connections" ? (
+            open && <ModelConnectionsPanel guard={leaveGuard}/>
           ) : tab === "skills" ? (
             open && <SkillsSettingsPanel guard={leaveGuard} />
           ) : tab === "tools" ? (

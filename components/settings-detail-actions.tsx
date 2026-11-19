@@ -24,6 +24,7 @@ export function SettingsDeleteAction<T extends { success: true }>({
   onDeleted,
   standalone = false,
   disabled = false,
+  actionLabel = "Delete",
 }: {
   noun: string
   title: string
@@ -32,6 +33,7 @@ export function SettingsDeleteAction<T extends { success: true }>({
   onDeleted: (result: T) => void
   standalone?: boolean
   disabled?: boolean
+  actionLabel?: string
 }) {
   const [open, setOpen] = useState(false)
   const [error, setError] = useState("")
@@ -74,7 +76,7 @@ export function SettingsDeleteAction<T extends { success: true }>({
         }
       >
         <Trash2Icon data-icon="inline-start" />
-        {standalone ? "Delete " + noun : "Delete"}
+        {standalone ? actionLabel + " " + noun : actionLabel}
       </AlertDialogTrigger>
       <AlertDialogContent size="sm">
         <AlertDialogHeader>
@@ -95,7 +97,8 @@ export function SettingsDeleteAction<T extends { success: true }>({
             disabled={pending}
             onClick={confirm}
           >
-            {pending && <Spinner data-icon="inline-start" />}Delete {noun}
+            {pending && <Spinner data-icon="inline-start" />}
+            {actionLabel} {noun}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

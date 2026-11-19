@@ -101,7 +101,7 @@ export function AppSidebar({
   const [taskDialogOpen, setTaskDialogOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<
-    "general" | "skills" | "tools" | null
+    "general" | "skills" | "tools" | "connections" | null
   >(null)
   useEffect(() => {
     const manageGeneral = () => setSettingsTab("general")
@@ -109,8 +109,11 @@ export function AppSidebar({
     const manageSkills = () => setSettingsTab("skills")
     window.addEventListener("scientistflow:manage-skills", manageSkills)
     const manageTools = () => setSettingsTab("tools")
+    const manageConnections = () => setSettingsTab("connections")
+    window.addEventListener("scientistflow:manage-connections", manageConnections)
     window.addEventListener("scientistflow:manage-tools", manageTools)
     return () => {
+      window.removeEventListener("scientistflow:manage-connections", manageConnections)
       window.removeEventListener("scientistflow:manage-general", manageGeneral)
       window.removeEventListener("scientistflow:manage-skills", manageSkills)
       window.removeEventListener("scientistflow:manage-tools", manageTools)

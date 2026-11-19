@@ -90,7 +90,7 @@ export function SettingsFormFooter({
 }: {
   children?: React.ReactNode
   formId: string
-  noun: "bot" | "skill" | "tool"
+  noun: "bot" | "skill" | "tool" | "connection"
   editing: boolean
   dirty: boolean
   pending: boolean
