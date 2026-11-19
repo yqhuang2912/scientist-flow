@@ -631,22 +631,25 @@ function ResearchWorkspaceInner({
           </div>
         )}
         {!statusLoading && status?.state === "no-config" && (
-          <div className="flex flex-col gap-2">
-            <p className="text-xs text-muted-foreground">
-              No workspace root directory configured.
-            </p>
+          <Empty className="px-4 py-8">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <FolderOpenIcon aria-hidden />
+              </EmptyMedia>
+              <EmptyTitle>No workspace directory</EmptyTitle>
+              <EmptyDescription>
+                Choose a root directory to hold this task&apos;s files.
+              </EmptyDescription>
+            </EmptyHeader>
             {onOpenSettings && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-fit"
-                onClick={onOpenSettings}
-              >
-                <SettingsIcon data-icon="inline-start" />
-                Set workspace directory
-              </Button>
+              <EmptyContent>
+                <Button variant="outline" size="sm" onClick={onOpenSettings}>
+                  <SettingsIcon data-icon="inline-start" />
+                  Set workspace directory
+                </Button>
+              </EmptyContent>
             )}
-          </div>
+          </Empty>
         )}
         {!statusLoading && status?.state === "not-initialised" && (
           <Empty className="px-4 py-8" aria-busy={initPending}>
