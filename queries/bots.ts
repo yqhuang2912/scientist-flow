@@ -1,5 +1,6 @@
 import "server-only"
 
+import { cache } from "react"
 import { format, isSameDay, isSameYear } from "date-fns"
 import { asc, desc, eq } from "drizzle-orm"
 
@@ -90,6 +91,8 @@ export async function getUserChats(): Promise<SidebarChat[]> {
   return [...chatMap.values()]
 }
 
-export async function getBots(): Promise<BotSummary[]> {
+// Cached per request: the dashboard layout and page both read this, and each
+// uncached call is a separate neon-http round trip.
+export const getBots = cache(async (): Promise<BotSummary[]> => {
   return db.select().from(bots).orderBy(asc(bots.createdAt))
-}
+})

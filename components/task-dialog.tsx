@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useId, useState, useTransition } from "react"
 import {
   compactChatAvatarStyles,
   compactItemStyles,
@@ -71,6 +71,11 @@ export function TaskDialog({
   const [serverError, setServerError] = useState<string | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const formId = useId()
+  const nameId = useId()
+  const nameErrorId = useId()
+  const botsHintId = useId()
+  const botsErrorId = useId()
   const defaultValues: TaskFormValues = {
     name: chat?.name ?? "",
     botIds: chat?.bots.map((bot) => bot.id) ?? [],
@@ -158,7 +163,7 @@ export function TaskDialog({
         </DialogHeader>
 
         <form
-          id="task-form"
+          id={formId}
           className="flex max-h-[60dvh] flex-col gap-4 overflow-y-auto p-4"
           onSubmit={form.handleSubmit(onSubmit)}
         >
@@ -167,20 +172,20 @@ export function TaskDialog({
               className="gap-1.5"
               data-invalid={!!form.formState.errors.name}
             >
-              <FieldLabel htmlFor="task-name">Task name</FieldLabel>
+              <FieldLabel htmlFor={nameId}>Task name</FieldLabel>
               <Input
-                id="task-name"
+                id={nameId}
                 placeholder="e.g. Literature review"
                 autoComplete="off"
                 disabled={isPending}
                 aria-invalid={!!form.formState.errors.name}
                 aria-describedby={
-                  form.formState.errors.name ? "task-name-error" : undefined
+                  form.formState.errors.name ? nameErrorId : undefined
                 }
                 {...form.register("name")}
               />
               <FieldError
-                id="task-name-error"
+                id={nameErrorId}
                 errors={[form.formState.errors.name]}
               />
             </Field>
@@ -195,7 +200,7 @@ export function TaskDialog({
                   data-invalid={!!fieldState.error}
                 >
                   <FieldLegend variant="label">Bots</FieldLegend>
-                  <FieldDescription id="task-bots-hint">
+                  <FieldDescription id={botsHintId}>
                     {bots.length
                       ? "Select at least one bot."
                       : "Add a bot in Settings to create a task."}
@@ -230,8 +235,8 @@ export function TaskDialog({
                             aria-invalid={!!fieldState.error}
                             aria-describedby={
                               fieldState.error
-                                ? "task-bots-hint task-bots-error"
-                                : "task-bots-hint"
+                                ? `${botsHintId} ${botsErrorId}`
+                                : botsHintId
                             }
                             onBlur={field.onBlur}
                             checked={checked}
@@ -247,10 +252,7 @@ export function TaskDialog({
                       )
                     })}
                   </div>
-                  <FieldError
-                    id="task-bots-error"
-                    errors={[fieldState.error]}
-                  />
+                  <FieldError id={botsErrorId} errors={[fieldState.error]} />
                 </FieldSet>
               )}
             />
@@ -328,7 +330,7 @@ export function TaskDialog({
           </DialogClose>
           <Button
             type="submit"
-            form="task-form"
+            form={formId}
             disabled={isPending || bots.length === 0}
             className="sm:min-w-24"
           >
