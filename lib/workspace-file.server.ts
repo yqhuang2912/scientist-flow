@@ -13,6 +13,7 @@ import {
   workspaceFileTargetSchema,
   workspaceParentPath,
   deleteWorkspaceFileSchema,
+  uploadWorkspaceFileSchema,
   type FileDeletionInspection,
 } from "./workspace-validation"
 
@@ -91,6 +92,42 @@ export async function createFileInWorkspace(
     isDir: false as const,
     isFile: true as const,
     relPath: parent.relativePath ? `${parent.relativePath}/${name}` : name,
+  }
+}
+
+export async function uploadFileToWorkspace(
+  taskDir: string,
+  rawParent: unknown,
+  rawName: unknown,
+  rawBytes: unknown
+) {
+  const input = uploadWorkspaceFileSchema.parse({
+    name: rawName,
+    bytes: rawBytes,
+  })
+  // The destination is the folder the upload started from. It must already
+  // exist: uploading never creates a directory the user did not ask for.
+  const parent = await resolveWorkspaceDirectory(taskDir, rawParent)
+  const absolute = path.join(parent.absolute, input.name)
+  // Opening exclusively first means a collision fails before any bytes are
+  // written, so an existing file is never truncated by a failed upload.
+  const file = await fs.open(absolute, "wx")
+  try {
+    await file.writeFile(input.bytes)
+  } catch (error) {
+    // Do not leave a partial file behind under the requested name.
+    await file.close().catch(() => undefined)
+    await fs.unlink(absolute).catch(() => undefined)
+    throw error
+  }
+  await file.close()
+  const stat = await fs.stat(absolute)
+  return {
+    name: input.name,
+    isDir: false as const,
+    isFile: true as const,
+    relPath: parent.relativePath ? `${parent.relativePath}/${input.name}` : input.name,
+    size: stat.size,
   }
 }
 

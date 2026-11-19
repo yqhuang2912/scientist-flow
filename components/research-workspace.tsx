@@ -11,6 +11,7 @@ import {
   SettingsIcon,
   AlertCircleIcon,
   ArrowLeftIcon,
+  UploadIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -45,6 +46,7 @@ import {
   initialiseWorkspaceAction,
   inspectWorkspaceDirectoryForDeletionAction,
   inspectWorkspaceFileForDeletionAction,
+  uploadWorkspaceFileAction,
   type WorkspaceStatus,
 } from "@/actions/workspace"
 import {
@@ -147,6 +149,10 @@ function ResearchWorkspaceInner({
   const mutationPath = useRef<string | null>(null)
   const locatePath = useRef<string | null>(null)
   const container = useRef<HTMLDivElement>(null)
+  // The upload target is captured when the picker opens, so a folder expanded
+  // or collapsed while the OS dialog is up cannot change where files land.
+  const uploadParent = useRef<string | null>(null)
+  const uploadInput = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     mounted.current = true
@@ -341,6 +347,53 @@ function ResearchWorkspaceInner({
     setMutationPending(false)
   }
 
+  function beginUpload(parentRelativePath: string) {
+    if (operationLocked.current || mutationPending || status?.state !== "ready")
+      return
+    uploadParent.current = parentRelativePath
+    uploadInput.current?.click()
+  }
+
+  async function handleUploadPicked(files: FileList | null) {
+    const parent = uploadParent.current
+    uploadParent.current = null
+    if (!files?.length || parent === null) {
+      if (uploadInput.current) uploadInput.current.value = ""
+      return
+    }
+    operationLocked.current = true
+    startMutation(parent)
+    const uploaded: string[] = []
+    try {
+      // Sequential so the first collision or oversized file stops the batch
+      // with a clear report, and the tree is not refreshed to a half state.
+      for (const file of Array.from(files)) {
+        const result = await uploadWorkspaceFileAction(chatId, parent, file)
+        if (!result.success) {
+          showNotice(
+            `${file.name} 上传失败`,
+            result.error,
+            "error"
+          )
+          break
+        }
+        uploaded.push(result.entry.name)
+      }
+      if (uploaded.length)
+        showNotice(
+          uploaded.length === 1 ? "已上传 1 个文件" : `已上传 ${uploaded.length} 个文件`,
+          uploaded.join("、")
+        )
+    } catch {
+      showNotice("上传失败", "请重试。", "error")
+    } finally {
+      if (uploadInput.current) uploadInput.current.value = ""
+      operationLocked.current = false
+      finishMutation()
+      if (uploaded.length) await refreshBranch(parent)
+    }
+  }
+
   async function handleCreated(target: Operation, entry: WorkspaceEntry) {
     if (!mounted.current) return
     finishMutation()
@@ -404,6 +457,10 @@ function ResearchWorkspaceInner({
     if (kind === "open") {
       const node = findWorkspaceNode(tree, relativePath)
       if (node?.entry.isFile) void workbench.open({ chatId, relativePath })
+      return
+    }
+    if (kind === "upload") {
+      beginUpload(relativePath)
       return
     }
     operationLocked.current = true
@@ -600,6 +657,36 @@ function ResearchWorkspaceInner({
               {unavailableReason && ` (${unavailableReason})`}
             </TooltipContent>
           </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span
+                  className="inline-flex"
+                  tabIndex={unavailableReason ? 0 : undefined}
+                  aria-label={
+                    unavailableReason
+                      ? `Upload to task root: ${unavailableReason}`
+                      : undefined
+                  }
+                />
+              }
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Upload to task root"
+                disabled={!!unavailableReason}
+                onClick={() => beginUpload("")}
+              >
+                <UploadIcon />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              Upload to task root
+              {unavailableReason && ` (${unavailableReason})`}
+            </TooltipContent>
+          </Tooltip>
           {[
             { icon: GitBranchIcon, label: "Git" },
             { icon: WorkflowIcon, label: "Research flow" },
@@ -623,6 +710,13 @@ function ResearchWorkspaceInner({
           ))}
         </div>
       </header>
+      <input
+        ref={uploadInput}
+        type="file"
+        multiple
+        hidden
+        onChange={(event) => void handleUploadPicked(event.currentTarget.files)}
+      />
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
         {statusLoading && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">

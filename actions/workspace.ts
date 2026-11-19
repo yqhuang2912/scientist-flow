@@ -11,6 +11,8 @@ import {
   inspectWorkspaceDirectoryForDeletion,
   deleteWorkspaceDirectory,
   createWorkspaceFile,
+  uploadWorkspaceFile,
+  saveChatAttachment,
   inspectWorkspaceFileForDeletion,
   deleteWorkspaceFile,
 } from "@/lib/workspace.server"
@@ -30,6 +32,7 @@ import {
   createWorkspaceFileSchema,
   workspaceFileTargetSchema,
   deleteWorkspaceFileSchema,
+  uploadWorkspaceFileSchema,
   type FileDeletionConfirmation,
 } from "@/lib/workspace-validation"
 import { fileError } from "@/lib/workspace-file.server"
@@ -234,6 +237,64 @@ export async function createWorkspaceFileAction(
     return { success: true as const, entry }
   } catch (error) {
     return { success: false as const, ...fileError(error) }
+  }
+}
+
+export async function uploadWorkspaceFileAction(
+  chatId: string,
+  parentRelativePath: string,
+  file: File
+) {
+  if (!(file instanceof File))
+    return {
+      success: false as const,
+      code: "INVALID",
+      error: "Choose a file to upload.",
+    }
+  const name = file.name
+  const input = uploadWorkspaceFileSchema.safeParse({
+    name,
+    bytes: new Uint8Array(await file.arrayBuffer()),
+  })
+  if (!input.success)
+    return {
+      success: false as const,
+      code: "INVALID",
+      error: input.error.issues[0].message,
+    }
+  try {
+    workspaceChatIdSchema.parse(chatId)
+    const parent = workspaceRelativePathSchema.parse(parentRelativePath)
+    const entry = await uploadWorkspaceFile(
+      chatId,
+      parent,
+      input.data.name,
+      input.data.bytes
+    )
+    return { success: true as const, entry }
+  } catch (error) {
+    return { success: false as const, ...fileError(error) }
+  }
+}
+
+/**
+ * Persist a composer attachment into the task's uploads folder so the file
+ * outlives the browser tab and the model can reach it from its workspace.
+ */
+export async function saveChatAttachmentAction(chatId: string, file: File) {
+  if (!(file instanceof File))
+    return {
+      success: false as const,
+      error: "Choose a file to attach.",
+    }
+  try {
+    workspaceChatIdSchema.parse(chatId)
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const entry = await saveChatAttachment(chatId, file.name, bytes)
+    return { success: true as const, entry }
+  } catch (error) {
+    const failure = fileError(error)
+    return { success: false as const, error: failure.error }
   }
 }
 

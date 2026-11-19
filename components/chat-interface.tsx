@@ -14,7 +14,10 @@ import { CircleAlertIcon } from "lucide-react"
 import { useRouter } from "next/navigation"
 
 import { ChatTranscript } from "@/components/chat-transcript"
-import type { ChatComposerMessage } from "@/lib/chat-composer"
+import {
+  fileToDataUrl,
+  type ChatComposerMessage,
+} from "@/lib/chat-composer"
 import { ChatComposer } from "@/components/chat-composer"
 import {
   loadChatTranscript,
@@ -22,6 +25,7 @@ import {
   startChatSession,
   touchChatActivity,
 } from "@/actions/chat"
+import { saveChatAttachmentAction } from "@/actions/workspace"
 import type { chatAgent } from "@/trigger/chat"
 import type { ChatWithBot } from "@/queries/chats"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -116,8 +120,8 @@ function ChatView({
     void transport.stopGeneration(chatId)
   }
 
-  async function handleSubmit({ text }: ChatComposerMessage) {
-    if (!text.trim() || status === "submitted" || status === "streaming") {
+  async function handleSubmit({ text, files }: ChatComposerMessage) {
+    if ((!text.trim() && files.length === 0) || status === "submitted" || status === "streaming") {
       return
     }
 
@@ -125,8 +129,29 @@ function ChatView({
     router.refresh()
 
     const metadata = selectedBotId ? { botId: selectedBotId } : undefined
+    // Attachments are saved into the task's uploads folder first, so the file
+    // outlives this tab and the model can reach it from its workspace. The
+    // message then carries the same bytes as file parts for the model to read
+    // directly, and the stored path so the answer can refer to it.
+    const saved = await Promise.all(
+      files.map(async (file) => {
+        const url = await fileToDataUrl(file)
+        const result = await saveChatAttachmentAction(chatId, file)
+        return {
+          type: "file" as const,
+          mediaType: file.type || "application/octet-stream",
+          filename: file.name,
+          url,
+          ...(result.success ? { workspacePath: result.entry.relPath } : {}),
+        }
+      })
+    )
+    const parts = [...(text.trim() ? [{ type: "text" as const, text }] : []), ...saved]
 
-    await sendMessage({ text, metadata }, metadata ? { metadata } : undefined)
+    await sendMessage(
+      { parts, metadata },
+      metadata ? { metadata } : undefined
+    )
   }
 
   return (

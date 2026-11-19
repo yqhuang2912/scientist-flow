@@ -8,6 +8,7 @@ import {
   workspaceDirectoryTargetSchema,
   workspaceDirectoryNameSchema,
   deleteWorkspaceDirectorySchema,
+  UPLOADS_DIR,
   type DirectoryDeletionInspection,
 } from "./workspace-validation"
 
@@ -147,6 +148,30 @@ export async function createDirectoryInWorkspace(
   // mkdir without recursive is atomic on collisions and never fills in missing parents.
   await fs.mkdir(path.join(parent.absolute, name))
   return { name, isDir: true as const, relPath: relativePath }
+}
+
+/**
+ * Make sure the upload folder exists, without failing when it already does.
+ * Only one level is created under the task root. An existing entry under the
+ * name is rechecked, so a symlink planted there is still refused.
+ */
+export async function ensureUploadsDirectory(taskDir: string) {
+  const root = await resolveWorkspaceDirectory(taskDir, "")
+  const absolute = path.join(root.absolute, UPLOADS_DIR)
+  try {
+    await fs.mkdir(absolute)
+  } catch (error) {
+    // EEXIST is the ordinary case after the first attachment.
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+  }
+  await realDirectory(absolute)
+  assertInside(await fs.realpath(root.absolute), await fs.realpath(absolute))
+  const resolved = await resolveWorkspaceDirectory(taskDir, UPLOADS_DIR)
+  return {
+    name: UPLOADS_DIR,
+    isDir: true as const,
+    relPath: resolved.relativePath,
+  }
 }
 
 export async function inspectDirectoryInWorkspace(

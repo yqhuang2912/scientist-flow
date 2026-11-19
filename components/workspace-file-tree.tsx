@@ -11,6 +11,7 @@ import {
   MoreHorizontalIcon,
   Trash2Icon,
   FolderOpenIcon,
+  UploadIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -44,7 +45,12 @@ import { cn } from "@/lib/utils"
 import { type WorkspaceTreeNode } from "@/lib/workspace-tree"
 
 export type WorkspaceEntryAction =
-  "create" | "delete" | "create-file" | "delete-file" | "open"
+  | "create"
+  | "delete"
+  | "create-file"
+  | "delete-file"
+  | "open"
+  | "upload"
 
 type TreeProps = {
   nodes: WorkspaceTreeNode[]
@@ -88,6 +94,10 @@ function EntryMenuItems({
           <Item disabled={disabled} onClick={() => onAction("create-file")}>
             <FilePlusIcon />
             New file
+          </Item>
+          <Item disabled={disabled} onClick={() => onAction("upload")}>
+            <UploadIcon />
+            Upload files
           </Item>
           <Item disabled={disabled} onClick={() => onAction("create")}>
             <FolderPlusIcon />

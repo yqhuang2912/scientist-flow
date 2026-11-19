@@ -4,7 +4,12 @@ import {
   createFileInWorkspace,
   inspectFileInWorkspace,
   deleteFileInWorkspace,
+  uploadFileToWorkspace,
 } from "./workspace-file.server"
+import {
+  ensureUploadsDirectory,
+} from "./workspace-directory.server"
+import { UPLOADS_DIR } from "./workspace-validation"
 import type { FileDeletionConfirmation } from "./workspace-validation"
 
 import fs from "node:fs/promises"
@@ -380,6 +385,41 @@ export async function createWorkspaceFile(
   return withDirectoryWrite(chatId, async () => {
     const binding = await requireWorkspaceBinding(chatId)
     return createFileInWorkspace(binding.taskDir, parentRelativePath, name)
+  })
+}
+
+export async function uploadWorkspaceFile(
+  chatId: string,
+  parentRelativePath: string,
+  name: string,
+  bytes: Uint8Array
+) {
+  return withDirectoryWrite(chatId, async () => {
+    const binding = await requireWorkspaceBinding(chatId)
+    return uploadFileToWorkspace(
+      binding.taskDir,
+      parentRelativePath,
+      name,
+      bytes
+    )
+  })
+}
+
+/**
+ * Store a chat attachment in the task's uploads folder. The folder is created
+ * on first use; the file keeps its own name and never overwrites an existing
+ * one, so a repeated attachment name gets a distinct copy rather than
+ * destroying the earlier upload.
+ */
+export async function saveChatAttachment(
+  chatId: string,
+  name: string,
+  bytes: Uint8Array
+) {
+  return withDirectoryWrite(chatId, async () => {
+    const binding = await requireWorkspaceBinding(chatId)
+    await ensureUploadsDirectory(binding.taskDir)
+    return uploadFileToWorkspace(binding.taskDir, UPLOADS_DIR, name, bytes)
   })
 }
 

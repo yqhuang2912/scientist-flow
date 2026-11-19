@@ -42,6 +42,30 @@ export const createWorkspaceFileSchema = z.object({
   name: workspaceFileNameSchema,
 })
 
+// Chat attachments are written here rather than beside the task's own files:
+// they are inputs the reader supplied, and keeping them in one folder makes
+// them easy to find and to clear out.
+export const UPLOADS_DIR = "uploads"
+
+// An uploaded file keeps its own name, so it is validated by the same entry
+// rules as a hand-typed one. The byte limit matches what the editor can open
+// and re-save, so an upload never lands in a state the workbench cannot read.
+export const MAX_UPLOAD_BYTES = 256 * 1024
+
+export const uploadWorkspaceFileSchema = z.object({
+  name: workspaceFileNameSchema,
+  bytes: z
+    .instanceof(Uint8Array)
+    .refine(
+      (bytes) => bytes.byteLength > 0,
+      "The selected file is empty."
+    )
+    .refine(
+      (bytes) => bytes.byteLength <= MAX_UPLOAD_BYTES,
+      "Files must be 256 KiB or smaller."
+    ),
+})
+
 export const createWorkspaceDirectorySchema = z.object({
   name: workspaceDirectoryNameSchema,
 })
