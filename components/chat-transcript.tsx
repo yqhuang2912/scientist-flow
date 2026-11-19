@@ -137,12 +137,18 @@ function AssistantParts({
           )
         if (block.part.type === "text")
           return (
-            <ChatMarkdown
+            <div
               key={block.key}
-              isAnimating={streaming && block.part.state === "streaming"}
+              data-evidence-part={block.key}
+              tabIndex={-1}
+              className="rounded-sm focus-visible:outline-ring"
             >
-              {cleanBotText(block.part.text, bots, streaming)}
-            </ChatMarkdown>
+              <ChatMarkdown
+                isAnimating={streaming && block.part.state === "streaming"}
+              >
+                {cleanBotText(block.part.text, bots, streaming)}
+              </ChatMarkdown>
+            </div>
           )
         if (block.part.type === "file")
           return <ChatFile key={block.key} part={block.part} />
@@ -199,7 +205,12 @@ const ChatTurn = memo(function ChatTurn({
                     return <ChatFile key={index} part={part} />
                   if (part.type !== "text") return null
                   return (
-                    <div key={index} className="min-w-0">
+                    <div
+                      key={index}
+                      data-evidence-part={index}
+                      tabIndex={-1}
+                      className="min-w-0 rounded-sm focus-visible:outline-ring"
+                    >
                       {addressedBot && index === firstText && (
                         <span
                           className="mr-2.5 inline-flex max-w-32 items-baseline gap-0.5 text-muted-foreground"
@@ -347,6 +358,7 @@ export function ChatTranscript({
                 <MessageScrollerItem
                   key={message.id}
                   messageId={message.id}
+                  data-evidence-message={message.id}
                   scrollAnchor={message.role === "user"}
                 >
                   <ChatTurn

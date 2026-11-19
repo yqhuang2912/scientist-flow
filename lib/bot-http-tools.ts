@@ -8,7 +8,7 @@ import {
 } from "ai"
 import { z } from "zod"
 import type { ToolDefinition } from "../db/schema"
-import { toModelToolDefinition } from "./tool-definition"
+import { reservedToolNames, toModelToolDefinition } from "./tool-definition"
 import { executeSharedHttpTool } from "./shared-http-executor"
 import { publicHttpsRequest } from "./public-https"
 
@@ -16,10 +16,14 @@ type Bound = ToolDefinition & { botId: string; botName: string }
 const past =
   "Historical HTTP call. Its recorded status is not a fresh observation."
 const contextSchema = z.object({ botId: z.string() })
+// Existing definitions may predate a built-in. A hyphen cannot occur in a
+// user-defined identifier, so this provider-facing alias is unambiguous.
+const runtimeName = (name: string) =>
+  reservedToolNames.has(name) ? "shared-http-" + name : name
 function declaration(def: Bound) {
   const { name, description, inputSchema } = toModelToolDefinition(def)
   return {
-    name,
+    name: runtimeName(name),
     title: def.displayName || name,
     description,
     contextSchema,
@@ -31,7 +35,7 @@ function declaration(def: Bound) {
 export function historyHttpTools(bindings: Bound[]): ToolSet {
   return Object.fromEntries(
     bindings.map((def) => [
-      def.name,
+      runtimeName(def.name),
       tool({
         ...declaration(def),
         toModelOutput: () => ({ type: "text", value: past }),
@@ -50,10 +54,10 @@ export function httpToolTurn(
   const uncertain = new Set<string>()
   const tools: ToolSet = Object.create(null)
   const names = (botId: string) =>
-    bindings.filter((b) => b.botId === botId).map((b) => b.name)
+    bindings.filter((b) => b.botId === botId).map((b) => runtimeName(b.name))
   for (const def of bindings) {
-    if (Object.hasOwn(tools, def.name)) continue
-    tools[def.name] = tool({
+    if (Object.hasOwn(tools, runtimeName(def.name))) continue
+    tools[runtimeName(def.name)] = tool({
       ...declaration(def),
       execute: async (input, { context, toolCallId, abortSignal }) => {
         const start = Date.now()
@@ -168,7 +172,7 @@ export function httpToolTurn(
 
 // Transform only the outward stream. The executor receives the original args;
 // neither streamed partial args nor complete args belong in the replayable UI.
-export function redactHttpInputs<TOOLS extends ToolSet>(
+export function redactToolInputs<TOOLS extends ToolSet>(
   names: Set<string>
 ): StreamTextTransform<TOOLS> {
   return () => {

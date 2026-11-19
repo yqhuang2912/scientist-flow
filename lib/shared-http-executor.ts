@@ -1,6 +1,6 @@
 import Ajv from "ajv"
 import { createHash } from "node:crypto"
-import { toolDefinitionSchema } from "../db/tool-form-schema"
+import { storedHttpToolSchema } from "../db/tool-form-schema"
 import {
   PublicTargetError,
   publicHttpsRequest,
@@ -31,7 +31,7 @@ export async function executeSharedHttpTool(
     request: ToolRequest
   ) => Promise<ToolResponse> = publicHttpsRequest
 ): Promise<HttpResult> {
-  const parsed = toolDefinitionSchema.safeParse(definition)
+  const parsed = storedHttpToolSchema.safeParse(definition)
   if (!parsed.success)
     return {
       success: false,

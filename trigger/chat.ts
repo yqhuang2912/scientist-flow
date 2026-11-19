@@ -18,13 +18,38 @@ import {
   transferredSpeaker,
 } from "../lib/chat-bot-context"
 import { botTextTransform } from "../lib/chat-bot-text"
+import {
+  decisionInput,
+  projectContextForSteps,
+  projectDecisionTool,
+} from "../lib/project-decisions"
+import { projectEvidence } from "../lib/project-evidence"
+import {
+  readProjectDecisions,
+  recordProjectDecision,
+} from "../lib/project-decisions.server"
+
+const decisionDefinition = {
+  description:
+    "Save an adopted project research decision with an exact quotation from a labeled public group message. Returns its database record ID.",
+  inputSchema: decisionInput,
+  contextSchema: z.object({ botId: z.string() }),
+}
+const pastDecision = tool({
+  ...decisionDefinition,
+  toModelOutput: () => ({
+    type: "text",
+    value:
+      "Historical project decision activity. Consult the current active project records.",
+  }),
+})
 
 import { pastRead, skillTurn } from "../lib/bot-skill-turn"
 
 import {
   historyHttpTools,
   httpToolTurn,
-  redactHttpInputs,
+  redactToolInputs,
 } from "../lib/bot-http-tools"
 
 const readSkillInput = z.object({
@@ -65,7 +90,9 @@ const handoffInputSchema = z.object({
     .string()
     .trim()
     .min(1)
-    .describe("Why this bot is better suited to the request."),
+    .describe(
+      "Only explain why that bot's role fits the remaining work. The recipient reads active project decisions directly; omit record IDs and quotations."
+    ),
 })
 
 const handoffToolSchema = tool({
@@ -158,6 +185,7 @@ export const chatAgent = chat.agent({
     return {
       ...schemas,
       handoff: handoffToolSchema,
+      [projectDecisionTool]: pastDecision,
       read_skill: readSkillSchema,
     }
   },
@@ -166,13 +194,23 @@ export const chatAgent = chat.agent({
     const bot = resolveReplyBot(chatContext, clientData?.botId)
     if (!chatContext) throw new Error("Chat not found")
 
-    const [skills, bindings, memories] = await Promise.all([
+    const isProject = chatContext.kind === "group"
+    const [skills, bindings, memories, decisions] = await Promise.all([
       getChatSkillBindings(chatId),
       getChatToolBindings(chatId),
       getChatBotMemories(chatId),
+      isProject ? readProjectDecisions(chatId) : [],
     ])
     const turn = skillTurn(skills)
-    const messageId = chat.history.all().findLast((m) => m.role === "user")?.id
+    const history = chat.history.all()
+    const evidence = isProject
+      ? projectEvidence(chatId, history, chatContext.bots)
+      : null
+    const projectContext = projectContextForSteps(decisions, () =>
+      readProjectDecisions(chatId)
+    )
+    const initialProjectContext = isProject ? await projectContext(0) : ""
+    const messageId = history.findLast((m) => m.role === "user")?.id
     const http = httpToolTurn(
       bindings,
       async (botId, toolId) =>
@@ -180,11 +218,16 @@ export const chatAgent = chat.agent({
       async (toolId, hash) =>
         !!messageId && claimToolPost(chatId, messageId, toolId, hash)
     )
-    const scope = (botId: string, allowHandoff: boolean) => {
+    const scope = (
+      botId: string,
+      allowHandoff: boolean,
+      allowDecision = true
+    ) => {
       const names = http.names(botId)
       return {
         activeTools: [
           "read_skill",
+          ...(isProject && allowDecision ? [projectDecisionTool] : []),
           ...(allowHandoff && chatContext.kind === "group" ? ["handoff"] : []),
           ...names,
         ],
@@ -193,6 +236,7 @@ export const chatAgent = chat.agent({
             Object.keys(http.tools).map((name) => [name, { botId }])
           ),
           read_skill: { botId },
+          ...(isProject && { [projectDecisionTool]: { botId } }),
         },
       }
     }
@@ -201,6 +245,18 @@ export const chatAgent = chat.agent({
       ...(chatContext.kind === "group"
         ? { handoff: createHandoffTool(chatContext.bots, bot.id) }
         : {}),
+      ...(evidence && {
+        [projectDecisionTool]: tool({
+          ...decisionDefinition,
+          execute: (input, { context }) =>
+            recordProjectDecision(
+              chatId,
+              context.botId,
+              evidence.sources,
+              input
+            ),
+        }),
+      }),
       read_skill: tool({
         ...readSkillDefinition,
         execute: ({ name }, { toolCallId, context }) =>
@@ -217,7 +273,11 @@ export const chatAgent = chat.agent({
     chat.setUIMessageStreamOptions({
       messageMetadata: () => ({ botId: responseBotId }),
     })
-    const instructionsFor = (speaker: TriggerBot, allowHandoff: boolean) =>
+    const instructionsFor = (
+      speaker: TriggerBot,
+      allowHandoff: boolean,
+      project: string
+    ) =>
       [
         systemInstructions,
         botInstructions(speaker, chatContext, {
@@ -225,6 +285,14 @@ export const chatAgent = chat.agent({
           memories,
         }),
         turn.catalog(speaker.id),
+        ...(project
+          ? [
+              project,
+              allowHandoff
+                ? "When asked to save and delegate, first save, then call handoff with only the recipient's role and remaining work. Do not announce or restate the record before the transfer."
+                : "The transfer is complete. YOU are the receiving specialist. Deliver the requested work yourself now. When continuing a research decision, cite its active ID and answer the requested next step with concrete details. Do not announce a handoff or ask someone else to answer.",
+            ]
+          : []),
         http.names(speaker.id).length
           ? "Your currently assigned HTTP tools: " +
             JSON.stringify(http.names(speaker.id)) +
@@ -243,26 +311,39 @@ export const chatAgent = chat.agent({
           errorType: error instanceof Error ? error.name : "UnknownError",
         })
       },
-      system: instructionsFor(bot, true),
+      system: instructionsFor(bot, true, initialProjectContext),
       ...scope(bot.id, true),
       // AI SDK 7 requires explicit opt-in for our server-authored attribution.
       allowSystemInMessages: chatContext.kind === "group",
-      messages:
-        chatContext.kind === "group"
-          ? await convertToModelMessages(
-              prepareBotModelHistory(chat.history.all(), chatContext.bots),
-              { tools }
-            )
-          : messages,
+      messages: evidence
+        ? await convertToModelMessages(
+            evidence.labelHistory(
+              prepareBotModelHistory(history, chatContext.bots)
+            ),
+            { tools }
+          )
+        : messages,
       tools: runtimeTools,
       experimental_transform: [
         botTextTransform(chatContext.bots),
-        redactHttpInputs(new Set(bindings.map((b) => b.name))),
+        redactToolInputs(
+          new Set([...Object.keys(http.tools), projectDecisionTool])
+        ),
       ],
       stopWhen: isStepCount(6),
-      prepareStep: ({ steps, messages }) => {
+      prepareStep: async ({ steps, messages }) => {
         const transferred = transferredSpeaker(steps, chatContext.bots)
         const target = transferred ?? bot
+        const justSaved = steps
+          .at(-1)
+          ?.toolResults.some(
+            (result) =>
+              result.toolName === projectDecisionTool &&
+              result.output &&
+              typeof result.output === "object" &&
+              "success" in result.output &&
+              result.output.success === true
+          )
         responseBotId = target.id
         const hasRead = turn.hasRead(target.id)
         const scopedMessages = transferred
@@ -271,12 +352,21 @@ export const chatAgent = chat.agent({
 
         return {
           instructions:
-            instructionsFor(target, !transferred) +
+            instructionsFor(
+              target,
+              !transferred,
+              isProject && steps.length
+                ? await projectContext(steps.length)
+                : initialProjectContext
+            ) +
+            (justSaved
+              ? "\nThe project decision is committed. Continue the remaining task now. If you are the recorder and a handoff was requested, call handoff now. If you are the recipient, deliver your work citing the active record ID."
+              : "") +
             (hasRead
               ? "\nYour read_skill result contains the working procedure for this answer. Deliver the requested artifact using its exact template, including any required literal wording in your visible response. Verify completeness before sending."
               : ""),
           ...(scopedMessages !== messages && { messages: scopedMessages }),
-          ...scope(target.id, !transferred),
+          ...scope(target.id, !transferred, !justSaved),
         }
       },
       abortSignal: signal,

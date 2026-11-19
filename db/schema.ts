@@ -1,8 +1,9 @@
 import { nanoid } from "nanoid"
-import { relations } from "drizzle-orm"
+import { relations, sql } from "drizzle-orm"
 import type { HttpToolConfig, ToolInputSchema } from "../lib/tool-definition"
 import {
   index,
+  integer,
   jsonb,
   pgEnum,
   pgTable,
@@ -177,6 +178,47 @@ export const chats = pgTable("chats", {
 })
 
 export const botMemoryLimit = 12
+
+export const projectDecisions = pgTable(
+  "project_decisions",
+  {
+    id: text("id")
+      .primaryKey()
+      .default(
+        sql`'D-' || left(replace(gen_random_uuid()::text, '-', ''), 16)`
+      ),
+    chatId: text("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    decision: text("decision").notNull(),
+    nextStep: text("next_step"),
+    creatorBotId: text("creator_bot_id").references(() => bots.id, {
+      onDelete: "set null",
+    }),
+    creatorName: text("creator_name").notNull(),
+    sourceMessageId: text("source_message_id").notNull(),
+    sourcePart: integer("source_part").notNull(),
+    sourceRole: text("source_role", { enum: ["user", "assistant"] }).notNull(),
+    sourceAuthor: text("source_author").notNull(),
+    quote: text("quote").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("project_decisions_source_decision_idx").on(
+      table.chatId,
+      table.fingerprint
+    ),
+  ]
+)
+
+export type ProjectDecision = Omit<
+  typeof projectDecisions.$inferSelect,
+  "fingerprint"
+>
 export const botMemoryTextLimit = 240
 
 export const botMemories = pgTable(

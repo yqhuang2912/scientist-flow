@@ -6,7 +6,7 @@ import { publicAddress, type ToolRequest } from "../lib/public-https"
 import {
   httpToolTurn,
   historyHttpTools,
-  redactHttpInputs,
+  redactToolInputs,
 } from "../lib/bot-http-tools"
 import { convertToModelMessages, type ToolSet, type TextStreamPart } from "ai"
 import { botFormSchema, type ToolDefinition } from "../db/schema"
@@ -164,6 +164,34 @@ test("bearer origin, cancellation, status, media type and streamed byte limits",
   }
 })
 
+test("a legacy HTTP definition keeps its own execution scope when its name becomes reserved", async () => {
+  const bound = {
+    ...definition,
+    name: "record_project_decision",
+    id: "old-tool",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    botId: "owner",
+    botName: "Owner",
+  }
+  const turn = httpToolTurn(
+    [bound],
+    async () => bound,
+    async () => true,
+    async () => ok()
+  )
+  const [alias] = turn.names("owner")
+  assert.equal(alias, "shared-http-record_project_decision")
+  assert.deepEqual(Object.keys(historyHttpTools([bound])), [alias])
+  assert.equal(turn.tools.record_project_decision, undefined)
+  const call = await turn.tools[alias].execute!(
+    { count: 1 },
+    { toolCallId: "legacy", messages: [], context: { botId: "owner" } }
+  )
+  assert.deepEqual((call as { success: boolean }).success, true)
+  assert.equal((call as { name: string }).name, bound.name)
+})
+
 test("turn scopes execution, rechecks membership and only receipts survive replay", async () => {
   const bound = {
     ...definition,
@@ -238,7 +266,7 @@ test("outgoing tool stream masks partial and complete arguments", async () => {
     },
     { type: "tool-input-end", id: "c" },
   ]
-  const transform = redactHttpInputs<ToolSet>(new Set(["count_items"]))({
+  const transform = redactToolInputs<ToolSet>(new Set(["count_items"]))({
     tools: {},
     stopStream() {},
   })

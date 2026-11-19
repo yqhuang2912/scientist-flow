@@ -105,6 +105,7 @@ test("only editable fields, dedicated bearer references and fixed HTTP configura
     "Bad Name",
     "9papers",
     "read_skill",
+    "record_project_decision",
     "handoff",
     "a".repeat(65),
   ])

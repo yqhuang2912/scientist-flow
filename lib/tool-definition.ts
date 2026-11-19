@@ -1,10 +1,15 @@
 import Ajv from "ajv"
 import { z } from "zod"
+import { projectDecisionTool } from "./project-decisions"
 
 // Local definitions use Draft-07. A future runner must also check its own
 // built-in names when assembling tools, and retain definitions on Bot deletion.
-const reservedNames = new Set(["read_skill", "handoff"])
-export const toolNameSchema = z
+export const reservedToolNames: ReadonlySet<string> = new Set([
+  "read_skill",
+  "handoff",
+  projectDecisionTool,
+])
+export const toolIdentifierSchema = z
   .string()
   .min(1, "Enter a tool identifier.")
   .max(64, "Use 64 characters or fewer.")
@@ -12,10 +17,10 @@ export const toolNameSchema = z
     /^[a-z][a-z0-9_]*$/,
     "Start with a lowercase letter and use lowercase letters, numbers or underscores."
   )
-  .refine(
-    (name) => !reservedNames.has(name),
-    "This identifier is reserved by the chat runtime."
-  )
+export const toolNameSchema = toolIdentifierSchema.refine(
+  (name) => !reservedToolNames.has(name),
+  "This identifier is reserved by the chat runtime."
+)
 
 // Transport contract for a future executor: GET encodes supplied scalar values
 // (including 0 and false); POST sends the validated object as a JSON body.

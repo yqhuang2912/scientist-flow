@@ -6,6 +6,7 @@ import {
   httpConfigSchema,
   maxSchemaBytes,
   parameterSchema,
+  toolIdentifierSchema,
   toolNameSchema,
   type ToolInputSchema,
 } from "../lib/tool-definition"
@@ -51,6 +52,11 @@ export const toolDefinitionSchema = createInsertSchema(toolDefinitions, {
           "” must be a scalar. Use POST for nested parameters.",
       })
   })
+
+// Runtime aliases keep older bound tools callable when a name becomes reserved.
+export const storedHttpToolSchema = toolDefinitionSchema.safeExtend({
+  name: toolIdentifierSchema,
+})
 
 export function formatToolInput(schema?: ToolInputSchema): string {
   if (!schema) return ""

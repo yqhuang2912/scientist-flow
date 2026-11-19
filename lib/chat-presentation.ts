@@ -5,6 +5,7 @@ import {
   type ToolUIPart,
   type UIMessage,
 } from "ai"
+import { projectDecisionTool } from "./project-decisions"
 
 export type ChatPart = UIMessage["parts"][number]
 export type ChatToolPart = ToolUIPart | DynamicToolUIPart
@@ -154,6 +155,44 @@ export function getToolPresentation(part: ChatToolPart, active: boolean) {
   const label =
     part.title ||
     name.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ")
+  if (name === projectDecisionTool) {
+    const saved =
+      part.state === "output-available" &&
+      !part.preliminary &&
+      http?.success === true &&
+      typeof http.id === "string"
+    const failed =
+      http?.success === false ||
+      part.state === "output-error" ||
+      part.state === "output-denied"
+    return {
+      name,
+      label,
+      status: saved
+        ? undefined
+        : failed
+          ? ("error" as const)
+          : active
+            ? ("running" as const)
+            : ("pending" as const),
+      title: saved
+        ? "Saved project decision · " + http.id
+        : failed
+          ? "Decision not saved"
+          : active
+            ? "Recording project decision"
+            : "Pending project decision",
+      reason: failed
+        ? typeof http?.error === "string"
+          ? http.error
+          : "Could not save the decision."
+        : null,
+      input: undefined,
+      output: undefined,
+      error: null,
+      deniedReason: null,
+    }
+  }
   const handoff = getHandoff(part)
   const failedHandoff =
     name === "handoff" &&
