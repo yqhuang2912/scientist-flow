@@ -27,13 +27,7 @@ export function ChatMessageActions({
   if (!text) return null
   const label = copied ? "Copied" : "Copy message"
   return (
-    <MessageFooter
-      // Idle messages carry no control strip, as in the reference. The row is
-      // taken out of the flow rather than hidden by height, so the content
-      // column's gap does not reserve space for it. Hover or keyboard focus
-      // brings it back; devices without hover always show it.
-      className="hidden px-0 group-hover/message:flex group-focus-within/message:flex [@media(hover:none)]:flex"
-    >
+    <MessageFooter className="px-0 opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100 motion-safe:transition-opacity [@media(hover:none)]:opacity-100">
       <Tooltip>
         <TooltipTrigger
           render={
