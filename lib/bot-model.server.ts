@@ -14,7 +14,7 @@ import {
 
 import { chatGPTStep } from "./chatgpt-step.server"
 import { accessForProfile } from "./chatgpt-oauth.server"
-import { openRouterStep, type OutboundRecord } from "./openrouter-step.server"
+import { gatewayStep, type OutboundRecord } from "./gateway-step.server"
 
 export async function resolveBotModel(
   chatId: string,
@@ -24,10 +24,10 @@ export async function resolveBotModel(
 ) {
   const choice = await chatMemberChoice(chatId, botId)
   const connection = await resolveConnection(choice)
-  return (step: number) => {
+  const modelForStep = (step: number) => {
     const common = {
       modelId: choice.modelId,
-      effort: choice.effort,
+      effort: connection.effort,
       authorize: async () => {
         await assertCurrentConnection(choice.connectionId, connection.revision)
       },
@@ -44,7 +44,7 @@ export async function resolveBotModel(
           connection: choice.connectionId.slice(-8),
           revision: connection.revision.slice(-8),
         })
-        if (fields.httpStatus === 401 && connection.provider === "openrouter")
+        if (fields.httpStatus === 401 && connection.provider === "gateway")
           await invalidateCredential(choice.connectionId, connection.revision)
         return id
       },
@@ -52,7 +52,6 @@ export async function resolveBotModel(
     if (connection.provider === "chatgpt")
       return chatGPTStep({
         ...common,
-        effort: connection.effort,
         token: () => accessForProfile(connection.ref),
         block: (e) =>
           setConnectionState(choice.connectionId, connection.revision, e.state),
@@ -63,8 +62,9 @@ export async function resolveBotModel(
             .where(eq(modelRequests.id, id))
         },
       })
-    return openRouterStep({
+    return gatewayStep({
       ...common,
+      baseUrl: connection.baseUrl,
       apiKey: connection.apiKey,
       response: async (id, fields) => {
         await db
@@ -74,4 +74,5 @@ export async function resolveBotModel(
       },
     })
   }
+  return Object.assign(modelForStep, { explicitEffort: choice.effort })
 }

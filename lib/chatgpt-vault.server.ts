@@ -24,7 +24,7 @@ export interface Registration {
     scopes: string[]
   } | null
 }
-function directory() {
+export function installationProfileDirectory() {
   const base =
     process.env.SCIENTISTFLOW_PROFILE_DIR ||
     path.join(
@@ -41,7 +41,7 @@ const missing = () =>
 async function database(name: string, create: boolean) {
   if (!/^[a-zA-Z0-9_-]{1,100}$/.test(name))
     throw new Error("Invalid profile reference")
-  const dir = directory(),
+  const dir = installationProfileDirectory(),
     file = path.join(dir, name + ".sqlite")
   if (create) {
     await mkdir(dir, { recursive: true, mode: 0o700 })

@@ -1,8 +1,13 @@
 import "server-only"
 import { createOpenRouter } from "@openrouter/ai-sdk-provider"
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 import { wrapLanguageModel, type ModelMessage, type ToolResultPart } from "ai"
 import { ModelConnectionError } from "./model-credentials.server"
-import type { Effort } from "./model-catalog"
+import {
+  gatewayBaseUrlSchema,
+  openRouterBaseUrl,
+  type Effort,
+} from "./model-catalog"
 
 export interface OutboundRecord {
   model: string
@@ -12,7 +17,8 @@ export interface OutboundRecord {
 type Route = {
   modelId: string
   effort: Effort | null
-  apiKey: string
+  baseUrl: string
+  apiKey: string | null
   authorize: () => Promise<void>
   record: (fields: OutboundRecord) => Promise<string>
   response: (
@@ -22,67 +28,72 @@ type Route = {
 }
 // Each instance belongs to a single turn/step. Observe the serialized request
 // at the transport boundary; never retain headers, messages or raw responses.
-export function openRouterStep(route: Route, transport: typeof fetch = fetch) {
+export function gatewayStep(route: Route, transport: typeof fetch = fetch) {
   let attempt: string | undefined
-  const settings = route.effort ? { reasoning: { effort: route.effort } } : {}
-  const provider = createOpenRouter({
-    apiKey: route.apiKey,
-    baseURL: "https://openrouter.ai/api/v1",
-    fetch: async (url, init) => {
-      if (
-        String(url) !== "https://openrouter.ai/api/v1/chat/completions" ||
-        init?.method?.toUpperCase() !== "POST" ||
-        typeof init.body !== "string" ||
-        new Headers(init.headers).get("authorization") !==
-          "Bearer " + route.apiKey
+  const baseURL = gatewayBaseUrlSchema.parse(route.baseUrl)
+  const openRouter = baseURL === openRouterBaseUrl
+  if (openRouter && !route.apiKey)
+    throw new ModelConnectionError("Enter an OpenRouter API key.")
+  const send: typeof fetch = async (url, init) => {
+    if (
+      String(url) !== baseURL + "/chat/completions" ||
+      init?.method?.toUpperCase() !== "POST" ||
+      typeof init.body !== "string" ||
+      new Headers(init.headers).get("authorization") !==
+        (route.apiKey ? "Bearer " + route.apiKey : null)
+    )
+      throw new ModelConnectionError(
+        "The gateway request did not match the selected connection."
       )
-        throw new ModelConnectionError(
-          "The OpenRouter request did not match the selected connection."
-        )
-      const body = JSON.parse(init.body)
-      const effort = body.reasoning?.effort ?? body.reasoning_effort ?? null
-      if (
-        body.model !== route.modelId ||
-        effort !== route.effort ||
-        body.models ||
-        body.route ||
-        body.reasoning_effort != null ||
-        (body.reasoning != null &&
-          (!route.effort ||
-            Object.keys(body.reasoning).some((key) => key !== "effort")))
+    const body = JSON.parse(init.body)
+    const effort = body.reasoning?.effort ?? body.reasoning_effort ?? null
+    if (
+      body.model !== route.modelId ||
+      effort !== route.effort ||
+      body.models ||
+      body.route ||
+      (openRouter ? body.reasoning_effort != null : body.reasoning != null) ||
+      (body.reasoning != null &&
+        (!route.effort ||
+          Object.keys(body.reasoning).some((key) => key !== "effort")))
+    )
+      throw new ModelConnectionError(
+        "The request did not match the bot’s model settings."
       )
-        throw new ModelConnectionError(
-          "The request did not match the bot’s model settings."
-        )
-      await route.authorize()
-      const fields = {
-        model: body.model as string,
-        effort: effort as string | null,
-      }
-      let res: Response
-      try {
-        res = await transport(url, { ...init, redirect: "error" })
-      } catch (error) {
-        if (init.signal?.aborted) throw error
-        await route.record({ ...fields, httpStatus: null })
-        throw new ModelConnectionError("OpenRouter could not be reached.")
-      }
-      attempt = await route.record({ ...fields, httpStatus: res.status })
-      if (!res.ok) {
-        await res.body?.cancel()
-        throw new ModelConnectionError(
-          res.status === 401 || res.status === 403
-            ? "OpenRouter denied access. Check this bot’s model connection."
-            : "OpenRouter request failed (HTTP " +
-                res.status +
-                "). Check model availability, credits or rate limits."
-        )
-      }
-      return res
-    },
-  })
+    await route.authorize()
+    const fields = {
+      model: body.model as string,
+      effort: effort as string | null,
+    }
+    let res: Response
+    try {
+      res = await transport(url, { ...init, redirect: "error" })
+    } catch (error) {
+      if (init.signal?.aborted) throw error
+      await route.record({ ...fields, httpStatus: null })
+      throw new ModelConnectionError("The gateway could not be reached.")
+    }
+    attempt = await route.record({ ...fields, httpStatus: res.status })
+    if (!res.ok) {
+      await res.body?.cancel()
+      throw new ModelConnectionError(
+        res.status === 401 || res.status === 403
+          ? "The gateway denied access. Check this bot’s model connection."
+          : "Gateway request failed (HTTP " +
+              res.status +
+              "). Check model availability, credits or rate limits."
+      )
+    }
+    return res
+  }
+  const config = { baseURL, apiKey: route.apiKey ?? undefined, fetch: send }
+  const gateway = openRouter
+    ? createOpenRouter(config).chat(route.modelId)
+    : createOpenAICompatible({ ...config, name: "customGateway" }).chatModel(
+        route.modelId
+      )
   const model = wrapLanguageModel({
-    model: provider.chat(route.modelId, { extraBody: settings }),
+    model: gateway,
     middleware: {
       specificationVersion: "v4",
       wrapStream: async ({ doStream }) => {
@@ -115,7 +126,13 @@ export function openRouterStep(route: Route, transport: typeof fetch = fetch) {
       },
     },
   })
-  return { model, providerOptions: { openrouter: settings } }
+  const providerOptions: NonNullable<ModelMessage["providerOptions"]> = {}
+  if (route.effort) {
+    if (openRouter)
+      providerOptions.openrouter = { reasoning: { effort: route.effort } }
+    else providerOptions.customGateway = { reasoningEffort: route.effort }
+  }
+  return { model, providerOptions }
 }
 
 // Provider-specific reasoning/signatures belong to the model that produced

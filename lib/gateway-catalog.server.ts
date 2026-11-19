@@ -1,23 +1,32 @@
 import "server-only"
-import { parseCatalog } from "./model-catalog"
+import {
+  gatewayBaseUrlSchema,
+  openRouterBaseUrl,
+  parseCatalog,
+} from "./model-catalog"
 import { ModelConnectionError } from "./model-credentials.server"
 
 export class CatalogError extends ModelConnectionError {
   constructor(readonly state: "invalid" | "catalog-error") {
     super(
       state === "invalid"
-        ? "OpenRouter rejected this API key."
-        : "Could not load the OpenRouter account catalog. Try again."
+        ? "The gateway rejected the API key."
+        : "Could not load the gateway’s models. Check the base URL and try again."
     )
   }
 }
 export async function accountCatalog(
-  key: string,
+  baseUrl: string,
+  key: string | null,
   transport: typeof fetch = fetch
 ) {
+  const base = gatewayBaseUrlSchema.parse(baseUrl)
+  const openRouter = base === openRouterBaseUrl
+  if (openRouter && !key)
+    throw new ModelConnectionError("Enter an OpenRouter API key.")
   async function read(path: string) {
-    const response = await transport("https://openrouter.ai/api/v1/" + path, {
-      headers: { Authorization: "Bearer " + key },
+    const response = await transport(base + "/" + path, {
+      headers: key ? { Authorization: "Bearer " + key } : {},
       cache: "no-store",
       redirect: "error",
       signal: AbortSignal.timeout(20000),
@@ -28,8 +37,12 @@ export async function accountCatalog(
     return response.json()
   }
   try {
-    if (!(await read("key"))?.data) throw new CatalogError("invalid")
-    return parseCatalog(await read("models/user"))
+    if (openRouter && !(await read("key"))?.data)
+      throw new CatalogError("invalid")
+    return parseCatalog(
+      await read(openRouter ? "models/user" : "models"),
+      openRouter
+    )
   } catch (error) {
     throw error instanceof CatalogError
       ? error

@@ -26,10 +26,10 @@ export function SettingsListHeader({
 }: {
   title: string
   description: string
-  noun: string
+  noun?: string
   search: string
   onSearch: (query: string) => void
-  onCreate: () => void
+  onCreate?: () => void
 }) {
   const label = "Search " + title.toLowerCase()
   return (
@@ -46,10 +46,12 @@ export function SettingsListHeader({
           value={search}
           onChange={(event) => onSearch(event.target.value)}
         />
-        <Button size="sm" onClick={onCreate}>
-          <PlusIcon data-icon="inline-start" />
-          New {noun}
-        </Button>
+        {onCreate && (
+          <Button size="sm" onClick={onCreate}>
+            <PlusIcon data-icon="inline-start" />
+            New {noun}
+          </Button>
+        )}
       </div>
     </>
   )

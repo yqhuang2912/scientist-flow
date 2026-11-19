@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert"
 import { randomBytes, randomUUID } from "node:crypto"
 import { test } from "node:test"
+import { openRouterBaseUrl } from "../lib/model-catalog"
 import { eq } from "drizzle-orm"
 
 test(
@@ -28,6 +29,8 @@ test(
     process.env.SCIENTISTFLOW_MODEL_MASTER_KEY =
       randomBytes(32).toString("base64")
     const modelId = "fixture/shared"
+    const customBase = "https://example.invalid/custom/v1"
+    let customReads = 0
     const keys = new Map([
       ["fixture-a", modelId],
       ["fixture-b", modelId],
@@ -45,6 +48,14 @@ test(
       const destination = new URL(
         url instanceof Request ? url.url : String(url)
       )
+      if (destination.href === customBase + "/models") {
+        customReads++
+        assert.equal(
+          new Headers(init?.headers).get("authorization"),
+          "Bearer fixture-custom"
+        )
+        return Response.json({ data: [{ id: modelId }] })
+      }
       if (destination.hostname !== "openrouter.ai") return fetchReal(url, init)
       const key =
         new Headers(init?.headers).get("authorization")?.slice(7) ?? ""
@@ -61,18 +72,24 @@ test(
       })
     }
     try {
-      await Promise.all([
-        connect({ nickname: "A", apiKey: "fixture-a" }),
-        connect({ nickname: "B", apiKey: "fixture-b" }),
-      ])
-      const [a, b] = await listConnections()
+      await connect({ baseUrl: openRouterBaseUrl, apiKey: "fixture-a" })
+      const [a] = await listConnections()
+      await connect({ baseUrl: openRouterBaseUrl, apiKey: "fixture-b" })
+      const b = (await listConnections()).find((c) => c.id !== a.id)!
       assert.notEqual(a.id, b.id)
       assert.deepEqual(a.catalog, b.catalog)
       assert.ok(!JSON.stringify(a).includes("fixture-a"))
       const choiceA = { connectionId: a.id, modelId, effort: null },
         choiceB = { ...choiceA, connectionId: b.id }
-      assert.equal((await resolveConnection(choiceA)).apiKey, "fixture-a")
-      assert.equal((await resolveConnection(choiceB)).apiKey, "fixture-b")
+      assert.partialDeepStrictEqual(await resolveConnection(choiceA), {
+        provider: "gateway",
+        apiKey: "fixture-a",
+        baseUrl: openRouterBaseUrl,
+      })
+      assert.partialDeepStrictEqual(await resolveConnection(choiceB), {
+        provider: "gateway",
+        apiKey: "fixture-b",
+      })
       process.env.SCIENTISTFLOW_INSTALLATION_ID = randomUUID()
       assert.equal((await listConnections()).length, 0)
       await assert.rejects(resolveConnection(choiceA), /unavailable/)
@@ -82,16 +99,21 @@ test(
         chatMemberChoice(randomUUID(), randomUUID()),
         /member/
       )
+      await assert.rejects(
+        connect({ baseUrl: customBase, apiKey: "" }, b),
+        /new API key/
+      )
+      assert.equal(customReads, 0)
       delayRefresh = true
       const oldRefresh = refreshConnection(a.id, a.revision)
       await entered
       try {
-        await connect({ nickname: "A", apiKey: "rotated-a" }, a)
+        await connect({ baseUrl: openRouterBaseUrl, apiKey: "rotated-a" }, a)
       } finally {
         release()
       }
       await assert.rejects(oldRefresh, /changed/)
-      const [rotated] = await listConnections()
+      const rotated = (await listConnections()).find((c) => c.id === a.id)!
       await invalidateCredential(a.id, a.revision)
       await assertCurrentConnection(rotated.id, rotated.revision)
       assert.notEqual(rotated.revision, a.revision)
@@ -108,7 +130,19 @@ test(
         .from(modelConnections)
         .where(eq(modelConnections.id, a.id))
       assert.equal(stored.credential, null)
-      assert.equal((await resolveConnection(choiceB)).apiKey, "fixture-b")
+      assert.partialDeepStrictEqual(await resolveConnection(choiceB), {
+        provider: "gateway",
+        apiKey: "fixture-b",
+      })
+      await connect({ baseUrl: customBase, apiKey: "fixture-custom" }, b)
+      const custom = (await listConnections()).find((c) => c.id === b.id)!
+      await refreshConnection(custom.id, custom.revision)
+      assert.equal(customReads, 2)
+      assert.partialDeepStrictEqual(await resolveConnection(choiceB), {
+        provider: "gateway",
+        baseUrl: customBase,
+        apiKey: "fixture-custom",
+      })
     } finally {
       release()
       globalThis.fetch = fetchReal

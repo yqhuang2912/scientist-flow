@@ -1,20 +1,23 @@
 import { strict as assert } from "node:assert"
 import { test } from "node:test"
 import { randomBytes } from "node:crypto"
-import { streamText, type ModelMessage } from "ai"
-import { accountCatalog, CatalogError } from "../lib/openrouter-catalog.server"
+import { z } from "zod"
+import { streamText, tool, type ModelMessage } from "ai"
+import { accountCatalog, CatalogError } from "../lib/gateway-catalog.server"
 import {
   parseCatalog,
+  gatewayBaseUrlSchema,
+  openRouterBaseUrl,
   choiceProblem,
   type ConnectionSummary,
   type Effort,
 } from "../lib/model-catalog"
 import { sealCredential, openCredential } from "../lib/model-credentials.server"
 import {
-  openRouterStep,
+  gatewayStep,
   portableHistory,
   type OutboundRecord,
-} from "../lib/openrouter-step.server"
+} from "../lib/gateway-step.server"
 
 const modelId = "test/same:free"
 const modelData = {
@@ -39,7 +42,9 @@ test("each account authenticates its own user catalog; a matching model ID does 
     })
   }
   const [a, b] = await Promise.all(
-    [...catalogs.keys()].map((key) => accountCatalog(key, transport))
+    [...catalogs.keys()].map((key) =>
+      accountCatalog(openRouterBaseUrl, key, transport)
+    )
   )
   assert.equal(calls.length, 4)
   for (const key of catalogs.keys())
@@ -82,11 +87,15 @@ test("each account authenticates its own user catalog; a matching model ID does 
 })
 test("invalid key, catalog outage and a valid empty catalog remain distinguishable", async () => {
   await assert.rejects(
-    accountCatalog("dummy", async () => new Response(null, { status: 401 })),
+    accountCatalog(
+      openRouterBaseUrl,
+      "dummy",
+      async () => new Response(null, { status: 401 })
+    ),
     (e) => e instanceof CatalogError && e.state === "invalid"
   )
   await assert.rejects(
-    accountCatalog("dummy", async (url) =>
+    accountCatalog(openRouterBaseUrl, "dummy", async (url) =>
       String(url).endsWith("/key")
         ? Response.json({ data: {} })
         : new Response(null, { status: 503 })
@@ -94,7 +103,7 @@ test("invalid key, catalog outage and a valid empty catalog remain distinguishab
     (e) => e instanceof CatalogError && e.state === "catalog-error"
   )
   assert.deepEqual(
-    await accountCatalog("dummy", async (url) =>
+    await accountCatalog(openRouterBaseUrl, "dummy", async (url) =>
       Response.json({ data: String(url).endsWith("/key") ? {} : [] })
     ),
     []
@@ -152,10 +161,11 @@ function fixture(
 ) {
   const audit: OutboundRecord[] = []
   const responses: unknown[] = []
-  const route = openRouterStep(
+  const route = gatewayStep(
     {
       modelId,
       apiKey: key,
+      baseUrl: openRouterBaseUrl,
       effort,
       authorize,
       record: async (record) => {
@@ -267,4 +277,70 @@ test("portable history removes adapter metadata while preserving user tool data"
   assert.ok(!JSON.stringify(clean).includes("private"))
   assert.ok(JSON.stringify(clean).includes("application data"))
   assert.ok(JSON.stringify(messages).includes("private"))
+})
+
+test("custom gateways preserve the base path and send only compatible API requests", async () => {
+  const base = gatewayBaseUrlSchema.parse(" https://EXAMPLE.org/team/v1/// ")
+  assert.equal(base, "https://example.org/team/v1")
+  for (const bad of [
+    "",
+    "example.org",
+    "ftp://host/v1",
+    "https://u:p@host/v1",
+    "https://host/v1?key=test",
+    "https://host/v1#fragment",
+    "https://host/a\\b",
+  ])
+    assert.equal(gatewayBaseUrlSchema.safeParse(bad).success, false)
+  for (const apiKey of ["fixture", null]) {
+    const urls: string[] = []
+    const transport: typeof fetch = async (url, init) => {
+      urls.push(String(url))
+      assert.equal(init?.redirect, "error")
+      assert.equal(
+        new Headers(init?.headers).get("authorization"),
+        apiKey ? "Bearer " + apiKey : null
+      )
+      if (String(url) === base + "/models")
+        return Response.json({
+          data: [
+            { id: modelId, reasoning: { supported_efforts: ["medium"] } },
+            { id: "unconfirmed" },
+          ],
+        })
+      assert.equal(String(url), base + "/chat/completions")
+      const body = JSON.parse(String(init?.body))
+      assert.equal(body.stream, true)
+      assert.equal(body.model, modelId)
+      assert.equal(body.reasoning_effort, "medium")
+      assert.equal(body.reasoning, undefined)
+      assert.equal(body.tools[0].function.name, "lookup")
+      return completion({ content: "gateway result" }, "stop")
+    }
+    const catalog = await accountCatalog(base, apiKey, transport)
+    assert.deepEqual(catalog.find((m) => m.id === modelId)?.efforts, ["medium"])
+    assert.deepEqual(catalog.find((m) => m.id === "unconfirmed")?.efforts, [])
+    const route = gatewayStep(
+      {
+        baseUrl: base,
+        apiKey,
+        modelId,
+        effort: "medium",
+        authorize: async () => {},
+        record: async () => "receipt",
+        response: async () => {},
+      },
+      transport
+    )
+    assert.equal(
+      await streamText({
+        ...route,
+        prompt: "hello",
+        tools: { lookup: tool({ inputSchema: z.object({}) }) },
+        maxRetries: 0,
+      }).text,
+      "gateway result"
+    )
+    assert.deepEqual(urls, [base + "/models", base + "/chat/completions"])
+  }
 })

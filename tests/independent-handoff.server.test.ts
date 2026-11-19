@@ -1,5 +1,8 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
+import { mkdir, writeFile, unlink, rmdir } from "node:fs/promises"
+import { dirname } from "node:path"
+import { pilotBotFile } from "../lib/deepagents-pilot.server"
 import { randomBytes, randomUUID } from "node:crypto"
 import { nanoid } from "nanoid"
 import { eq, inArray } from "drizzle-orm"
@@ -143,6 +146,8 @@ test(
         type: "function",
         function: { name, arguments: JSON.stringify(args) },
       })
+      if (!body.tools?.length)
+        return sse(body.model, { content: "One public reply" }, "stop")
       if (key === "Bearer fixture-rowan")
         return sse(body.model, { content: "63，Rowan" }, "stop")
       const n = sent.filter((r) => r.key === key).length
@@ -258,6 +263,9 @@ test(
       })
       return transcript.slice(history.length)
     }
+    const flag = pilotBotFile() // unique fixture installation, separate from the real worker
+    await mkdir(dirname(flag), { recursive: true })
+    await writeFile(flag, a, { flag: "wx" })
     try {
       await db.insert(modelConnections).values(
         [
@@ -328,6 +336,85 @@ test(
         }),
         db.insert(botTools).values({ botId: b, toolId: httpId }),
       ])
+      await t.test(
+        "one direct bot uses the pilot, another uses the original runner, and replay reuses the claimed message",
+        async () => {
+          const direct = nanoid(),
+            other = nanoid()
+          try {
+            await db.insert(chats).values([{ id: direct }, { id: other }])
+            await db.insert(chatMembers).values([
+              { chatId: direct, botId: a },
+              { chatId: other, botId: b },
+            ])
+            const input = user()
+            const invoke = async (id: string) => {
+              let history: UIMessage[] = []
+              await runBotTurn({
+                chatId: id,
+                runId: nanoid(),
+                signal: new AbortController().signal,
+                streamText,
+                messages: [{ role: "user", content: "Question" }],
+                transcript: [input],
+                publish: async (stream) => {
+                  let last
+                  for await (const message of readUIMessageStream({ stream }))
+                    last = message
+                  return last
+                },
+                saveHistory: (all) => {
+                  history = all
+                },
+              })
+              return history[1]
+            }
+            sent = []
+            const reply = await invoke(direct)
+            assert.equal(
+              (reply.metadata as { engine: string }).engine,
+              "deepagents"
+            )
+            assert.deepEqual(
+              reply.parts.map((p) => p.type === "text" && p.text),
+              ["One public reply"]
+            )
+            assert.deepEqual((await invoke(direct)).id, reply.id)
+            assert.equal(sent.length, 1)
+            assert.deepEqual(
+              [sent[0].key, sent[0].body.model, sent[0].body.reasoning.effort],
+              ["Bearer fixture-iris", firstModel, "low"]
+            )
+            const [execution] = await db
+              .select()
+              .from(botExecutions)
+              .where(eq(botExecutions.messageId, reply.id))
+            assert.equal(execution.status, "completed")
+            const attempts = await db
+              .select()
+              .from(modelRequests)
+              .where(eq(modelRequests.executionId, execution.id))
+            assert.deepEqual(
+              attempts.map((r) => [r.connection, r.httpStatus]),
+              [[ca.slice(-8), 200]]
+            )
+            const legacy = await invoke(other)
+            assert.equal(
+              (legacy.metadata as { engine?: string }).engine,
+              undefined
+            )
+            assert.equal(sent[1].key, "Bearer fixture-rowan")
+            assert.ok(sent[1].body.tools.length)
+          } finally {
+            await db.batch([
+              db
+                .delete(modelRequests)
+                .where(inArray(modelRequests.chatId, [direct, other])),
+              db.delete(chats).where(inArray(chats.id, [direct, other])),
+            ])
+          }
+        }
+      )
       for (const modelId of [otherModel, firstModel]) {
         await t.test(
           "independent recipient first request for " + modelId,
@@ -504,6 +591,8 @@ test(
         }
       )
     } finally {
+      await unlink(flag)
+      await rmdir(dirname(flag))
       globalThis.fetch = realFetch
       if (beforeOwner === undefined)
         delete process.env.SCIENTISTFLOW_INSTALLATION_ID

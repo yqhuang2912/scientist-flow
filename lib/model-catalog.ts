@@ -1,5 +1,30 @@
 import { z } from "zod"
 
+export const openRouterBaseUrl = "https://openrouter.ai/api/v1"
+export const gatewayBaseUrlSchema = z
+  .string()
+  .trim()
+  .min(1, "Enter a base URL.")
+  .max(2048)
+  .transform((value, ctx) => {
+    const url = URL.canParse(value) ? new URL(value) : null
+    if (
+      !url ||
+      !/^https?:\/\//i.test(value) ||
+      /[\s\\?#]/.test(value) ||
+      url.username ||
+      url.password
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "Enter an HTTP or HTTPS base URL without credentials, query parameters or a fragment.",
+      })
+      return z.NEVER
+    }
+    return url.href.replace(/\/+$/, "")
+  })
+
 const routerEffort = z.enum([
   "none",
   "minimal",
@@ -38,9 +63,10 @@ export type ConnectionState =
   | "identity-only"
   | "limited"
   | "restricted"
-export type ModelProvider = "openrouter" | "chatgpt"
+export type ModelProvider = "openrouter" | "gateway" | "chatgpt"
 export type ConnectionSummary = {
   provider?: ModelProvider
+  baseUrl?: string | null
   usedBy?: string[]
   needsModelChange?: string[]
   id: string
@@ -58,6 +84,18 @@ export const connectionStatus: Record<ConnectionState, string> = {
   invalid: "Authorization is invalid",
   "catalog-error": "Could not load the model catalog",
   disconnected: "Disconnected",
+}
+export function connectionLabel(
+  row: ConnectionSummary,
+  all: ConnectionSummary[]
+) {
+  const label = row.baseUrl ?? row.nickname
+  return all.some(
+    (other) =>
+      other.id !== row.id && (other.baseUrl ?? other.nickname) === label
+  )
+    ? label + " · " + row.id.slice(-6)
+    : label
 }
 
 const routerModel = z.object({
@@ -78,7 +116,10 @@ const routerModel = z.object({
     })
     .nullish(),
 })
-export function parseCatalog(input: unknown): CatalogModel[] {
+export function parseCatalog(
+  input: unknown,
+  openRouter = true
+): CatalogModel[] {
   return z
     .object({ data: z.array(routerModel) })
     .parse(input)
@@ -96,10 +137,12 @@ export function parseCatalog(input: unknown): CatalogModel[] {
       // The user catalog distinguishes general reasoning support from exact levels.
       const declared = m.reasoning?.supported_efforts
       const efforts = (
-        declared === null ? routerEffort.options : (declared ?? [])
+        openRouter && declared === null
+          ? routerEffort.options
+          : (declared ?? [])
       ).filter(
         (e): e is Effort =>
-          routerEffort.safeParse(e).success &&
+          (openRouter ? routerEffort : effortSchema).safeParse(e).success &&
           !(e === "none" && m.reasoning?.mandatory)
       )
       const fixedEffort =
@@ -132,7 +175,7 @@ export function choiceProblem(
   if (!connection || connection.id !== choice.connectionId)
     return "This connection is unavailable to this installation."
   if (connection.state !== "ready")
-    return connectionStatus[connection.state] + ". Check Model connections."
+    return connectionStatus[connection.state] + ". Check Settings → Models."
   const model = connection.catalog.find((m) => m.id === choice.modelId)
   if (!model) return "This model is no longer in the connection’s catalog."
   if (model.unavailable) return model.unavailable + "."

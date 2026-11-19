@@ -4,7 +4,7 @@ import { createOpenAI } from "@ai-sdk/openai"
 import { wrapLanguageModel } from "ai"
 import { ModelConnectionError } from "./model-credentials.server"
 import { ChatGrantError } from "./chatgpt-oauth.server"
-import type { OutboundRecord } from "./openrouter-step.server"
+import type { OutboundRecord } from "./gateway-step.server"
 
 type Outcome =
   "completed" | "failed" | "incomplete" | "interrupted" | "cancelled"

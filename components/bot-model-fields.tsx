@@ -3,6 +3,7 @@ import { useState } from "react"
 import { ChevronsUpDownIcon } from "lucide-react"
 import {
   choiceProblem,
+  connectionLabel,
   type ConnectionSummary,
   type CatalogModel,
   type ModelChoice,
@@ -38,11 +39,7 @@ export function BotModelFields({
   const model = selected?.catalog.find((m) => m.id === choice?.modelId)
   const problem = connections && choice && choiceProblem(choice, selected)
   function accountLabel(c: ConnectionSummary) {
-    return connections?.some(
-      (other) => other.id !== c.id && other.nickname === c.nickname
-    )
-      ? c.nickname + " · " + c.id.slice(-6)
-      : c.nickname
+    return connectionLabel(c, connections ?? [])
   }
   function choose(connectionId: string, next: CatalogModel) {
     const effort =
@@ -103,7 +100,7 @@ export function BotModelFields({
                         heading={
                           (c.provider === "chatgpt"
                             ? "ChatGPT"
-                            : "OpenRouter") +
+                            : "Custom gateway") +
                           " · " +
                           accountLabel(c)
                         }
@@ -111,7 +108,13 @@ export function BotModelFields({
                         {c.catalog.map((m) => (
                           <CommandItem
                             key={m.id}
-                            value={[c.id, c.nickname, m.id, m.name].join(" ")}
+                            value={[
+                              c.id,
+                              c.nickname,
+                              c.baseUrl,
+                              m.id,
+                              m.name,
+                            ].join(" ")}
                             disabled={!!m.unavailable}
                             onSelect={() => choose(c.id, m)}
                           >
@@ -173,7 +176,7 @@ export function BotModelFields({
         <div className="text-xs text-muted-foreground">
           {problem}{" "}
           <Button type="button" size="sm" variant="link" onClick={manage}>
-            Manage model connections
+            Manage models
           </Button>
         </div>
       )}

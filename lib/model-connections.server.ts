@@ -5,6 +5,8 @@ import { bots, chatMembers, modelConnections as table } from "../db/schema"
 import { db } from "./db"
 import {
   choiceProblem,
+  gatewayBaseUrlSchema,
+  openRouterBaseUrl,
   modelChoiceSchema,
   type ModelChoice,
   type ConnectionState,
@@ -29,12 +31,13 @@ import {
   storeRegistration,
   clearLocalTokens,
 } from "./chatgpt-vault.server"
-import { accountCatalog, CatalogError } from "./openrouter-catalog.server"
+import { accountCatalog, CatalogError } from "./gateway-catalog.server"
 
 const publicColumns = {
   provider: table.provider,
   id: table.id,
   nickname: table.nickname,
+  baseUrl: table.baseUrl,
   revision: table.revision,
   state: table.state,
   catalog: table.catalog,
@@ -71,6 +74,7 @@ export async function listConnections() {
     const members = bound.filter((b) => b.choice?.connectionId === c.id)
     return {
       ...c,
+      baseUrl: c.provider === "openrouter" ? openRouterBaseUrl : c.baseUrl,
       usedBy: members.map((b) => b.name),
       needsModelChange:
         c.state === "ready"
@@ -97,7 +101,7 @@ async function change(
   values: Partial<
     Pick<
       typeof table.$inferInsert,
-      "credential" | "state" | "nickname" | "catalog"
+      "credential" | "state" | "nickname" | "catalog" | "baseUrl" | "provider"
     >
   >
 ) {
@@ -108,37 +112,64 @@ async function change(
     .returning({ id: table.id })
   if (!rows.length) throw stale()
 }
+function gatewayConfig(row: typeof table.$inferSelect) {
+  if (row.provider !== "openrouter" && row.provider !== "gateway") throw stale()
+  const legacy = row.provider === "openrouter"
+  const baseUrl = legacy
+    ? openRouterBaseUrl
+    : gatewayBaseUrlSchema.parse(row.baseUrl)
+  const keyContext = legacy ? row.id : JSON.stringify([row.id, baseUrl])
+  return {
+    baseUrl,
+    apiKey: row.credential
+      ? openCredential(row.owner, keyContext, row.credential)
+      : null,
+  }
+}
 export async function connect(
-  input: { nickname: string; apiKey: string },
+  input: { baseUrl: string; apiKey: string },
   target?: { id: string; revision: string }
 ) {
   const owner = installationOwner()
+  const baseUrl = gatewayBaseUrlSchema.parse(input.baseUrl)
+  let key = input.apiKey || null
   if (target) {
-    const [row] = await db
-      .select({ revision: table.revision, provider: table.provider })
-      .from(table)
-      .where(owned(target.id))
-    if (row?.revision !== target.revision || row.provider !== "openrouter")
+    const [row] = await db.select().from(table).where(owned(target.id))
+    if (!row || row.revision !== target.revision || row.provider === "chatgpt")
       throw stale()
+    if (!key && row.credential) {
+      const saved = gatewayConfig(row)
+      if (saved.baseUrl !== baseUrl)
+        throw new ModelConnectionError(
+          "Enter a new API key when changing the base URL."
+        )
+      key = saved.apiKey
+    }
   }
   const id = target?.id ?? nanoid()
-  const credential = sealCredential(owner, id, input.apiKey)
-  const catalog = await accountCatalog(input.apiKey)
+  const credential = key
+    ? sealCredential(owner, JSON.stringify([id, baseUrl]), key)
+    : null
+  const catalog = await accountCatalog(baseUrl, key)
   const state: ConnectionState = catalog.length ? "ready" : "empty"
-  const values = { nickname: input.nickname, credential, catalog, state }
+  const values = {
+    provider: "gateway" as const,
+    nickname: new URL(baseUrl).host,
+    baseUrl,
+    credential,
+    catalog,
+    state,
+  }
   if (target) await change(id, target.revision, values)
   else
     await db.insert(table).values({ ...values, id, owner, revision: nanoid() })
 }
 export async function refreshConnection(id: string, revision: string) {
   const [row] = await db.select().from(table).where(owned(id))
-  if (
-    !row?.credential ||
-    row.revision !== revision ||
-    row.state === "disconnected"
-  )
+  if (!row || row.revision !== revision || row.state === "disconnected")
     throw stale()
   if (row.provider === "chatgpt") {
+    if (!row.credential) throw stale()
     try {
       const catalog = await chatCatalog(await accessForProfile(row.credential))
       await change(id, revision, {
@@ -152,9 +183,9 @@ export async function refreshConnection(id: string, revision: string) {
     }
     return
   }
-  const key = openCredential(row.owner, id, row.credential)
+  const { baseUrl, apiKey } = gatewayConfig(row)
   try {
-    const catalog = await accountCatalog(key)
+    const catalog = await accountCatalog(baseUrl, apiKey)
     await change(id, revision, {
       catalog,
       state: catalog.length ? "ready" : "empty",
@@ -185,22 +216,27 @@ export async function disconnectConnection(id: string, revision: string) {
 export async function resolveConnection(choice: ModelChoice) {
   const [row] = await db.select().from(table).where(owned(choice.connectionId))
   const problem = choiceProblem(choice, row)
-  if (problem || !row?.credential)
+  if (problem || !row)
     throw new ModelConnectionError(
       problem ?? "This connection is disconnected."
     )
-  if (row.provider === "chatgpt")
+  const effort =
+    row.catalog.find((m) => m.id === choice.modelId)?.fixedEffort ??
+    choice.effort
+  if (row.provider === "chatgpt") {
+    if (!row.credential)
+      throw new ModelConnectionError("Reconnect this ChatGPT account.")
     return {
       provider: "chatgpt" as const,
       ref: row.credential,
-      effort:
-        row.catalog.find((m) => m.id === choice.modelId)?.fixedEffort ??
-        choice.effort,
+      effort,
       revision: row.revision,
     }
+  }
   return {
-    provider: "openrouter" as const,
-    apiKey: openCredential(row.owner, row.id, row.credential),
+    provider: "gateway" as const,
+    effort,
+    ...gatewayConfig(row),
     revision: row.revision,
   }
 }

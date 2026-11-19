@@ -101,7 +101,7 @@ export function SettingsDialog({
               >
                 Tools
               </SettingsNavItem>
-              <SettingsNavItem active={tab==="connections"} icon={<CableIcon/>} onClick={()=>selectTab("connections")}>Model connections</SettingsNavItem>
+              <SettingsNavItem active={tab==="connections"} icon={<CableIcon/>} onClick={()=>selectTab("connections")}>Models</SettingsNavItem>
             </>
           }
         >

@@ -16,7 +16,7 @@ export async function assertInstallationRequest() {
     (origin && !["http://" + host, "https://" + host].includes(origin))
   ) {
     throw new ModelConnectionError(
-      "Model connections are available only in the local installation."
+      "Model settings are available only in the local installation."
     )
   }
 }

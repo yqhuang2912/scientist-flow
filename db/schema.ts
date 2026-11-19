@@ -15,6 +15,7 @@ import {
 import { createInsertSchema } from "drizzle-zod"
 import { z } from "zod"
 import {
+  gatewayBaseUrlSchema,
   modelChoiceSchema,
   type CatalogModel,
   type ModelProvider,
@@ -35,6 +36,7 @@ export const modelConnections = pgTable(
       .notNull()
       .default("openrouter"),
     nickname: text("nickname").notNull(),
+    baseUrl: text("base_url"),
     revision: text("revision").notNull(),
     credential: text("credential"),
     state: text("state").$type<ConnectionState>().notNull(),
@@ -44,16 +46,17 @@ export const modelConnections = pgTable(
 )
 
 export const connectionFormSchema = createInsertSchema(modelConnections, {
-  nickname: z.string().trim().min(1, "Enter a nickname.").max(80),
+  baseUrl: gatewayBaseUrlSchema,
 })
-  .pick({ nickname: true })
+  .pick({ baseUrl: true })
   .extend({
-    provider: z.literal("openrouter"),
-    apiKey: z.string().trim().min(1, "Enter an OpenRouter API key.").max(1024),
+    apiKey: z.string().trim().max(1024),
   })
   .strict()
 
-export const profileNameSchema = connectionFormSchema
+export const profileNameSchema = createInsertSchema(modelConnections, {
+  nickname: z.string().trim().min(1, "Enter a nickname.").max(80),
+})
   .pick({ nickname: true })
   .strict()
 

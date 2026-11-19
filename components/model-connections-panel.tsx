@@ -10,9 +10,14 @@ import {
 } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { CableIcon, RefreshCwIcon } from "lucide-react"
+import { CableIcon, PlusIcon, RefreshCwIcon } from "lucide-react"
 import { connectionFormSchema } from "@/db/schema"
-import { connectionStatus, type ConnectionSummary } from "@/lib/model-catalog"
+import {
+  connectionLabel,
+  connectionStatus,
+  openRouterBaseUrl,
+  type ConnectionSummary,
+} from "@/lib/model-catalog"
 import {
   getModelConnections,
   saveModelConnection,
@@ -36,7 +41,6 @@ import { SettingsDeleteAction } from "./settings-detail-actions"
 import { Field, FieldGroup, FieldLabel, FieldError } from "./ui/field"
 import { Button } from "./ui/button"
 import { Input } from "./ui/input"
-import { NativeSelect } from "./ui/native-select"
 
 export function ModelConnectionsPanel({
   guard,
@@ -82,7 +86,7 @@ export function ModelConnectionsPanel({
   const row = rows?.find((r) => r.id === editor)
   if (editor === "new" || row)
     return (
-      <SettingsEditorPane label="Model connection">
+      <SettingsEditorPane label="Custom gateway">
         <ConnectionForm
           key={editor}
           row={row}
@@ -95,17 +99,17 @@ export function ModelConnectionsPanel({
   const items = (rows ?? [])
     .filter((r) => r.provider !== "chatgpt")
     .filter((r) =>
-      r.nickname.toLowerCase().includes(search.trim().toLowerCase())
+      [r.baseUrl, r.nickname].some((s) =>
+        s?.toLowerCase().includes(search.trim().toLowerCase())
+      )
     )
   return (
-    <SettingsPane className="gap-3" aria-label="Model connections">
+    <SettingsPane className="gap-3" aria-label="Models">
       <SettingsListHeader
-        title="Model connections"
-        noun="OpenRouter connection"
-        description="Manage the model accounts available to your bots."
+        title="Models"
+        description="Manage ChatGPT accounts and gateways for your bots."
         search={search}
         onSearch={setSearch}
-        onCreate={() => setEditor("new")}
       />
       {error && (
         <p role="alert">
@@ -127,28 +131,34 @@ export function ModelConnectionsPanel({
           reload={reloadRows}
         />
       )}
-      <h3 className="type-control font-medium">OpenRouter</h3>
-      {rows ? (
-        <SettingsList
-          icon={<CableIcon />}
-          emptyLabel={
-            search ? "No matching connections" : "No model connections yet"
-          }
-          items={items.map((r) => ({
-            id: r.id,
-            name: r.nickname,
-            description:
-              "OpenRouter · " +
-              (r.state === "ready"
-                ? r.catalog.length + " models"
-                : connectionStatus[r.state]),
-            icon: <CableIcon />,
-            onSelect: () => setEditor(r.id),
-          }))}
-        />
-      ) : (
-        !error && <p>Loading connections…</p>
-      )}
+      <section aria-label="Custom gateways" className="grid gap-1">
+        <div className="flex items-center justify-between">
+          <h3 className="type-control font-medium">Custom gateways</h3>
+          <Button size="sm" variant="ghost" onClick={() => setEditor("new")}>
+            <PlusIcon />
+            Add gateway
+          </Button>
+        </div>
+        {rows ? (
+          <SettingsList
+            icon={<CableIcon />}
+            emptyLabel={search ? "No matching gateways" : "No gateways yet"}
+            items={items.map((r) => ({
+              id: r.id,
+              name: connectionLabel(r, rows),
+              description:
+                (r.baseUrl === openRouterBaseUrl ? "OpenRouter · " : "") +
+                (r.state === "ready"
+                  ? r.catalog.length + " models"
+                  : connectionStatus[r.state]),
+              icon: <CableIcon />,
+              onSelect: () => setEditor(r.id),
+            }))}
+          />
+        ) : (
+          !error && <p>Loading connections…</p>
+        )}
+      </section>
     </SettingsPane>
   )
 }
@@ -168,8 +178,7 @@ function ConnectionForm({
   const form = useForm({
     resolver: zodResolver(connectionFormSchema),
     defaultValues: {
-      provider: "openrouter" as const,
-      nickname: row?.nickname ?? "",
+      baseUrl: row?.baseUrl ?? "",
       apiKey: "",
     },
   })
@@ -222,31 +231,46 @@ function ConnectionForm({
       >
         <fieldset disabled={pending}>
           <FieldGroup className="gap-3">
-            <Field>
-              <FieldLabel htmlFor="connection-provider">Provider</FieldLabel>
-              <NativeSelect
-                id="connection-provider"
-                {...form.register("provider")}
-              >
-                <option value="openrouter">OpenRouter</option>
-              </NativeSelect>
-            </Field>
-            <Field data-invalid={!!form.formState.errors.nickname}>
-              <FieldLabel htmlFor="connection-name">Connection name</FieldLabel>
+            <Field data-invalid={!!form.formState.errors.baseUrl}>
+              <div className="flex items-center justify-between">
+                <FieldLabel htmlFor="gateway-url">Base URL</FieldLabel>
+                {!row && (
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    onClick={() =>
+                      form.setValue("baseUrl", openRouterBaseUrl, {
+                        shouldDirty: true,
+                        shouldValidate: true,
+                      })
+                    }
+                  >
+                    Use OpenRouter
+                  </Button>
+                )}
+              </div>
               <Input
-                id="connection-name"
-                aria-invalid={!!form.formState.errors.nickname}
-                {...form.register("nickname")}
+                id="gateway-url"
+                placeholder="https://gateway.example.com/v1"
+                inputMode="url"
+                autoComplete="url"
+                spellCheck={false}
+                aria-invalid={!!form.formState.errors.baseUrl}
+                {...form.register("baseUrl")}
               />
-              <FieldError errors={[form.formState.errors.nickname]} />
+              <FieldError errors={[form.formState.errors.baseUrl]} />
             </Field>
             <Field data-invalid={!!form.formState.errors.apiKey}>
-              <FieldLabel htmlFor="connection-key">
-                {row ? "Replacement API key" : "API key"}
-              </FieldLabel>
+              <FieldLabel htmlFor="connection-key">API key</FieldLabel>
               <Input
                 id="connection-key"
                 type="password"
+                placeholder={
+                  row && row.state !== "disconnected"
+                    ? "Enter a replacement key"
+                    : "If required by the gateway"
+                }
                 autoComplete="new-password"
                 spellCheck={false}
                 aria-invalid={!!form.formState.errors.apiKey}
@@ -287,7 +311,7 @@ function ConnectionForm({
       </SettingsFormBody>
       <SettingsFormFooter
         formId={formId}
-        noun="connection"
+        noun="gateway"
         editing={!!row}
         dirty={form.formState.isDirty}
         pending={pending}
@@ -297,7 +321,7 @@ function ConnectionForm({
           <SettingsDeleteAction
             noun="connection"
             actionLabel="Disconnect"
-            title={"Disconnect " + row.nickname + "?"}
+            title={"Disconnect " + (row.baseUrl ?? row.nickname) + "?"}
             description="Bots using this connection will need a working connection before they can reply."
             disabled={pending}
             remove={() => removeModelConnection(target)}

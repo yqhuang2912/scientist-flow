@@ -234,7 +234,7 @@ export function ChatProfileEditor({
       } catch {
         if (active) {
           setLogin(null)
-          setError("Could not check sign-in. Reopen Model connections.")
+          setError("Could not check sign-in. Reopen Settings → Models.")
         }
       }
     }

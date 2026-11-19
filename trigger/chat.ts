@@ -1,3 +1,4 @@
+import { usesDeepAgent } from "../lib/deepagents-pilot.server"
 import { resolveBotModel } from "../lib/bot-model.server"
 import {
   chatMemberChoice,
@@ -15,7 +16,7 @@ import {
   mergeExecutionMessages,
   type Delegation,
 } from "../lib/bot-execution"
-import { portableHistory } from "../lib/openrouter-step.server"
+import { portableHistory } from "../lib/gateway-step.server"
 import { ModelConnectionError } from "../lib/model-credentials.server"
 import { chat, defaultStorage, type ChatStreamText } from "@trigger.dev/sdk/ai"
 import {
@@ -349,50 +350,65 @@ export async function runBotTurn({
           )
         : portableHistory(messages)
       const initial = modelForStep(0)
-      const result = streamText({
-        ...initial,
-        system: instructions,
-        messages: publicInput,
-        tools,
-        ...scope(true),
-        abortSignal: signal,
-        stopWhen: [isStepCount(6), () => !!intent],
-        experimental_transform: [
-          botTextTransform(members),
-          redactToolInputs(
-            new Set([...Object.keys(http.tools), projectDecisionTool])
-          ),
-        ],
-        onError: ({ error }) => {
-          failure = safeError(error)
-        },
-        prepareStep: async ({ steps }) => {
-          const saved = steps.some((s) =>
-            s.toolResults.some(
-              (r) =>
-                r.toolName === projectDecisionTool &&
-                (r.output as { success?: boolean } | null)?.success
+      const legacyStream = () =>
+        streamText({
+          ...initial,
+          system: instructions,
+          messages: publicInput,
+          tools,
+          ...scope(true),
+          abortSignal: signal,
+          stopWhen: [isStepCount(6), () => !!intent],
+          experimental_transform: [
+            botTextTransform(members),
+            redactToolInputs(
+              new Set([...Object.keys(http.tools), projectDecisionTool])
+            ),
+          ],
+          onError: ({ error }) => {
+            failure = safeError(error)
+          },
+          prepareStep: async ({ steps }) => {
+            const saved = steps.some((s) =>
+              s.toolResults.some(
+                (r) =>
+                  r.toolName === projectDecisionTool &&
+                  (r.output as { success?: boolean } | null)?.success
+              )
             )
-          )
-          return {
-            ...(steps.length ? modelForStep(steps.length) : initial),
-            instructions: [
+            return {
+              ...(steps.length ? modelForStep(steps.length) : initial),
+              instructions: [
+                instructions,
+                group ? await project(steps.length) : "",
+                saved && canDelegate
+                  ? "The decision is committed. If a delegation was requested, call handoff now."
+                  : "",
+                skill.hasRead(bot.id)
+                  ? "Follow your retrieved skill's exact procedure and required wording in the visible answer."
+                  : "",
+              ]
+                .filter(Boolean)
+                .join("\n\n"),
+              ...scope(!saved),
+            }
+          },
+        }).toUIMessageStream(options)
+      const generated =
+        !incoming &&
+        modelForStep.explicitEffort &&
+        (await usesDeepAgent(context, bot.id, user))
+          ? (await import("../lib/deepagents-reply.server")).deepAgentReply({
+              route: initial,
               instructions,
-              group ? await project(steps.length) : "",
-              saved && canDelegate
-                ? "The decision is committed. If a delegation was requested, call handoff now."
-                : "",
-              skill.hasRead(bot.id)
-                ? "Follow your retrieved skill's exact procedure and required wording in the visible answer."
-                : "",
-            ]
-              .filter(Boolean)
-              .join("\n\n"),
-            ...scope(!saved),
-          }
-        },
-      })
-      const stream = result.toUIMessageStream(options).pipeThrough(
+              messages: publicInput,
+              signal,
+              metadata: meta,
+              messageId: execution.messageId,
+              onError: safeError,
+            })
+          : legacyStream()
+      const stream = generated.pipeThrough(
         new TransformStream<UIMessageChunk, UIMessageChunk>({
           transform(chunk, controller) {
             if (chunk.type !== "error") {
