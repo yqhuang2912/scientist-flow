@@ -5,7 +5,12 @@ import { cjk } from "@streamdown/cjk"
 import { code } from "@streamdown/code"
 import { math } from "@streamdown/math"
 import { mermaid } from "@streamdown/mermaid"
-import { Streamdown, defaultComponents, type ExtraProps } from "streamdown"
+import {
+  Streamdown,
+  defaultComponents,
+  defaultRemarkPlugins,
+  type ExtraProps,
+} from "streamdown"
 import {
   CheckIcon,
   CopyIcon,
@@ -17,6 +22,8 @@ import {
   ZoomOutIcon,
 } from "lucide-react"
 import { MarkdownCodeBlock } from "@/components/markdown-code-block"
+import { normalizeChatMath } from "@/lib/chat-math"
+import { remarkReasoningMath } from "@/lib/remark-reasoning-math"
 import { cn } from "@/lib/utils"
 import "@/components/chat-markdown.css"
 
@@ -45,6 +52,16 @@ function MarkdownCode({
 
 const components = { code: MarkdownCode }
 const plugins = { cjk, code, math, mermaid }
+const reasoningPlugins = { cjk, math }
+const reasoningComponents = {
+  img: ({ alt }: ComponentProps<"img">) => <>{alt}</>,
+}
+const reasoningRemarkPlugins = [
+  ...Object.values(defaultRemarkPlugins),
+  remarkReasoningMath,
+]
+// Earlier references and their defining expression can be in different paragraphs.
+const wholeThought = (source: string) => [source]
 const icons = {
   CheckIcon,
   CopyIcon,
@@ -86,25 +103,35 @@ const diagram: ComponentProps<typeof Streamdown>["mermaid"] = {
 
 export const ChatMarkdown = memo(function ChatMarkdown({
   className,
+  children,
   variant = "assistant",
   ...props
 }: ComponentProps<typeof Streamdown> & {
-  variant?: "assistant" | "user"
+  variant?: "assistant" | "user" | "reasoning"
 }) {
+  const reasoning = variant === "reasoning"
   return (
     <Streamdown
       className={cn(
         "chat-markdown w-full min-w-0 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-        "[&_[data-streamdown=heading-1]]:font-serif [&_[data-streamdown=heading-1]]:font-bold",
         "[&_[data-streamdown=inline-code]]:rounded-sm [&_[data-streamdown=inline-code]]:bg-surface [&_[data-streamdown=table-header]]:bg-surface/80",
-        variant === "user" ? "type-chat-prompt" : "type-chat-response",
+        reasoning
+          ? "text-sm leading-6 font-medium"
+          : variant === "user"
+            ? "type-chat-prompt"
+            : "type-chat-response",
         className
       )}
-      plugins={plugins}
-      components={components}
+      plugins={reasoning ? reasoningPlugins : plugins}
+      components={reasoning ? reasoningComponents : components}
+      remarkPlugins={reasoning ? reasoningRemarkPlugins : undefined}
+      parseMarkdownIntoBlocksFn={reasoning ? wholeThought : undefined}
+      skipHtml={reasoning}
       icons={icons}
       mermaid={diagram}
       {...props}
-    />
+    >
+      {children && normalizeChatMath(children)}
+    </Streamdown>
   )
 })

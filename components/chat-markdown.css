@@ -5,6 +5,38 @@
  * Reference source/verification limits: docs/visual-chat-markdown.md.
  */
 
+/* Chat headings stay close to the surrounding message size, including inside
+   a narrower Thought panel. Heading elements retain their semantic levels. */
+.chat-markdown [data-streamdown^="heading-"] {
+  margin-block: 1em 0.25em;
+  font-family: inherit;
+  font-size: 1em;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.4;
+}
+.chat-markdown [data-streamdown="heading-1"] {
+  font-size: 1.2em;
+}
+.chat-markdown [data-streamdown="heading-2"] {
+  font-size: calc(1em + 0.125rem);
+}
+.chat-markdown [data-streamdown="heading-3"] {
+  font-size: calc(1em + 0.0625rem);
+}
+.chat-markdown [data-streamdown^="heading-"]:first-child {
+  margin-block-start: 0;
+}
+.chat-markdown [data-streamdown^="heading-"]:last-child {
+  margin-block-end: 0;
+}
+.chat-markdown .katex {
+  font-size: 1em;
+}
+.chat-markdown .katex-display {
+  overflow-x: auto;
+  padding-block: 0.2em;
+}
+
 /* Markdown uses the same Base UI CodeBlock as tool input/output. */
 .chat-markdown [data-slot="code-block"] {
   margin-block: 16px;

@@ -32,12 +32,22 @@ The available reference conversation had stopped before a final answer. Thus
 15/26 is verified from source declarations, not claimed as a newly rendered
 reference answer measurement.
 
-The follow-up audit removed the local heading size overrides. Streamdown supplies
-H1 through H6 at 30/36, 24/32, 20/28, 18/28, 16/24 and 14/20 px. The reference
-adds bold serif styling to H1. Inline code uses the renderer’s 14/20 px monospace
+The initial audit used Streamdown's default heading scale. On 2026-11-19 the
+chat adopted a tighter scale. At the 15px assistant body size, H1–H6 are
+18, 17, 16, 15, 15 and 15px, with weight 600 and unitless line height 1.4.
+Headings use the surrounding font family. Firecrawl measured H3/body at
+16.38/14px in a [Claude shared reply](https://claude.ai/share/9581bb8e-5cdf-40c8-b173-3d311fb6ee37)
+and 18.72/16px in a [DeepSeek shared reply](https://chat.deepseek.com/share/qzg1zsbuar56grens4).
+The [ChatGPT stylesheet](https://chatgpt.com/cdn/assets/root-93849dd4e63a.css)
+declares a 1.125rem H3 for its newer Markdown style. The sampled ChatGPT share
+did not expose a rendered reply for measurement.
+
+Inline code uses the renderer’s 14/20 px monospace
 with 6 px horizontal padding, the surface color and the small radius. Table headers
 use the same surface at 80% opacity. Expanded reasoning uses its measured 14/24 px
-medium text and a 224 px scroll height limit.
+medium text and a 224 px scroll height limit. Chat formulas inherit the local
+text size, 15px in a reply and 14px in a thought. KaTeX controls script sizing
+within each formula.
 
 Chrome computed-style checks passed at 1080 px in light mode and 375 px in dark
 mode. They covered all six heading levels, prose, inline code, table headers and
