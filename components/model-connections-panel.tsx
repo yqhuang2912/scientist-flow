@@ -1,6 +1,7 @@
 "use client"
 import {
   useEffect,
+  useCallback,
   useId,
   useRef,
   useState,
@@ -18,6 +19,7 @@ import {
   updateConnectionCatalog,
   removeModelConnection,
 } from "@/actions/model-connections"
+import { ChatGPTAccounts, ChatProfileEditor } from "./chatgpt-accounts"
 import { SettingsList, SettingsListHeader } from "./settings-list"
 import {
   SettingsPane,
@@ -45,7 +47,13 @@ export function ModelConnectionsPanel({
   const [error, setError] = useState("")
   const [search, setSearch] = useState("")
   const [editor, setEditor] = useState<string | null>(null)
+  const [profile, setProfile] = useState<{
+    row?: ConnectionSummary
+    rename?: boolean
+  } | null>(null)
+  const closeProfile = useCallback(() => setProfile(null), [])
   const [version, reload] = useState(0)
+  const reloadRows = useCallback(() => reload((n) => n + 1), [])
   useEffect(() => {
     let current = true
     getModelConnections()
@@ -63,6 +71,14 @@ export function ModelConnectionsPanel({
       current = false
     }
   }, [version])
+  if (profile)
+    return (
+      <ChatProfileEditor
+        edit={profile}
+        close={closeProfile}
+        reload={reloadRows}
+      />
+    )
   const row = rows?.find((r) => r.id === editor)
   if (editor === "new" || row)
     return (
@@ -76,14 +92,16 @@ export function ModelConnectionsPanel({
         />
       </SettingsEditorPane>
     )
-  const items = (rows ?? []).filter((r) =>
-    r.nickname.toLowerCase().includes(search.trim().toLowerCase())
-  )
+  const items = (rows ?? [])
+    .filter((r) => r.provider !== "chatgpt")
+    .filter((r) =>
+      r.nickname.toLowerCase().includes(search.trim().toLowerCase())
+    )
   return (
     <SettingsPane className="gap-3" aria-label="Model connections">
       <SettingsListHeader
         title="Model connections"
-        noun="connection"
+        noun="OpenRouter connection"
         description="Manage the model accounts available to your bots."
         search={search}
         onSearch={setSearch}
@@ -101,6 +119,15 @@ export function ModelConnectionsPanel({
           </Button>
         </p>
       )}
+      {rows && (
+        <ChatGPTAccounts
+          rows={rows.filter((r) => r.provider === "chatgpt")}
+          search={search}
+          onEdit={setProfile}
+          reload={reloadRows}
+        />
+      )}
+      <h3 className="type-control font-medium">OpenRouter</h3>
       {rows ? (
         <SettingsList
           icon={<CableIcon />}

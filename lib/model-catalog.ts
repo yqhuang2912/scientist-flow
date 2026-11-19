@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-export const effortSchema = z.enum([
+const routerEffort = z.enum([
   "none",
   "minimal",
   "low",
@@ -8,6 +8,10 @@ export const effortSchema = z.enum([
   "high",
   "xhigh",
 ])
+export const effortSchema = z
+  .string()
+  .max(40)
+  .regex(/^[a-z][a-z0-9_-]*$/)
 export type Effort = z.infer<typeof effortSchema>
 export const modelChoiceSchema = z
   .object({
@@ -26,8 +30,19 @@ export type CatalogModel = {
   effortNote?: string
 }
 export type ConnectionState =
-  "ready" | "empty" | "invalid" | "catalog-error" | "disconnected"
+  | "ready"
+  | "empty"
+  | "invalid"
+  | "catalog-error"
+  | "disconnected"
+  | "identity-only"
+  | "limited"
+  | "restricted"
+export type ModelProvider = "openrouter" | "chatgpt"
 export type ConnectionSummary = {
+  provider?: ModelProvider
+  usedBy?: string[]
+  needsModelChange?: string[]
   id: string
   nickname: string
   revision: string
@@ -36,8 +51,11 @@ export type ConnectionSummary = {
 }
 export const connectionStatus: Record<ConnectionState, string> = {
   ready: "Connected",
+  "identity-only": "Signed in · plan permission required",
+  limited: "Plan usage limit reached",
+  restricted: "Account or workspace restriction",
   empty: "No models visible to this account",
-  invalid: "Invalid API key",
+  invalid: "Authorization is invalid",
   "catalog-error": "Could not load the model catalog",
   disconnected: "Disconnected",
 }
@@ -78,10 +96,10 @@ export function parseCatalog(input: unknown): CatalogModel[] {
       // The user catalog distinguishes general reasoning support from exact levels.
       const declared = m.reasoning?.supported_efforts
       const efforts = (
-        declared === null ? effortSchema.options : (declared ?? [])
+        declared === null ? routerEffort.options : (declared ?? [])
       ).filter(
         (e): e is Effort =>
-          effortSchema.safeParse(e).success &&
+          routerEffort.safeParse(e).success &&
           !(e === "none" && m.reasoning?.mandatory)
       )
       const fixedEffort =

@@ -37,6 +37,13 @@ export function BotModelFields({
   const selected = connections?.find((c) => c.id === choice?.connectionId)
   const model = selected?.catalog.find((m) => m.id === choice?.modelId)
   const problem = connections && choice && choiceProblem(choice, selected)
+  function accountLabel(c: ConnectionSummary) {
+    return connections?.some(
+      (other) => other.id !== c.id && other.nickname === c.nickname
+    )
+      ? c.nickname + " · " + c.id.slice(-6)
+      : c.nickname
+  }
   function choose(connectionId: string, next: CatalogModel) {
     const effort =
       next.fixedEffort ??
@@ -74,9 +81,11 @@ export function BotModelFields({
                 {!connections
                   ? "Loading models…"
                   : choice
-                    ? (selected?.nickname ?? "Unavailable connection") +
+                    ? (selected
+                        ? accountLabel(selected)
+                        : "Unavailable connection") +
                       " · " +
-                      choice.modelId
+                      (model?.name ?? choice.modelId)
                     : "Needs configuration"}
               </span>
               <ChevronsUpDownIcon />
@@ -91,7 +100,13 @@ export function BotModelFields({
                     .map((c) => (
                       <CommandGroup
                         key={c.id}
-                        heading={"OpenRouter · " + c.nickname}
+                        heading={
+                          (c.provider === "chatgpt"
+                            ? "ChatGPT"
+                            : "OpenRouter") +
+                          " · " +
+                          accountLabel(c)
+                        }
                       >
                         {c.catalog.map((m) => (
                           <CommandItem
@@ -103,7 +118,7 @@ export function BotModelFields({
                             <span className="min-w-0">
                               <span className="block truncate">{m.name}</span>
                               <span className="block truncate text-xs text-muted-foreground">
-                                {c.nickname} · {m.id}
+                                {accountLabel(c)} · {m.id}
                                 {m.unavailable && " · " + m.unavailable}
                               </span>
                             </span>

@@ -17,6 +17,7 @@ import { z } from "zod"
 import {
   modelChoiceSchema,
   type CatalogModel,
+  type ModelProvider,
   type ConnectionState,
   type ModelChoice,
 } from "../lib/model-catalog"
@@ -29,6 +30,10 @@ export const modelConnections = pgTable(
   {
     id: text("id").primaryKey(),
     owner: text("owner").notNull(),
+    provider: text("provider")
+      .$type<ModelProvider>()
+      .notNull()
+      .default("openrouter"),
     nickname: text("nickname").notNull(),
     revision: text("revision").notNull(),
     credential: text("credential"),
@@ -48,6 +53,10 @@ export const connectionFormSchema = createInsertSchema(modelConnections, {
   })
   .strict()
 
+export const profileNameSchema = connectionFormSchema
+  .pick({ nickname: true })
+  .strict()
+
 export const modelRequests = pgTable(
   "model_requests",
   {
@@ -62,6 +71,7 @@ export const modelRequests = pgTable(
     model: text("model").notNull(),
     effort: text("effort"),
     httpStatus: integer("http_status"),
+    outcome: text("outcome"),
     responseModel: text("response_model"),
     responseId: text("response_id"),
     createdAt: timestamp("created_at", { withTimezone: true })

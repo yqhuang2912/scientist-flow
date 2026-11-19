@@ -9,9 +9,12 @@ import {
   assertCurrentConnection,
   invalidateCredential,
   resolveConnection,
+  setConnectionState,
 } from "./model-connections.server"
 
-import { openRouterStep } from "./openrouter-step.server"
+import { chatGPTStep } from "./chatgpt-step.server"
+import { accessForProfile } from "./chatgpt-oauth.server"
+import { openRouterStep, type OutboundRecord } from "./openrouter-step.server"
 
 export async function resolveBotModel(
   chatId: string,
@@ -21,15 +24,14 @@ export async function resolveBotModel(
 ) {
   const choice = await chatMemberChoice(chatId, botId)
   const connection = await resolveConnection(choice)
-  return (step: number) =>
-    openRouterStep({
-      apiKey: connection.apiKey,
+  return (step: number) => {
+    const common = {
       modelId: choice.modelId,
       effort: choice.effort,
       authorize: async () => {
         await assertCurrentConnection(choice.connectionId, connection.revision)
       },
-      record: async (fields) => {
+      record: async (fields: OutboundRecord) => {
         const id = nanoid()
         await db.insert(modelRequests).values({
           id,
@@ -42,10 +44,28 @@ export async function resolveBotModel(
           connection: choice.connectionId.slice(-8),
           revision: connection.revision.slice(-8),
         })
-        if (fields.httpStatus === 401)
+        if (fields.httpStatus === 401 && connection.provider === "openrouter")
           await invalidateCredential(choice.connectionId, connection.revision)
         return id
       },
+    }
+    if (connection.provider === "chatgpt")
+      return chatGPTStep({
+        ...common,
+        effort: connection.effort,
+        token: () => accessForProfile(connection.ref),
+        block: (e) =>
+          setConnectionState(choice.connectionId, connection.revision, e.state),
+        receipt: async (id, fields) => {
+          await db
+            .update(modelRequests)
+            .set(fields)
+            .where(eq(modelRequests.id, id))
+        },
+      })
+    return openRouterStep({
+      ...common,
+      apiKey: connection.apiKey,
       response: async (id, fields) => {
         await db
           .update(modelRequests)
@@ -53,4 +73,5 @@ export async function resolveBotModel(
           .where(eq(modelRequests.id, id))
       },
     })
+  }
 }
