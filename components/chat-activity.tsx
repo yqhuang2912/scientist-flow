@@ -373,7 +373,7 @@ export function ChatFile({
     <Attachment
       state="done"
       size="xs"
-      className="max-w-[min(100%,16rem)] min-w-0 flex-nowrap"
+      className="max-w-[min(100%,16rem)] min-w-0"
       title={name}
     >
       <AttachmentMedia variant="icon">

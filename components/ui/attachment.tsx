@@ -13,11 +13,11 @@ const attachmentVariants = cva(
       size: {
         default:
           "gap-2 text-sm has-data-[slot=attachment-content]:px-2.5 has-data-[slot=attachment-content]:py-2 has-data-[slot=attachment-media]:p-2",
-        sm: "gap-2.5 text-xs has-data-[slot=attachment-content]:px-2 has-data-[slot=attachment-content]:py-1.5 has-data-[slot=attachment-media]:p-1.5",
-        xs: "gap-1.5 rounded-lg text-xs has-data-[slot=attachment-content]:px-1.5 has-data-[slot=attachment-content]:py-1 has-data-[slot=attachment-media]:p-1",
+        sm: "gap-2 p-1.5 type-control-compact has-data-[slot=attachment-content]:px-2",
+        xs: "gap-2 rounded-lg p-1 type-control-compact has-data-[slot=attachment-content]:px-2",
       },
       orientation: {
-        horizontal: "min-w-40 items-center",
+        horizontal: "min-w-40 flex-nowrap items-center",
         vertical: "w-24 flex-col has-data-[slot=attachment-content]:w-30",
       },
     },
@@ -47,7 +47,7 @@ function Attachment({
 }
 
 const attachmentMediaVariants = cva(
-  "relative flex aspect-square w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted text-foreground group-data-[orientation=vertical]/attachment:w-full group-data-[size=sm]/attachment:w-8 group-data-[size=xs]/attachment:w-7 group-data-[size=xs]/attachment:rounded-md group-data-[state=error]/attachment:bg-destructive/10 group-data-[state=error]/attachment:text-destructive group-data-[orientation=vertical]/attachment:*:data-[slot=spinner]:size-6! [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 group-data-[orientation=vertical]/attachment:[&_svg:not([class*='size-'])]:size-6 group-data-[size=xs]/attachment:[&_svg:not([class*='size-'])]:size-3.5",
+  "relative flex aspect-square w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted text-foreground group-data-[orientation=vertical]/attachment:w-full group-data-[size=sm]/attachment:w-8 group-data-[size=xs]/attachment:w-8 group-data-[size=xs]/attachment:rounded-md group-data-[state=error]/attachment:bg-destructive/10 group-data-[state=error]/attachment:text-destructive group-data-[orientation=vertical]/attachment:*:data-[slot=spinner]:size-6! [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 group-data-[orientation=vertical]/attachment:[&_svg:not([class*='size-'])]:size-6",
   {
     variants: {
       variant: {
@@ -85,7 +85,7 @@ function AttachmentContent({
     <div
       data-slot="attachment-content"
       className={cn(
-        "max-w-full min-w-0 flex-1 leading-tight group-data-[orientation=vertical]/attachment:px-1",
+        "max-w-full min-w-0 flex-1 text-start leading-tight group-data-[size=sm]/attachment:leading-4 group-data-[size=xs]/attachment:leading-4 group-data-[orientation=vertical]/attachment:px-1",
         className
       )}
       {...props}
@@ -117,7 +117,7 @@ function AttachmentDescription({
     <span
       data-slot="attachment-description"
       className={cn(
-        "mt-0.5 block min-w-0 truncate text-xs text-muted-foreground group-data-[state=error]/attachment:text-destructive/80",
+        "block min-w-0 truncate text-[11px] leading-4 font-normal text-muted-foreground group-data-[size=default]/attachment:mt-0.5 group-data-[state=error]/attachment:text-destructive/80",
         "max-w-full",
         className
       )}
