@@ -1,19 +1,36 @@
 import "server-only"
+import { isDeepStrictEqual } from "node:util"
+import type {
+  LanguageModelV4FunctionTool,
+  LanguageModelV4Message,
+} from "@ai-sdk/provider"
 import { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import {
   AIMessage,
   HumanMessage,
   SystemMessage,
+  ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages"
 import { createDeepAgent, registerHarnessProfile } from "deepagents"
-import { createMiddleware } from "langchain"
-import type { ModelMessage, UIMessageChunk } from "ai"
+import { createMiddleware, tool } from "langchain"
+import {
+  asSchema,
+  type ModelMessage,
+  type ToolSet,
+  type UIMessageChunk,
+} from "ai"
+import { z } from "zod"
+import {
+  handoffDescription,
+  handoffInputSchema,
+  type HandoffInput,
+} from "./chat-handoff"
 import type { resolveBotModel } from "./bot-model.server"
 import { ModelConnectionError } from "./model-credentials.server"
 
 type Route = ReturnType<Awaited<ReturnType<typeof resolveBotModel>>>
-const profile = "scientistflow:direct-text"
+const profile = "scientistflow:single-turn"
 registerHarnessProfile(profile, {
   generalPurposeSubagent: { enabled: false },
   excludedMiddleware: ["SummarizationMiddleware"],
@@ -30,24 +47,62 @@ registerHarnessProfile(profile, {
   ],
 })
 
-// The agent invokes this model once. The resolved provider keeps ownership of
-// credential selection, wire validation and the provider's completion receipt.
-class DirectTextModel extends BaseChatModel {
+type PilotCall = { id: string; name: string; args: Record<string, unknown> }
+const objectInput = z.record(z.string(), z.unknown())
+
+function providerMessage(message: BaseMessage): LanguageModelV4Message {
+  if (SystemMessage.isInstance(message))
+    return { role: "system", content: message.text }
+  if (ToolMessage.isInstance(message) && message.name)
+    return {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: message.tool_call_id,
+          toolName: message.name,
+          output: { type: "text", value: message.text },
+        },
+      ],
+    }
+  const text = { type: "text" as const, text: message.text }
+  if (HumanMessage.isInstance(message)) return { role: "user", content: [text] }
+  if (AIMessage.isInstance(message))
+    return {
+      role: "assistant",
+      content: [
+        ...(text.text ? [text] : []),
+        ...(message.tool_calls ?? []).map((c) => ({
+          type: "tool-call" as const,
+          toolCallId: c.id!,
+          toolName: c.name,
+          input: c.args,
+        })),
+      ],
+    }
+  throw new Error("Unexpected pilot message.")
+}
+
+class PilotModel extends BaseChatModel {
   readonly modelName = profile
-  private called = false
+  private steps = 0
+  private call?: PilotCall
   constructor(
     private readonly route: Route,
     private readonly signal: AbortSignal,
+    private readonly definitions: LanguageModelV4FunctionTool[],
+    private readonly followup: ((step: number) => Route) | undefined,
+    private readonly allowsTool: (name: string) => boolean,
     private readonly onText: (delta: string) => void
   ) {
     super({ maxRetries: 0, cache: false })
   }
   _llmType() {
-    return "scientistflow-direct-text"
+    return "scientistflow-single-turn"
   }
-  bindTools(tools: unknown[]) {
-    if (tools.length)
-      throw new Error("Tools are disabled for the direct text pilot.")
+  bindTools(tools: { name?: string }[]) {
+    if (tools.some((t) => !this.definitions.some((d) => d.name === t.name)))
+      throw new Error("Unexpected pilot tool binding.")
     return this
   }
   async _generate(messages: BaseMessage[], options: this["ParsedCallOptions"]) {
@@ -55,29 +110,35 @@ class DirectTextModel extends BaseChatModel {
       ? AbortSignal.any([options.signal, this.signal])
       : this.signal
     signal.throwIfAborted()
-    if (this.called)
-      throw new Error("Only one model call is permitted per direct reply.")
-    this.called = true
-    const prompt: Parameters<Route["model"]["doStream"]>[0]["prompt"] =
-      messages.map((message) => {
-        const text = message.text
-        if (SystemMessage.isInstance(message))
-          return { role: "system" as const, content: text }
-        const role = HumanMessage.isInstance(message)
-          ? "user"
-          : AIMessage.isInstance(message)
-            ? "assistant"
-            : null
-        if (!role) throw new Error("Unexpected role in the text pilot.")
-        return { role, content: [{ type: "text" as const, text }] }
-      })
-    const { stream } = await this.route.model.doStream({
-      prompt,
-      providerOptions: this.route.providerOptions,
+    const step = this.steps++
+    const last = messages.at(-1)
+    if (
+      step > 0 &&
+      !(
+        step <= 2 &&
+        this.followup &&
+        this.call &&
+        last &&
+        ToolMessage.isInstance(last) &&
+        last.tool_call_id === this.call.id &&
+        last.name === this.call.name
+      )
+    )
+      throw new Error("Unexpected pilot model step.")
+    const route = step === 0 ? this.route : this.followup!(step)
+    const tools = this.definitions.filter((t) => this.allowsTool(t.name))
+    const { stream } = await route.model.doStream({
+      prompt: messages.map(providerMessage),
+      tools: tools.length ? tools : undefined,
+      providerOptions: route.providerOptions,
       abortSignal: signal,
     })
-    let text = "",
-      complete = false
+    let text = ""
+    let finish: string | undefined
+    let call: PilotCall | undefined
+    // A recipient may return either an answer or a tool call. Only committed
+    // answer text belongs in the public message before the tool result exists.
+    const bufferText = tools.length > 0 && !!this.followup
     const reader = stream.getReader()
     try {
       for (;;) {
@@ -85,13 +146,33 @@ class DirectTextModel extends BaseChatModel {
         if (done) break
         signal.throwIfAborted()
         if (value.type === "error") throw value.error
-        if (value.type.startsWith("tool-"))
+        if (value.type.startsWith("tool-") && !tools.length)
           throw new Error("Unexpected tool output.")
-        if (value.type === "finish")
-          complete = value.finishReason.unified === "stop"
+        // Both provider SDKs assemble argument deltas into this final event.
+        // Execute only after a clean terminal frame and validation of the whole call.
+        if (value.type === "tool-call") {
+          if (
+            !tools.some((t) => t.name === value.toolName) ||
+            !value.toolCallId ||
+            value.toolCallId === this.call?.id ||
+            value.providerExecuted
+          )
+            throw new Error("Unexpected pilot tool call.")
+          const schema =
+            value.toolName === "handoff" ? handoffInputSchema : objectInput
+          const next = {
+            id: value.toolCallId,
+            name: value.toolName,
+            args: schema.parse(JSON.parse(value.input)),
+          }
+          if (call && !isDeepStrictEqual(call, next))
+            throw new Error("Only one tool call is permitted.")
+          call = next
+        }
+        if (value.type === "finish") finish = value.finishReason.unified
         if (value.type === "text-delta") {
           text += value.delta
-          this.onText(value.delta)
+          if (!bufferText) this.onText(value.delta)
         }
       }
     } finally {
@@ -99,8 +180,20 @@ class DirectTextModel extends BaseChatModel {
       reader.releaseLock()
     }
     signal.throwIfAborted()
-    if (!complete || !text.trim())
+    if (call && (finish === "tool-calls" || finish === "stop")) {
+      this.call = call
+      return {
+        generations: [
+          {
+            text,
+            message: new AIMessage({ content: text, tool_calls: [call] }),
+          },
+        ],
+      }
+    }
+    if (finish !== "stop" || !text.trim())
       throw new ModelConnectionError("The model did not complete a text reply.")
+    if (bufferText) this.onText(text)
     return { generations: [{ text, message: new AIMessage(text) }] }
   }
 }
@@ -128,6 +221,14 @@ export function deepAgentReply(options: {
   signal: AbortSignal
   messageId: string
   metadata: { executionId: string; engine?: "deepagents" }
+  recipient?: {
+    botId: string
+    tools: ToolSet
+    followup: (step: number) => Route
+  }
+  handoff?: (
+    input: HandoffInput
+  ) => Promise<{ success: boolean; message?: string }>
   onError: (error: unknown) => string
 }) {
   const cancel = new AbortController()
@@ -139,29 +240,156 @@ export function deepAgentReply(options: {
       }
       const id = options.messageId
       let started = false
-      const model = new DirectTextModel(options.route, signal, (delta) => {
+      const publishText = (delta: string) => {
         if (!started) {
           write({ type: "text-start", id })
           started = true
         }
         write({ type: "text-delta", id, delta })
-      })
+      }
       try {
+        const accept = options.handoff
+        let handedOff = false
+        let rejection: string | undefined
+        const recipient = options.recipient
+        const definitions: LanguageModelV4FunctionTool[] = []
+        if (accept)
+          definitions.push({
+            type: "function",
+            name: "handoff",
+            description: handoffDescription,
+            inputSchema: await asSchema(handoffInputSchema).jsonSchema,
+          })
+        let phase: "initial" | "after-skill" | "answer" = "initial"
+        const allowsTool = (name: string) =>
+          phase === "initial" ||
+          (phase === "after-skill" && name !== "read_skill")
+        let verifiedFailure: string | undefined
+        const tools = accept
+          ? [
+              tool(
+                async (input, config) => {
+                  const toolCallId = config.toolCall?.id
+                  if (!toolCallId)
+                    throw new Error("Missing handoff call identity.")
+                  signal.throwIfAborted()
+                  if (started) {
+                    write({ type: "text-end", id })
+                    started = false
+                  }
+                  write({
+                    type: "tool-input-available",
+                    toolCallId,
+                    toolName: "handoff",
+                    input,
+                  })
+                  const output = await accept(input)
+                  write({ type: "tool-output-available", toolCallId, output })
+                  handedOff = output.success
+                  if (!handedOff)
+                    rejection = output.message || "Handoff was declined."
+                  return JSON.stringify(output)
+                },
+                {
+                  name: "handoff",
+                  description: handoffDescription,
+                  schema: handoffInputSchema,
+                  returnDirect: true,
+                }
+              ),
+            ]
+          : await Promise.all(
+              Object.entries(recipient?.tools ?? {}).map(
+                async ([name, shared]) => {
+                  const description =
+                    typeof shared.description === "string"
+                      ? shared.description
+                      : name
+                  definitions.push({
+                    type: "function",
+                    name,
+                    description,
+                    inputSchema: await asSchema(shared.inputSchema).jsonSchema,
+                  })
+                  return tool(
+                    async (input, config) => {
+                      const toolCallId = config.toolCall?.id
+                      if (
+                        !recipient ||
+                        !toolCallId ||
+                        !allowsTool(name) ||
+                        !shared.execute ||
+                        !shared.toModelOutput
+                      )
+                        throw new Error("Unexpected recipient tool execution.")
+                      signal.throwIfAborted()
+                      // Close the gate before awaiting I/O. Only a verified skill
+                      // read reopens it, for one subsequent HTTP call.
+                      phase = "answer"
+                      write({
+                        type: "tool-input-available",
+                        toolName: name,
+                        toolCallId,
+                        input: {},
+                      })
+                      const output = await shared.execute(input, {
+                        toolCallId,
+                        context: {
+                          botId: recipient.botId,
+                          executionId: options.metadata.executionId,
+                        },
+                        abortSignal: signal,
+                        messages: [],
+                      })
+                      write({
+                        type: "tool-output-available",
+                        toolCallId,
+                        output,
+                      })
+                      const result = await shared.toModelOutput({
+                        toolCallId,
+                        input,
+                        output,
+                      })
+                      if (result.type !== "text")
+                        throw new Error("Expected a text tool result.")
+                      if (output.success !== true)
+                        verifiedFailure = result.value
+                      else if (name === "read_skill") phase = "after-skill"
+                      return result.value
+                    },
+                    { name, description, schema: objectInput }
+                  )
+                }
+              )
+            )
+        const model = new PilotModel(
+          options.route,
+          signal,
+          definitions,
+          recipient?.followup,
+          allowsTool,
+          (delta) => {
+            if (!verifiedFailure) publishText(delta)
+          }
+        )
         const agent = createDeepAgent({
           model,
           systemPrompt: options.instructions,
-          tools: [],
+          tools,
           subagents: [],
           checkpointer: false,
           middleware: [
             createMiddleware({
-              name: "DirectTextOnly",
-              wrapModelCall: (request, handler) =>
-                handler({
+              name: "PilotToolScope",
+              wrapModelCall: (request, handler) => {
+                if (verifiedFailure) return new AIMessage(verifiedFailure)
+                return handler({
                   ...request,
-                  tools: [],
+                  tools: tools.filter((tool) => allowsTool(tool.name)),
                   systemMessage: new SystemMessage(options.instructions),
-                }),
+                })
+              },
             }),
           ],
         })
@@ -174,9 +402,13 @@ export function deepAgentReply(options: {
         })
         await agent.invoke(
           { messages: publicText(options.messages) },
-          { signal, recursionLimit: 8 }
+          // Graph steps include middleware and tool nodes between the three
+          // model calls. The route and tool gates enforce the actual budgets.
+          { signal, recursionLimit: recipient ? 16 : 8 }
         )
-        if (!started)
+        if (verifiedFailure) publishText(verifiedFailure)
+        if (rejection) throw new ModelConnectionError(rejection)
+        if (!started && !handedOff)
           throw new ModelConnectionError("The model returned no public reply.")
       } catch (error) {
         if (!signal.aborted) {

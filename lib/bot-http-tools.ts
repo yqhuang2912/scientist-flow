@@ -15,7 +15,10 @@ import { publicHttpsRequest } from "./public-https"
 type Bound = ToolDefinition & { botId: string; botName: string }
 const past =
   "Historical HTTP call. Its recorded status is not a fresh observation."
-const contextSchema = z.object({ botId: z.string() })
+const contextSchema = z.object({
+  botId: z.string(),
+  executionId: z.string().optional(),
+})
 // Existing definitions may predate a built-in. A hyphen cannot occur in a
 // user-defined identifier, so this provider-facing alias is unambiguous.
 const runtimeName = (name: string) =>
@@ -119,7 +122,14 @@ export function httpToolTurn(
                 if (!(await claim(def.id, hash)))
                   throw new Error("POST already claimed")
               }
-              return send(request)
+              return send(
+                context.executionId
+                  ? {
+                      ...request,
+                      audit: { executionId: context.executionId, toolCallId },
+                    }
+                  : request
+              )
             }
           )
           const base = {

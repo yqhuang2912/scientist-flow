@@ -44,15 +44,24 @@ test("saving requires an explicit set of valid IDs, allows clearing, and dedupli
     []
   )
 })
-test("snapshot catalogs and reads are scoped to the server-selected speaker", () => {
-  const turn = skillTurn([definition])
+test("snapshot catalogs and reads are scoped to the server-selected speaker", async () => {
+  const loaded: string[] = []
+  const turn = skillTurn([definition], async (id) => {
+    loaded.push(id)
+    return definition
+  })
   assert.doesNotMatch(turn.catalog("intake"), /outline|private body/)
   assert.match(turn.catalog("designer"), /outline/)
   assert.doesNotMatch(turn.catalog("designer"), /private body/)
-  assert.equal(turn.read("intake", "outline", "denied").success, false)
-  assert.equal(turn.read("designer", "unknown", "missing").success, false)
+  assert.equal((await turn.read("intake", "outline", "denied")).success, false)
+  assert.equal(
+    (await turn.read("designer", "unknown", "missing")).success,
+    false
+  )
+  assert.deepEqual(loaded, [])
   assert.equal(turn.content("denied"), undefined)
-  const receipt = turn.read("designer", "outline", "allowed")
+  const receipt = await turn.read("designer", "outline", "allowed")
+  assert.deepEqual(loaded, [definition.id])
   assert.equal(receipt.skillId, definition.id)
   assert.equal(receipt.version, definition.updatedAt.toISOString())
   assert.match(turn.content("allowed")!, /private body/)
@@ -79,7 +88,17 @@ test("snapshot catalogs and reads are scoped to the server-selected speaker", ()
     JSON.stringify(turn.forSpeaker(messages, "intake")),
     /private body/
   )
-  assert.equal(skillTurn([]).content("allowed"), undefined)
+  for (const changed of [
+    undefined,
+    { ...definition, updatedAt: new Date("2026-02-01") },
+  ]) {
+    const next = skillTurn([definition], async () => changed)
+    assert.equal(
+      (await next.read("designer", "outline", "changed")).success,
+      false
+    )
+    assert.equal(next.content("changed"), undefined)
+  }
 })
 test("skill trace follows tool state and same-step reads remain with the handoff sender", () => {
   const input = { name: "outline" }

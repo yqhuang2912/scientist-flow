@@ -79,6 +79,7 @@ export type ToolRequest = {
   headers: Record<string, string>
   body?: string
   signal: AbortSignal
+  audit?: { executionId: string; toolCallId: string }
 }
 export type ToolResponse = {
   status: number
@@ -91,6 +92,7 @@ export async function publicHttpsRequest({
   headers,
   body,
   signal,
+  audit,
 }: ToolRequest): Promise<ToolResponse> {
   const host = url.hostname.replace(/^\[|\]$/g, "")
   signal.throwIfAborted()
@@ -135,6 +137,12 @@ export async function publicHttpsRequest({
       }
     )
     req.once("error", reject)
+    // Count at the native send boundary, after DNS and authorization. No URL,
+    // headers, arguments or response data belong in the dispatch record.
+    if (audit)
+      req.once("finish", () =>
+        console.info("shared-http.sent", JSON.stringify(audit))
+      )
     req.end(body)
   })
 }

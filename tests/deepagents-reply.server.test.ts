@@ -1,7 +1,175 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
+import type { LanguageModelV4StreamPart } from "@ai-sdk/provider"
+import { simulateReadableStream, tool } from "ai"
+import { z } from "zod"
+import { MockLanguageModelV4 } from "ai/test"
 import { deepAgentReply } from "../lib/deepagents-reply.server"
 import { gatewayStep } from "../lib/gateway-step.server"
+
+test("only one complete, validated handoff reaches the dispatcher", async (t) => {
+  const call = {
+    type: "tool-call" as const,
+    toolName: "handoff",
+    toolCallId: "call-1",
+    input: JSON.stringify({
+      botName: "Rowan",
+      reason: "Check the arithmetic.",
+    }),
+  }
+  const finish: LanguageModelV4StreamPart = {
+    type: "finish",
+    finishReason: { unified: "tool-calls", raw: "tool_calls" },
+    usage: {
+      inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+      outputTokens: { total: 1, text: 1, reasoning: 0 },
+    },
+  }
+  const cases: [string, LanguageModelV4StreamPart[], number][] = [
+    ["duplicate event", [call, call, finish], 1],
+    ["multiple calls", [call, { ...call, toolCallId: "call-2" }, finish], 0],
+    ["incomplete stream", [call], 0],
+    ["invalid JSON", [{ ...call, input: "{" }, finish], 0],
+    ["missing task", [{ ...call, input: '{"botName":"Rowan"}' }, finish], 0],
+    ["unknown tool", [{ ...call, toolName: "other" }, finish], 0],
+  ]
+  for (const [name, chunks, expected] of cases) {
+    await t.test(name, async () => {
+      let calls = 0
+      const model = new MockLanguageModelV4({
+        doStream: async () => ({
+          stream: simulateReadableStream({ chunks }),
+        }),
+      })
+      const reader = deepAgentReply({
+        route: { model, providerOptions: { openai: {} } },
+        instructions: "Delegate to Rowan.",
+        messages: [{ role: "user", content: "Check the arithmetic." }],
+        messageId: "sender",
+        metadata: { executionId: "root" },
+        signal: new AbortController().signal,
+        handoff: async () => {
+          calls++
+          return { success: true }
+        },
+        onError: () => "Rejected",
+      }).getReader()
+      const output = []
+      for (;;) {
+        const next = await reader.read()
+        if (next.done) break
+        output.push(next.value)
+      }
+      assert.equal(calls, expected)
+      assert.equal(
+        output.filter((c) => c.type === "tool-output-available").length,
+        expected
+      )
+      assert.equal(
+        output.some((c) => c.type === "error"),
+        expected === 0
+      )
+    })
+  }
+})
+
+test("recipient accepts sequential calls only and deduplicates dispatch within one invocation", async (t) => {
+  const call = (toolName: string, toolCallId: string) => ({
+    type: "tool-call" as const,
+    toolName,
+    toolCallId,
+    input: "{}",
+  })
+  const read = call("read_skill", "read"),
+    http = call("lookup", "fetch")
+  const cases = [
+    {
+      name: "sequential duplicate stream events",
+      batches: [[read, read], [http, http], []],
+      executed: ["read", "fetch"],
+    },
+    { name: "parallel read and lookup", batches: [[read, http]], executed: [] },
+    {
+      name: "lookup reuses the skill call ID",
+      batches: [[read], [call("lookup", "read")]],
+      executed: ["read"],
+    },
+    {
+      name: "extra lookup at the final step",
+      batches: [[read], [http], [call("lookup", "again")]],
+      executed: ["read", "fetch"],
+    },
+  ]
+  for (const { name, batches, executed } of cases)
+    await t.test(name, async () => {
+      const seen: string[] = []
+      let step = 0
+      const model = new MockLanguageModelV4({
+        doStream: async () => {
+          const batch = batches[step++]
+          assert.ok(batch)
+          const chunks: LanguageModelV4StreamPart[] = batch.length
+            ? [...batch]
+            : [
+                { type: "text-start", id: "answer" },
+                { type: "text-delta", id: "answer", delta: "Done" },
+                { type: "text-end", id: "answer" },
+              ]
+          chunks.push({
+            type: "finish",
+            finishReason: {
+              unified: batch.length ? "tool-calls" : "stop",
+              raw: undefined,
+            },
+            usage: {
+              inputTokens: {
+                total: 1,
+                noCache: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+              },
+              outputTokens: { total: 1, text: 1, reasoning: 0 },
+            },
+          })
+          return { stream: simulateReadableStream({ chunks }) }
+        },
+      })
+      const shared = tool({
+        inputSchema: z.object({}),
+        execute: async (_, { toolCallId }) => {
+          seen.push(toolCallId)
+          return { success: true }
+        },
+        toModelOutput: () => ({ type: "text", value: "Tool result" }),
+      })
+      const route = { model, providerOptions: { openai: {} } }
+      const reader = deepAgentReply({
+        route,
+        recipient: {
+          botId: "recipient",
+          tools: { read_skill: shared, lookup: shared },
+          followup: () => route,
+        },
+        instructions: "Answer the task.",
+        messages: [{ role: "user", content: "Question" }],
+        messageId: "one",
+        metadata: { executionId: "one-run" },
+        signal: new AbortController().signal,
+        onError: () => "Rejected",
+      }).getReader()
+      const chunks = []
+      for (;;) {
+        const next = await reader.read()
+        if (next.done) break
+        chunks.push(next.value)
+      }
+      assert.deepEqual(seen, executed)
+      assert.equal(
+        chunks.some((c) => c.type === "error"),
+        batches.at(-1)!.length > 0
+      )
+    })
+})
 
 test("the agent issues one authorized text request and publishes only completed public text", async (t) => {
   for (const variant of [

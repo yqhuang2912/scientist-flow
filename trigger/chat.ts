@@ -1,4 +1,12 @@
-import { usesDeepAgent } from "../lib/deepagents-pilot.server"
+import {
+  groupPilotRecipient,
+  usesDeepAgent,
+} from "../lib/deepagents-pilot.server"
+import {
+  handoffDescription,
+  handoffInputSchema,
+  type HandoffInput,
+} from "../lib/chat-handoff"
 import { resolveBotModel } from "../lib/bot-model.server"
 import {
   chatMemberChoice,
@@ -33,6 +41,7 @@ import { z } from "zod"
 import {
   getChatBotMemories,
   getChatSkillBindings,
+  readChatSkillInstructions,
   getChatToolBindings,
   claimToolPost,
   getTriggerChatContext,
@@ -88,25 +97,6 @@ const readSkillDefinition = {
 const readSkillSchema = tool({
   ...readSkillDefinition,
   toModelOutput: () => ({ type: "text", value: pastRead }),
-})
-
-const handoffDescription =
-  "Pass the user's request to another bot in this group chat when that bot is clearly better suited to answer it."
-
-const handoffInputSchema = z.object({
-  botName: z
-    .string()
-    .min(1)
-    .describe(
-      "The exact name of the group member who should answer next. Do not use an internal id."
-    ),
-  reason: z
-    .string()
-    .trim()
-    .min(1)
-    .describe(
-      "The concrete public task for the recipient, with the requested deliverable. Only include information intended for the group."
-    ),
 })
 
 const handoffToolSchema = tool({
@@ -172,6 +162,7 @@ type BotTurn = {
   runId: string
   signal: AbortSignal
   streamText: ChatStreamText
+  httpTransport?: Parameters<typeof httpToolTurn>[3]
   messages: ModelMessage[]
   transcript: UIMessage[]
   publish: (
@@ -189,6 +180,7 @@ export async function runBotTurn({
   runId,
   signal,
   streamText,
+  httpTransport,
   messages,
   transcript,
   publish,
@@ -202,6 +194,13 @@ export async function runBotTurn({
   if (!user) throw new Error("The task message is missing.")
   const group = context.kind === "group"
   const members = context.bots
+  const pilotRecipient = await groupPilotRecipient(
+    chatId,
+    context,
+    first.id,
+    history,
+    user
+  )
 
   const completed: UIMessage[] = []
   const perform = async (bot: TriggerBot, incoming: Delegation | null) => {
@@ -239,23 +238,77 @@ export async function runBotTurn({
       const evidence = group
         ? projectEvidence(chatId, visibleHistory, members)
         : null
-      const skill = skillTurn(skills)
+      const skill = skillTurn(skills, (skillId) =>
+        readChatSkillInstructions(chatId, bot.id, skillId)
+      )
       const http = httpToolTurn(
         bindings,
         async (botId, toolId) =>
           (await getChatToolBindings(chatId, { botId, toolId }))[0],
-        (toolId, hash) => claimToolPost(chatId, user.id, toolId, hash)
+        (toolId, hash) => claimToolPost(chatId, user.id, toolId, hash),
+        httpTransport
       )
       const project = projectContextForSteps(decisions, () =>
         readProjectDecisions(chatId)
       )
       const committed = new Set<string>()
       const canDelegate = group && !incoming
+      const acceptHandoff = async ({ botName, reason }: HandoffInput) => {
+        const matches = members.filter(
+          (m) =>
+            m.name.toLocaleLowerCase() === botName.trim().toLocaleLowerCase()
+        )
+        const target = matches.length === 1 ? matches[0] : null
+        if (
+          !canDelegate ||
+          !target ||
+          target.id === bot.id ||
+          (pilotRecipient && target.id !== pilotRecipient.id)
+        )
+          return {
+            success: false,
+            message: "Choose another identified member of this group.",
+          }
+        try {
+          await validateChoice(await chatMemberChoice(chatId, target.id))
+        } catch (error) {
+          return {
+            success: false,
+            message: target.name + ": " + safeError(error),
+          }
+        }
+        if (intent)
+          return {
+            success: false,
+            message: "A delegation has already been accepted for this turn.",
+          }
+        signal.throwIfAborted()
+        intent = { target, task: reason }
+        return {
+          success: true,
+          handedOffFrom: { id: bot.id, name: bot.name },
+          handedOffTo: { id: target.id, name: target.name },
+          reason,
+        }
+      }
       const tools = Object.assign({}, http.tools, {
         read_skill: tool({
           ...readSkillDefinition,
-          execute: ({ name }, { toolCallId }) =>
-            skill.read(bot.id, name, toolCallId),
+          execute: async (input, { toolCallId }) => {
+            const { name } = readSkillInput.parse(input)
+            const receipt = await skill.read(bot.id, name, toolCallId)
+            if (receipt.success && pilotRecipient && incoming)
+              console.info(
+                "shared-skill.read",
+                JSON.stringify({
+                  executionId: execution.id,
+                  toolCallId,
+                  skillId: receipt.skillId,
+                  version: receipt.version,
+                })
+              )
+            return receipt
+          },
           toModelOutput: ({ toolCallId, output }) => ({
             type: "text",
             value: output.success
@@ -282,41 +335,7 @@ export async function runBotTurn({
           handoff: tool({
             description: handoffDescription,
             inputSchema: handoffInputSchema,
-            execute: async ({ botName, reason }) => {
-              const matches = members.filter(
-                (m) =>
-                  m.name.toLocaleLowerCase() ===
-                  botName.trim().toLocaleLowerCase()
-              )
-              const target = matches.length === 1 ? matches[0] : null
-              if (!target || target.id === bot.id)
-                return {
-                  success: false,
-                  message: "Choose another identified member of this group.",
-                }
-              try {
-                await validateChoice(await chatMemberChoice(chatId, target.id))
-              } catch (error) {
-                return {
-                  success: false,
-                  message: target.name + ": " + safeError(error),
-                }
-              }
-              if (intent)
-                return {
-                  success: false,
-                  message:
-                    "A delegation has already been accepted for this turn.",
-                }
-              signal.throwIfAborted()
-              intent = { target, task: reason }
-              return {
-                success: true,
-                handedOffFrom: { id: bot.id, name: bot.name },
-                handedOffTo: { id: target.id, name: target.name },
-                reason,
-              }
-            },
+            execute: acceptHandoff,
           }),
         }),
       })
@@ -339,8 +358,8 @@ export async function runBotTurn({
         incoming,
         canDelegate,
         memories,
-        catalog: skill.catalog(bot.id),
-        ownTools,
+        catalog: pilotRecipient && !incoming ? "" : skill.catalog(bot.id),
+        ownTools: pilotRecipient && !incoming ? [] : ownTools,
       })
       const publicInput = evidence
         ? await publicModelHistory(
@@ -394,18 +413,47 @@ export async function runBotTurn({
             }
           },
         }).toUIMessageStream(options)
-      const generated =
-        !incoming &&
+      if (pilotRecipient && !modelForStep.explicitEffort)
+        throw new ModelConnectionError(
+          "Select an explicit reasoning effort for this bot."
+        )
+      const directPilot =
+        !group &&
         modelForStep.explicitEffort &&
         !publicInput.some(
-          (message) => message.role === "user" &&
+          (message) =>
+            message.role === "user" &&
             Array.isArray(message.content) &&
             message.content.some((part) => part.type !== "text")
         ) &&
         (await usesDeepAgent(context, bot.id, user))
+      const generated =
+        directPilot || pilotRecipient
           ? (await import("../lib/deepagents-reply.server")).deepAgentReply({
               route: initial,
-              instructions,
+              instructions: pilotRecipient
+                ? [
+                    instructions,
+                    await project(0),
+                    incoming
+                      ? `Current server date (UTC): ${new Date().toISOString().slice(0, 10)}. When a skill matches the task, read it first. Apply its procedure to the user's input. If it needs external data, choose one assigned HTTP tool and derive its arguments from the retrieved instructions. Wait for the lookup result before drawing a conclusion. Use only observed values and the reporting period when applicable. A task can also be answered directly or with a single lookup.`
+                      : "For this execution, the only available tool is handoff. Project records are read-only.",
+                  ].join("\n\n")
+                : instructions,
+              handoff: pilotRecipient && !incoming ? acceptHandoff : undefined,
+              recipient:
+                pilotRecipient && incoming && (ownTools.length || skills.length)
+                  ? {
+                      botId: bot.id,
+                      tools: {
+                        ...http.tools,
+                        ...(skills.length > 0 && {
+                          read_skill: tools.read_skill,
+                        }),
+                      },
+                      followup: modelForStep,
+                    }
+                  : undefined,
               messages: publicInput,
               signal,
               metadata: meta,

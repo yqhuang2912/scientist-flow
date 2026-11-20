@@ -1,4 +1,4 @@
-import { and, asc, eq, getTableColumns } from "drizzle-orm"
+import { and, asc, eq, getTableColumns, inArray } from "drizzle-orm"
 
 import {
   bots,
@@ -28,21 +28,43 @@ export async function getTriggerBotById(botId: string) {
   return rows[0] ?? null
 }
 
-export async function getChatSkillBindings(chatId: string, botId: string) {
+function memberSkillIds(chatId: string, botId: string) {
   return db
+    .select({ id: botSkills.skillId })
+    .from(chatMembers)
+    .innerJoin(botSkills, eq(chatMembers.botId, botSkills.botId))
+    .where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.botId, botId)))
+}
+
+export async function getChatSkillBindings(chatId: string, botId: string) {
+  const rows = await db
     .select({
-      botId: chatMembers.botId,
       id: skills.id,
       name: skills.name,
       description: skills.description,
-      instructions: skills.instructions,
       updatedAt: skills.updatedAt,
     })
-    .from(chatMembers)
-    .innerJoin(botSkills, eq(chatMembers.botId, botSkills.botId))
-    .innerJoin(skills, eq(botSkills.skillId, skills.id))
-    .where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.botId, botId)))
+    .from(skills)
+    .where(inArray(skills.id, memberSkillIds(chatId, botId)))
     .orderBy(asc(skills.name))
+  return rows.map((row) => ({ ...row, botId }))
+}
+
+export async function readChatSkillInstructions(
+  chatId: string,
+  botId: string,
+  skillId: string
+) {
+  const [row] = await db
+    .select({ instructions: skills.instructions, updatedAt: skills.updatedAt })
+    .from(skills)
+    .where(
+      and(
+        eq(skills.id, skillId),
+        inArray(skills.id, memberSkillIds(chatId, botId))
+      )
+    )
+  return row
 }
 
 export async function getChatBotMemories(chatId: string, botId: string) {

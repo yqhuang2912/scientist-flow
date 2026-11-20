@@ -1,9 +1,13 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
+import { Readable } from "node:stream"
+import type { ToolRequest } from "../lib/public-https"
 import { mkdir, writeFile, unlink, rmdir } from "node:fs/promises"
 import { dirname } from "node:path"
-import { pilotBotFile } from "../lib/deepagents-pilot.server"
-import { randomBytes, randomUUID } from "node:crypto"
+import { pilotBotFile, pilotGroupFile } from "../lib/deepagents-pilot.server"
+import { getHandoff, getSkillReadPresentation } from "../lib/chat-presentation"
+import { serializeSkillToMarkdown } from "../lib/skill-definition"
+import { randomBytes, randomInt, randomUUID } from "node:crypto"
 import { nanoid } from "nanoid"
 import { eq, inArray } from "drizzle-orm"
 import { readUIMessageStream, streamText, type UIMessage } from "ai"
@@ -71,10 +75,20 @@ test("creation and edits require an explicit model; effort choices use model-lev
 type RequestBody = {
   model: string
   reasoning: { effort: string }
-  messages: { role: string; content: unknown }[]
+  messages: {
+    role: string
+    content: unknown
+    tool_call_id?: string
+    tool_calls?: { id: string }[]
+  }[]
   tools: { function: { name: string } }[]
 }
-function sse(model: string, delta: object, reason: string) {
+function sse(
+  model: string,
+  delta: object,
+  reason: string,
+  continuation?: object
+) {
   const event = (delta: object, finish_reason: string | null) =>
     "data: " +
     JSON.stringify({
@@ -86,7 +100,10 @@ function sse(model: string, delta: object, reason: string) {
     }) +
     "\n\n"
   return new Response(
-    event(delta, null) + event({}, reason) + "data: [DONE]\n\n",
+    event(delta, null) +
+      (continuation ? event(continuation, null) : "") +
+      event({}, reason) +
+      "data: [DONE]\n\n",
     { headers: { "Content-Type": "text/event-stream" } }
   )
 }
@@ -134,6 +151,13 @@ test(
     const realFetch = globalThis.fetch
     let sent: { key: string; body: RequestBody }[] = []
     let rejectTarget = false
+    let pilotResponse: "success" | "denied" | undefined
+    let lookupMode: "bound" | "revoked" | "forbidden" | undefined
+    let requestedSkill: string | undefined
+    let combinedSkill: string | undefined
+    let observation: number | undefined
+    let sample: string | undefined
+    const sends: string[] = []
     globalThis.fetch = async (url, init) => {
       if (String(url) !== "https://openrouter.ai/api/v1/chat/completions")
         return realFetch(url, init)
@@ -146,6 +170,113 @@ test(
         type: "function",
         function: { name, arguments: JSON.stringify(args) },
       })
+      if (pilotResponse) {
+        if (combinedSkill && key === "Bearer fixture-rowan") {
+          const last = body.messages.at(-1)
+          if (last?.role !== "tool")
+            return sse(
+              body.model,
+              { tool_calls: [call(0, "read_skill", { name: combinedSkill })] },
+              "tool_calls"
+            )
+          if (last.tool_call_id === "fixture-call-0-read_skill") {
+            const topic = /Lookup topic: (\S+)/.exec(String(last.content))?.[1]
+            assert.ok(topic)
+            return sse(
+              body.model,
+              { tool_calls: [call(0, httpName, { topic })] },
+              "tool_calls"
+            )
+          }
+          const { value } = JSON.parse(String(last.content))
+          return sse(
+            body.model,
+            { content: "Doubled measurement: " + value * 2 },
+            "stop"
+          )
+        }
+        if (requestedSkill && key === "Bearer fixture-rowan") {
+          return body.messages.at(-1)?.role !== "tool"
+            ? sse(
+                body.model,
+                {
+                  tool_calls: [call(0, "read_skill", { name: requestedSkill })],
+                },
+                "tool_calls"
+              )
+            : sse(body.model, { content: "Measured result: 518" }, "stop")
+        }
+        if (lookupMode && key === "Bearer fixture-rowan") {
+          if (body.tools?.length) {
+            if (lookupMode === "revoked")
+              await db.delete(botTools).where(eq(botTools.toolId, httpId))
+            const name =
+              lookupMode === "forbidden" ? httpName + "_iris" : httpName
+            return sse(
+              body.model,
+              {
+                reasoning: "PRIVATE_LOOKUP_THOUGHT",
+                tool_calls: [
+                  call(0, name, { topic: "PRIVATE_LOOKUP_ARGUMENT" }),
+                ],
+              },
+              "tool_calls"
+            )
+          }
+          const result = body.messages.at(-1)
+          assert.ok(
+            JSON.stringify(body.messages[0]).includes(
+              "Current server date (UTC): " +
+                new Date().toISOString().slice(0, 10)
+            )
+          )
+          assert.equal(result?.role, "tool")
+          assert.equal(result.tool_call_id, "fixture-call-0-" + httpName)
+          assert.equal(
+            body.messages.at(-2)?.tool_calls?.[0].id,
+            result.tool_call_id
+          )
+          if (lookupMode === "revoked") {
+            assert.match(
+              String(result.content),
+              /binding or tool definition changed/
+            )
+            return sse(body.model, { content: "Unverified value" }, "stop")
+          }
+          const value = JSON.parse(String(result.content)).sample
+          assert.equal(value, sample)
+          return sse(body.model, { content: "Observed: " + value }, "stop")
+        }
+        if (key === "Bearer fixture-rowan")
+          return pilotResponse === "denied"
+            ? new Response(null, { status: 403 })
+            : sse(body.model, { content: "37 × 14 = 518" }, "stop")
+        return sse(
+          body.model,
+          {
+            tool_calls: [
+              {
+                index: 0,
+                id: "split-call",
+                type: "function",
+                function: { name: "handoff", arguments: '{"botName":"Ro' },
+              },
+            ],
+          },
+          "tool_calls",
+          {
+            tool_calls: [
+              {
+                index: 0,
+                function: {
+                  arguments:
+                    'wan","reason":"PUBLIC_DELEGATION: verify 37 times 14."}',
+                },
+              },
+            ],
+          }
+        )
+      }
       if (!body.tools?.length)
         return sse(body.model, { content: "One public reply" }, "stop")
       if (key === "Bearer fixture-rowan")
@@ -249,6 +380,36 @@ test(
         runId: nanoid(),
         signal: controller.signal,
         streamText,
+        httpTransport: async (req: ToolRequest) => {
+          sends.push(req.url.pathname)
+          if (combinedSkill) {
+            assert.equal(req.url.searchParams.get("topic"), "cohort-cobalt-17")
+            observation = randomInt(20, 2000)
+            return {
+              status: 200,
+              contentType: "application/json",
+              body: Readable.from([
+                JSON.stringify({
+                  value: observation,
+                  private: "RAW_MEASUREMENT",
+                }),
+              ]),
+            }
+          }
+          assert.equal(
+            req.url.searchParams.get("topic"),
+            "PRIVATE_LOOKUP_ARGUMENT"
+          )
+          assert.equal(req.audit?.toolCallId, "fixture-call-0-" + httpName)
+          sample = randomUUID()
+          return {
+            status: 200,
+            contentType: "application/json",
+            body: Readable.from([
+              JSON.stringify({ sample, detail: "PRIVATE_RAW_DETAIL" }),
+            ]),
+          }
+        },
         transcript: [...history, input],
         messages: [{ role: "system", content: "UNFILTERED_RUNNER_HISTORY" }],
         publish: async (stream, parent) => {
@@ -324,8 +485,10 @@ test(
           description: "ROWAN_TOOL_SCHEMA",
           inputSchema: {
             type: "object",
-            properties: {},
-            required: [],
+            properties: {
+              topic: { type: "string", description: "Lookup topic" },
+            },
+            required: ["topic"],
             additionalProperties: false,
           },
           config: {
@@ -412,6 +575,489 @@ test(
                 .where(inArray(modelRequests.chatId, [direct, other])),
               db.delete(chats).where(inArray(chats.id, [direct, other])),
             ])
+          }
+        }
+      )
+      await t.test(
+        "the two scoped Deep Agents use separate credentials for the same model and preserve a completed handoff on recipient failure or replay",
+        async (groupTest) => {
+          const groupFlag = pilotGroupFile()
+          await db
+            .update(bots)
+            .set({
+              modelChoice: {
+                connectionId: cb,
+                modelId: firstModel,
+                effort: "high",
+              },
+            })
+            .where(eq(bots.id, b))
+          await writeFile(
+            groupFlag,
+            JSON.stringify({ chatId, senderId: a, recipientId: b }),
+            { flag: "wx" }
+          )
+          try {
+            for (const outcome of ["success", "denied"] as const) {
+              pilotResponse = outcome
+              sent = []
+              const input = user()
+              const turn = await run(input)
+              const [, source, target] = turn
+              assert.equal(turn.length, 3, JSON.stringify(source?.parts))
+              assert.deepEqual(source.parts.map(getHandoff).filter(Boolean), [
+                {
+                  sourceName: "Iris",
+                  sourceId: a,
+                  targetName: "Rowan",
+                  targetId: b,
+                  reason: "PUBLIC_DELEGATION: verify 37 times 14.",
+                },
+              ])
+              assert.ok(
+                source.parts.some(
+                  (p) =>
+                    p.type === "tool-handoff" && p.toolCallId === "split-call"
+                )
+              )
+              const executions = await db
+                .select()
+                .from(botExecutions)
+                .where(eq(botExecutions.userMessageId, input.id))
+                .orderBy(botExecutions.slot)
+              assert.equal(executions.length, 2)
+              const [parent, child] = executions
+              assert.deepEqual(
+                [parent.status, child.status],
+                ["completed", outcome === "success" ? "completed" : "failed"]
+              )
+              assert.equal(child.parentExecutionId, parent.id)
+              assert.notEqual(source.id, target.id)
+              for (const [i, msg] of [source, target].entries()) {
+                assert.equal(executions[i].messageId, msg.id)
+                assert.deepEqual(msg.metadata, {
+                  executionId: executions[i].id,
+                  userMessageId: input.id,
+                  parentExecutionId: i ? parent.id : null,
+                  botId: i ? b : a,
+                  engine: "deepagents",
+                })
+                const receipts = await db
+                  .select()
+                  .from(modelRequests)
+                  .where(eq(modelRequests.executionId, executions[i].id))
+                assert.deepEqual(
+                  receipts.map((r) => [
+                    r.connection,
+                    r.model,
+                    r.effort,
+                    r.httpStatus,
+                  ]),
+                  [
+                    [
+                      (i ? cb : ca).slice(-8),
+                      firstModel,
+                      i ? "high" : "low",
+                      i && outcome === "denied" ? 403 : 200,
+                    ],
+                  ]
+                )
+              }
+              assert.deepEqual(
+                sent.map((r) => [
+                  r.key,
+                  r.body.model,
+                  r.body.reasoning.effort,
+                  r.body.tools?.map((t) => t.function.name) ?? [],
+                ]),
+                [
+                  ["Bearer fixture-iris", firstModel, "low", ["handoff"]],
+                  ["Bearer fixture-rowan", firstModel, "high", [httpName]],
+                ]
+              )
+              const recipientInput = JSON.stringify(sent[1].body.messages)
+              for (const marker of [
+                "PUBLIC_DELEGATION",
+                "Iris public history",
+                "ROWAN_PRIVATE_MEMORY",
+                "Public trial",
+              ])
+                assert.ok(recipientInput.includes(marker))
+              assert.doesNotMatch(
+                recipientInput,
+                /IRIS_PRIVATE|PRIVATE_THOUGHT|PRIVATE_TOOL_OUTPUT|PRIVATE_POINTER|PRIVATE_SIGNATURE/
+              )
+              assert.match(
+                JSON.stringify(target.parts),
+                outcome === "success" ? /518/ : /denied access/
+              )
+              assert.deepEqual(await run(input), turn)
+              assert.equal(sent.length, 2)
+            }
+            await groupTest.test(
+              "recipient selects from its own catalog and receives only the selected version in its follow-up",
+              async () => {
+                const suffix = randomBytes(5).toString("hex")
+                const [distractor, relevant] = await db
+                  .insert(skills)
+                  .values([
+                    {
+                      name: "agenda-" + suffix,
+                      description: "Prepare a meeting",
+                      instructions: "DISTRACTOR_BODY",
+                    },
+                    {
+                      name: "verify-" + suffix,
+                      description: "Verify a numerical result",
+                      instructions:
+                        "PRIVATE_METHOD: multiply the public dimensions; start with Measured result. When checking a measurement, query the lookup tool. Lookup topic: cohort-cobalt-17\nDouble the observed value.",
+                    },
+                  ])
+                  .returning()
+                const ids = [distractor.id, relevant.id]
+                try {
+                  await db
+                    .insert(botSkills)
+                    .values(ids.map((skillId) => ({ botId: b, skillId })))
+                  for (const allowed of [true, false]) {
+                    requestedSkill = allowed ? relevant.name : skillName
+                    pilotResponse = "success"
+                    sent = []
+                    const input = user()
+                    const turn = await run(input)
+                    const [, source, recipient] = turn
+                    assert.ok(source.parts.map(getHandoff).some(Boolean))
+                    assert.equal(
+                      (recipient.metadata as { botId: string }).botId,
+                      b
+                    )
+                    assert.deepEqual(
+                      sent.map((row) => [
+                        row.key,
+                        row.body.model,
+                        row.body.reasoning.effort,
+                      ]),
+                      [
+                        ["Bearer fixture-iris", firstModel, "low"],
+                        ...(allowed
+                          ? [["Bearer fixture-rowan", firstModel, "high"]]
+                          : []),
+                        ["Bearer fixture-rowan", firstModel, "high"],
+                      ]
+                    )
+                    const first = sent[1].body
+                    const context = JSON.stringify(first.messages)
+                    assert.ok(
+                      context.indexOf(distractor.name) >= 0 &&
+                        context.indexOf(distractor.name) <
+                          context.indexOf(relevant.name)
+                    )
+                    for (const def of [distractor, relevant])
+                      assert.ok(context.includes(def.description))
+                    assert.doesNotMatch(
+                      context,
+                      /PRIVATE_METHOD|DISTRACTOR_BODY|IRIS_PRIVATE/
+                    )
+                    assert.ok(!context.includes(skillName))
+                    assert.deepEqual(
+                      first.tools.map((t) => t.function.name).sort(),
+                      [httpName, "read_skill"].sort()
+                    )
+                    const receipt = recipient.parts[0]
+                    assert.ok(
+                      receipt.type === "tool-read_skill" &&
+                        receipt.state === "output-available"
+                    )
+                    if (!allowed) {
+                      assert.equal(
+                        getSkillReadPresentation(receipt, false)?.status,
+                        "error"
+                      )
+                      assert.match(JSON.stringify(recipient), /not assigned/)
+                      assert.doesNotMatch(
+                        JSON.stringify(recipient),
+                        /PRIVATE_METHOD|Measured result|已读取/
+                      )
+                      assert.equal(sends.length, 0)
+                      assert.deepEqual(await run(input), turn)
+                      assert.equal(sent.length, 2)
+                      continue
+                    }
+                    const second = sent[2].body
+                    const result = second.messages.at(-1)
+                    assert.equal(result?.role, "tool")
+                    assert.equal(result.tool_call_id, receipt.toolCallId)
+                    assert.equal(
+                      second.messages.at(-2)?.tool_calls?.[0].id,
+                      receipt.toolCallId
+                    )
+                    assert.deepEqual(
+                      second.tools.map((t) => t.function.name),
+                      [httpName]
+                    )
+                    assert.doesNotMatch(
+                      JSON.stringify(second.messages),
+                      /DISTRACTOR_BODY|IRIS_PRIVATE_SKILL_BODY/
+                    )
+                    assert.doesNotMatch(
+                      JSON.stringify(recipient),
+                      /PRIVATE_METHOD|DISTRACTOR_BODY|IRIS_PRIVATE_SKILL_BODY/
+                    )
+                    const badge = getSkillReadPresentation(receipt, false)
+                    assert.equal(
+                      result.content,
+                      serializeSkillToMarkdown(relevant)
+                    )
+                    assert.deepEqual(receipt.output, {
+                      botId: b,
+                      success: true,
+                      name: relevant.name,
+                      skillId: relevant.id,
+                      version: relevant.updatedAt.toISOString(),
+                      path: "/skills/" + relevant.name + "/SKILL.md",
+                    })
+                    assert.equal(
+                      badge?.title,
+                      "已读取 Skill · " + relevant.name
+                    )
+                    assert.deepEqual(recipient.parts.at(-1), {
+                      type: "text",
+                      text: "Measured result: 518",
+                      state: "done",
+                    })
+                    assert.deepEqual(await run(input), turn)
+                    assert.equal(sent.length, 3)
+                  }
+                  requestedSkill = undefined
+                  combinedSkill = relevant.name
+                  sent = []
+                  sends.length = 0
+                  const input = user()
+                  const turn = await run(input)
+                  const [, parent, child] = turn
+                  assert.ok(parent.parts.map(getHandoff).some(Boolean))
+                  assert.deepEqual(
+                    child.parts.map((p) => p.type),
+                    ["tool-read_skill", "tool-" + httpName, "text"]
+                  )
+                  const [skillReceipt, toolReceipt, answer] = child.parts
+                  assert.ok("output" in skillReceipt && "output" in toolReceipt)
+                  const eid = child.metadata as {
+                    executionId: string
+                    botId: string
+                  }
+                  assert.equal(eid.botId, b)
+                  assert.notEqual(
+                    skillReceipt.toolCallId,
+                    toolReceipt.toolCallId
+                  )
+                  assert.deepEqual(sends, ["/fixture"])
+                  assert.ok(observation !== undefined)
+                  assert.ok(
+                    answer.type === "text" &&
+                      answer.text === "Doubled measurement: " + observation * 2
+                  )
+                  assert.doesNotMatch(
+                    JSON.stringify(child.parts),
+                    /cohort-cobalt|RAW_MEASUREMENT|PRIVATE_METHOD/
+                  )
+                  const [, choose, lookup, reply] = sent.map((r) => r.body)
+                  assert.doesNotMatch(
+                    JSON.stringify(choose),
+                    /cohort-cobalt|DISTRACTOR_BODY|PRIVATE_METHOD/
+                  )
+                  assert.equal(
+                    lookup.messages.at(-1)?.content,
+                    serializeSkillToMarkdown(relevant)
+                  )
+                  assert.equal(
+                    lookup.messages.at(-1)?.tool_call_id,
+                    skillReceipt.toolCallId
+                  )
+                  assert.deepEqual(
+                    lookup.tools.map((t) => t.function.name),
+                    [httpName]
+                  )
+                  assert.equal(
+                    reply.messages.at(-1)?.tool_call_id,
+                    toolReceipt.toolCallId
+                  )
+                  assert.equal(
+                    JSON.parse(String(reply.messages.at(-1)?.content)).value,
+                    observation
+                  )
+                  assert.equal(reply.tools?.length ?? 0, 0)
+                  const requests = await db
+                    .select()
+                    .from(modelRequests)
+                    .where(eq(modelRequests.executionId, eid.executionId))
+                    .orderBy(modelRequests.step)
+                  assert.deepEqual(
+                    requests.map((r) => [
+                      r.botId,
+                      r.step,
+                      r.model,
+                      r.connection,
+                      r.effort,
+                      r.httpStatus,
+                    ]),
+                    [0, 1, 2].map((step) => [
+                      b,
+                      step,
+                      firstModel,
+                      cb.slice(-8),
+                      "high",
+                      200,
+                    ])
+                  )
+                  assert.deepEqual(await run(input), turn)
+                  assert.equal(sent.length, 4)
+                  assert.equal(sends.length, 1)
+                } finally {
+                  combinedSkill = undefined
+                  requestedSkill = undefined
+                  await db.batch([
+                    db.delete(botSkills).where(inArray(botSkills.skillId, ids)),
+                    db.delete(skills).where(inArray(skills.id, ids)),
+                  ])
+                }
+              }
+            )
+            const [original] = await db
+              .select()
+              .from(toolDefinitions)
+              .where(eq(toolDefinitions.id, httpId))
+            const extras = ["_other", "_iris"].map((suffix) => ({
+              ...original,
+              id: nanoid(),
+              name: httpName + suffix,
+              config: {
+                ...original.config,
+                url: "https://example.org/" + suffix,
+              },
+            }))
+            try {
+              await db.insert(toolDefinitions).values(extras)
+              await db
+                .insert(botTools)
+                .values(
+                  extras.map((def, i) => ({ botId: i ? a : b, toolId: def.id }))
+                )
+              for (const mode of ["bound", "forbidden", "revoked"] as const) {
+                await groupTest.test(
+                  "recipient HTTP tool: " + mode,
+                  async () => {
+                    lookupMode = mode
+                    pilotResponse = "success"
+                    sample = undefined
+                    sends.length = 0
+                    sent = []
+                    const input = user()
+                    const turn = await run(input)
+                    const [, source, recipient] = turn
+                    assert.ok(source.parts.map(getHandoff).some(Boolean))
+                    assert.deepEqual(
+                      sent[0].body.tools.map((t) => t.function.name),
+                      ["handoff"]
+                    )
+                    assert.deepEqual(
+                      sent[1].body.tools.map((t) => t.function.name).sort(),
+                      [httpName, extras[0].name].sort()
+                    )
+                    const receipts = recipient.parts.filter(
+                      (p) => p.type === "tool-" + httpName && "output" in p
+                    )
+                    assert.deepEqual(
+                      sends,
+                      mode === "bound" ? ["/fixture"] : []
+                    )
+                    if (mode === "forbidden") {
+                      assert.equal(receipts.length, 0)
+                      assert.equal(sent.length, 2)
+                    } else {
+                      assert.equal(receipts.length, 1)
+                      const receipt = receipts[0]
+                      assert.ok("output" in receipt && "input" in receipt)
+                      assert.deepEqual(receipt.input, {})
+                      assert.equal(
+                        receipt.toolCallId,
+                        "fixture-call-0-" + httpName
+                      )
+                      assert.deepEqual(
+                        (receipt.output as { kind: string }).kind,
+                        "shared-http"
+                      )
+                      assert.equal(
+                        (receipt.output as { success: boolean }).success,
+                        mode === "bound"
+                      )
+                      assert.equal(
+                        (receipt.output as { botId: string }).botId,
+                        b
+                      )
+                      assert.equal(recipient.parts.at(-1)?.type, "text")
+                      assert.match(
+                        JSON.stringify(recipient.parts.at(-1)),
+                        mode === "bound"
+                          ? new RegExp(sample!)
+                          : /binding or tool definition changed/
+                      )
+                      assert.doesNotMatch(
+                        JSON.stringify(recipient),
+                        /PRIVATE_RAW_DETAIL|PRIVATE_LOOKUP_THOUGHT|PRIVATE_LOOKUP_ARGUMENT|Unverified value/
+                      )
+                      assert.deepEqual(
+                        sent
+                          .slice(1)
+                          .map((r) => [r.key, r.body.reasoning.effort]),
+                        [
+                          ...(mode === "bound"
+                            ? [["Bearer fixture-rowan", "high"]]
+                            : []),
+                          ["Bearer fixture-rowan", "high"],
+                        ]
+                      )
+                      assert.equal(sent[2]?.body.tools?.length ?? 0, 0)
+                      const eid = (
+                        recipient.metadata as { executionId: string }
+                      ).executionId
+                      const attempts = await db
+                        .select()
+                        .from(modelRequests)
+                        .where(eq(modelRequests.executionId, eid))
+                        .orderBy(modelRequests.step)
+                      assert.deepEqual(
+                        attempts.map((r) => [r.botId, r.step, r.httpStatus]),
+                        [
+                          [b, 0, 200],
+                          ...(mode === "bound" ? [[b, 1, 200]] : []),
+                        ]
+                      )
+                    }
+                    const modelCalls = sent.length
+                    assert.deepEqual(await run(input), turn)
+                    assert.equal(sent.length, modelCalls)
+                    assert.equal(sends.length, mode === "bound" ? 1 : 0)
+                  }
+                )
+              }
+            } finally {
+              lookupMode = undefined
+              await db
+                .insert(botTools)
+                .values({ botId: b, toolId: httpId })
+                .onConflictDoNothing()
+              const extraIds = extras.map((x) => x.id)
+              await db.batch([
+                db.delete(botTools).where(inArray(botTools.toolId, extraIds)),
+                db
+                  .delete(toolDefinitions)
+                  .where(inArray(toolDefinitions.id, extraIds)),
+              ])
+            }
+          } finally {
+            pilotResponse = undefined
+            await unlink(groupFlag)
           }
         }
       )

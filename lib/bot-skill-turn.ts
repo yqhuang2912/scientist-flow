@@ -2,15 +2,19 @@ import type { ModelMessage } from "ai"
 import type { Skill } from "../db/schema"
 import { serializeSkillToMarkdown, skillPath } from "./skill-definition"
 
-export type BoundSkill = Pick<
-  Skill,
-  "id" | "name" | "description" | "instructions" | "updatedAt"
-> & { botId: string }
+type SkillListing = Pick<Skill, "id" | "name" | "description" | "updatedAt"> & {
+  botId: string
+}
 export const pastRead =
   "Past skill read. Consult your current catalog and read the skill again if relevant."
 
 /** One server-owned snapshot per reply. Only receipts are serialized to the transcript. */
-export function skillTurn(bindings: BoundSkill[]) {
+export function skillTurn(
+  bindings: SkillListing[],
+  load: (
+    skillId: string
+  ) => Promise<Pick<Skill, "instructions" | "updatedAt"> | undefined>
+) {
   const reads = new Map<string, { botId: string; content: string }>()
   function catalog(botId: string) {
     const available = bindings
@@ -22,19 +26,32 @@ export function skillTurn(bindings: BoundSkill[]) {
           "\nFor each new request, use this current catalog. If the task matches a description, call read_skill before answering, even if a previous request looked similar. Apply the returned instructions to the final answer. Skip unrelated skills. A skill grants no additional tools."
       : "You have no assigned skills for this turn. Earlier skill reads do not grant access."
   }
-  function read(botId: string, name: string, callId: string) {
+  async function read(botId: string, name: string, callId: string) {
     const skill = bindings.find((s) => s.botId === botId && s.name === name)
-    if (!skill)
+    const body = skill && (await load(skill.id))
+    if (
+      !skill ||
+      !body ||
+      body.updatedAt.getTime() !== skill.updatedAt.getTime()
+    )
       return {
         success: false as const,
         botId,
         name,
         skillId: null,
         version: null,
-        message: "This skill is not assigned to this bot.",
+        message: skill
+          ? "The skill or its binding changed. Please retry the task."
+          : "This skill is not assigned to this bot.",
       }
     const version = skill.updatedAt.toISOString()
-    reads.set(callId, { botId, content: serializeSkillToMarkdown(skill) })
+    reads.set(callId, {
+      botId,
+      content: serializeSkillToMarkdown({
+        ...skill,
+        instructions: body.instructions,
+      }),
+    })
     return {
       success: true as const,
       botId,

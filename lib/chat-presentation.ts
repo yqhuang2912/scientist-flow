@@ -305,8 +305,8 @@ export function getSkillReadPresentation(part: ChatToolPart, active: boolean) {
       title: "Skill 读取失败" + suffix,
       status: "error" as const,
       detail:
-        output?.success === false
-          ? "This skill is not assigned to this bot."
+        output?.success === false && typeof output.message === "string"
+          ? output.message
           : "The skill could not be read.",
     }
   return {
