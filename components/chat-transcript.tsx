@@ -1,4 +1,5 @@
 "use client"
+import { toolCallAnchor } from "@/lib/project-decisions"
 
 import { memo, useState } from "react"
 import {
@@ -98,12 +99,14 @@ function Responding() {
 }
 
 function AssistantParts({
+  messageId,
   parts,
   bots,
   streaming,
   busy,
   onApproval,
 }: {
+  messageId: string
   parts: IndexedChatPart[]
   bots: ChatSpeaker[]
   streaming: boolean
@@ -118,13 +121,19 @@ function AssistantParts({
         if (block.kind === "activity")
           return (
             <Trace key={block.key}>
-              {block.parts.map(({ part, index }) => (
-                <ChatActivity
-                  key={isToolUIPart(part) ? part.toolCallId : index}
-                  part={part}
-                  active={streaming}
-                />
-              ))}
+              {block.parts.map(({ part, index }) =>
+                isToolUIPart(part) ? (
+                  <div key={part.toolCallId}>
+                    <ChatActivity
+                      part={part}
+                      active={streaming}
+                      toolAnchor={toolCallAnchor(messageId, part.toolCallId)}
+                    />
+                  </div>
+                ) : (
+                  <ChatActivity key={index} part={part} active={streaming} />
+                )
+              )}
             </Trace>
           )
         if (block.kind === "approval" && isToolUIPart(block.part))
@@ -316,6 +325,7 @@ const ChatTurn = memo(function ChatTurn({
                 />
               </MessageHeader>
               <AssistantParts
+                messageId={message.id}
                 parts={segment.parts}
                 bots={bots}
                 streaming={streaming}

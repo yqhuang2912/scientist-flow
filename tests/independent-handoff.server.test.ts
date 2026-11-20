@@ -5,7 +5,11 @@ import type { ToolRequest } from "../lib/public-https"
 import { mkdir, writeFile, unlink, rmdir } from "node:fs/promises"
 import { dirname } from "node:path"
 import { pilotBotFile, pilotGroupFile } from "../lib/deepagents-pilot.server"
-import { getHandoff, getSkillReadPresentation } from "../lib/chat-presentation"
+import {
+  getHandoff,
+  getSkillReadPresentation,
+  getToolPresentation,
+} from "../lib/chat-presentation"
 import { serializeSkillToMarkdown } from "../lib/skill-definition"
 import { randomBytes, randomInt, randomUUID } from "node:crypto"
 import { nanoid } from "nanoid"
@@ -13,6 +17,10 @@ import { eq, inArray } from "drizzle-orm"
 import { readUIMessageStream, streamText, type UIMessage } from "ai"
 import { botFormSchema } from "../db/schema"
 import { choiceProblem, parseCatalog } from "../lib/model-catalog"
+import {
+  projectDecisionMediaType,
+  projectRecallTool,
+} from "../lib/project-decisions"
 
 test("creation and edits require an explicit model; effort choices use model-level capabilities", () => {
   const fields = {
@@ -120,6 +128,7 @@ test(
       chats,
       chatMembers,
       modelRequests,
+      projectDecisions,
       botMemories,
       skills,
       botSkills,
@@ -155,6 +164,12 @@ test(
     let lookupMode: "bound" | "revoked" | "forbidden" | undefined
     let requestedSkill: string | undefined
     let combinedSkill: string | undefined
+    let saveMeasurement = false
+    let recall:
+      | ((
+          body: RequestBody
+        ) => Promise<{ recordId: string | null; answer: string }>)
+      | undefined
     let observation: number | undefined
     let sample: string | undefined
     const sends: string[] = []
@@ -170,6 +185,12 @@ test(
         type: "function",
         function: { name, arguments: JSON.stringify(args) },
       })
+      if (recall)
+        return sse(
+          body.model,
+          { tool_calls: [call(0, projectRecallTool, await recall(body))] },
+          "tool_calls"
+        )
       if (pilotResponse) {
         if (combinedSkill && key === "Bearer fixture-rowan") {
           const last = body.messages.at(-1)
@@ -188,7 +209,37 @@ test(
               "tool_calls"
             )
           }
-          const { value } = JSON.parse(String(last.content))
+          if (last.tool_call_id === "fixture-call-0-record_project_decision") {
+            const receipt = JSON.parse(String(last.content))
+            assert.ok(receipt.success)
+            return sse(
+              body.model,
+              { content: receipt.decision + " · " + receipt.id },
+              "stop"
+            )
+          }
+          const {
+            evidenceRef,
+            data: { value },
+          } = JSON.parse(String(last.content))
+          if (saveMeasurement)
+            return sse(
+              body.model,
+              {
+                tool_calls: [
+                  call(0, "record_project_decision", {
+                    source: evidenceRef,
+                    decision:
+                      "Observed " +
+                      value +
+                      "; doubled measurement: " +
+                      value * 2,
+                    fields: [{ path: "/value", value: String(value) }],
+                  }),
+                ],
+              },
+              "tool_calls"
+            )
           return sse(
             body.model,
             { content: "Doubled measurement: " + value * 2 },
@@ -598,6 +649,184 @@ test(
             { flag: "wx" }
           )
           try {
+            await groupTest.test(
+              "a fresh sender recalls only its group's active evidence, with a durable citation",
+              async () => {
+                const otherGroup = nanoid()
+                const value = randomUUID()
+                const foreign = randomUUID()
+                const toolEvidence = (reading: string) => ({
+                  executionId: nanoid(),
+                  toolCallId: nanoid(),
+                  toolId: httpId,
+                  toolName: httpName,
+                  digest: randomBytes(32).toString("hex"),
+                  fields: [
+                    { path: "/reading", value: reading },
+                    { path: "/unit", value: "ms" },
+                  ],
+                })
+                const source = toolEvidence(value)
+                const fixture = {
+                  creatorBotId: b,
+                  creatorName: "Rowan",
+                  sourceMessageId: nanoid(),
+                  sourceRole: "assistant" as const,
+                  sourceAuthor: httpName,
+                  quote: "",
+                  fingerprint: nanoid(),
+                }
+                const ask = (): UIMessage => ({
+                  id: nanoid(),
+                  role: "user",
+                  parts: [
+                    {
+                      type: "text",
+                      text: "What did we conclude about wave latency and what supported it?",
+                    },
+                  ],
+                })
+                await db.insert(chats).values({ id: otherGroup, kind: "group" })
+                try {
+                  const [local, other] = await db
+                    .insert(projectDecisions)
+                    .values([
+                      {
+                        ...fixture,
+                        chatId,
+                        decision: "Wave latency met the target",
+                        toolEvidence: source,
+                      },
+                      {
+                        ...fixture,
+                        chatId: otherGroup,
+                        decision: "Wave latency missed the target",
+                        toolEvidence: toolEvidence(foreign),
+                      },
+                    ])
+                    .returning()
+                  sent = []
+                  sends.length = 0
+                  recall = async (body) => {
+                    assert.ok(
+                      body.tools.some(
+                        (t) => t.function.name === projectRecallTool
+                      )
+                    )
+                    const prompt = body.messages
+                      .filter((m) => m.role === "system")
+                      .flatMap((m) =>
+                        typeof m.content === "string"
+                          ? [m.content]
+                          : Array.isArray(m.content)
+                            ? m.content.map((p) => p.text)
+                            : []
+                      )
+                      .join("\n")
+                    const list = JSON.parse(
+                      prompt.match(
+                        /Active research decisions for this project\.[^\n]*\n([^\n]+)/
+                      )![1]
+                    )
+                    const record = list.find((r: { decision: string }) =>
+                      r.decision.includes("Wave latency")
+                    )
+                    assert.ok(
+                      !JSON.stringify(
+                        body.messages.filter((m) => m.role !== "system")
+                      ).includes(value)
+                    )
+                    assert.ok(
+                      !prompt.includes(foreign) && !prompt.includes(other.id)
+                    )
+                    assert.equal(record.evidence.toolCallId, source.toolCallId)
+                    return {
+                      recordId: record.recordId,
+                      answer:
+                        record.decision +
+                        ": " +
+                        record.evidence.fields
+                          .map((f: { value: string }) => f.value)
+                          .join(" "),
+                    }
+                  }
+                  const request = ask()
+                  const turn = await run(request)
+                  assert.equal(turn.length, 2)
+                  const reply = turn[1]
+                  assert.equal((reply.metadata as { botId: string }).botId, a)
+                  assert.deepEqual(reply.parts, [
+                    {
+                      type: "text",
+                      text: local.decision + ": " + value + " ms",
+                      state: "done",
+                    },
+                    {
+                      type: "source-document",
+                      sourceId: local.id,
+                      mediaType: projectDecisionMediaType,
+                      title: local.id,
+                    },
+                  ])
+                  assert.deepEqual(await run(request), turn)
+                  assert.equal(sent.length, 1)
+                  assert.equal(sent[0].key, "Bearer fixture-iris")
+                  for (const which of [
+                    "foreign",
+                    "withdraw while answering",
+                    "already withdrawn",
+                  ] as const) {
+                    recall = async (body) => {
+                      const inContext = JSON.stringify(
+                        body.messages.filter((m) => m.role === "system")
+                      ).includes(local.id)
+                      assert.equal(inContext, which !== "already withdrawn")
+                      if (which === "withdraw while answering")
+                        await db
+                          .update(projectDecisions)
+                          .set({ withdrawnAt: new Date() })
+                          .where(eq(projectDecisions.id, local.id))
+                      return {
+                        recordId: which === "foreign" ? other.id : local.id,
+                        answer: "Stale assertion " + value,
+                      }
+                    }
+                    const withOldReceipt = which === "already withdrawn"
+                    if (withOldReceipt) history.push(reply)
+                    const [, refused] = await run(ask()).finally(() => {
+                      if (withOldReceipt) history.pop()
+                    })
+                    assert.deepEqual(
+                      refused.parts.map((p) => p.type),
+                      ["text"]
+                    )
+                    assert.match(
+                      JSON.stringify(refused.parts),
+                      /No matching active decision/
+                    )
+                    assert.ok(!JSON.stringify(refused.parts).includes(value))
+                  }
+                  assert.equal(sends.length, 0)
+                  assert.equal(
+                    (
+                      await db
+                        .select()
+                        .from(projectDecisions)
+                        .where(eq(projectDecisions.chatId, chatId))
+                    ).length,
+                    1
+                  )
+                } finally {
+                  recall = undefined
+                  await db
+                    .delete(projectDecisions)
+                    .where(
+                      eq(projectDecisions.fingerprint, fixture.fingerprint)
+                    )
+                  await db.delete(chats).where(eq(chats.id, otherGroup))
+                }
+              }
+            )
             for (const outcome of ["success", "denied"] as const) {
               pilotResponse = outcome
               sent = []
@@ -671,7 +900,12 @@ test(
                   r.body.tools?.map((t) => t.function.name) ?? [],
                 ]),
                 [
-                  ["Bearer fixture-iris", firstModel, "low", ["handoff"]],
+                  [
+                    "Bearer fixture-iris",
+                    firstModel,
+                    "low",
+                    ["handoff", projectRecallTool],
+                  ],
                   ["Bearer fixture-rowan", firstModel, "high", [httpName]],
                 ]
               )
@@ -696,7 +930,7 @@ test(
             }
             await groupTest.test(
               "recipient selects from its own catalog and receives only the selected version in its follow-up",
-              async () => {
+              async (catalogTest) => {
                 const suffix = randomBytes(5).toString("hex")
                 const [distractor, relevant] = await db
                   .insert(skills)
@@ -883,10 +1117,14 @@ test(
                     toolReceipt.toolCallId
                   )
                   assert.equal(
-                    JSON.parse(String(reply.messages.at(-1)?.content)).value,
+                    JSON.parse(String(reply.messages.at(-1)?.content)).data
+                      .value,
                     observation
                   )
-                  assert.equal(reply.tools?.length ?? 0, 0)
+                  assert.deepEqual(
+                    reply.tools.map((t) => t.function.name),
+                    ["record_project_decision"]
+                  )
                   const requests = await db
                     .select()
                     .from(modelRequests)
@@ -913,7 +1151,65 @@ test(
                   assert.deepEqual(await run(input), turn)
                   assert.equal(sent.length, 4)
                   assert.equal(sends.length, 1)
+                  await catalogTest.test(
+                    "the recipient records its own observation and replays the saved message without dispatch",
+                    async () => {
+                      saveMeasurement = true
+                      sends.length = 0
+                      sent = []
+                      const request = user()
+                      const saved = await run(request)
+                      const recipient = saved[2]
+                      assert.deepEqual(
+                        recipient.parts.map((p) => p.type),
+                        [
+                          "tool-read_skill",
+                          "tool-" + httpName,
+                          "tool-record_project_decision",
+                          "text",
+                        ]
+                      )
+                      const receipt = recipient.parts[2]
+                      assert.ok("output" in receipt)
+                      const result = getToolPresentation(receipt, false)
+                      assert.deepEqual(result.memory?.evidence.fields, [
+                        { path: "/value", value: observation },
+                      ])
+                      assert.equal(result.memory?.sourceMessageId, recipient.id)
+                      assert.equal(
+                        result.memory?.evidence.toolCallId,
+                        "fixture-call-0-" + httpName
+                      )
+                      assert.equal(
+                        result.memory?.evidence.executionId,
+                        (recipient.metadata as { executionId: string })
+                          .executionId
+                      )
+                      const last = sent.at(-1)!.body
+                      assert.equal(
+                        last.messages.at(-1)?.tool_call_id,
+                        receipt.toolCallId
+                      )
+                      assert.equal(last.tools?.length ?? 0, 0)
+                      const stored = JSON.parse(
+                        String(last.messages.at(-1)?.content)
+                      )
+                      assert.deepEqual(recipient.parts[3], {
+                        type: "text",
+                        text: stored.decision + " · " + stored.id,
+                        state: "done",
+                      })
+                      assert.doesNotMatch(
+                        JSON.stringify(recipient.parts),
+                        /RAW_MEASUREMENT|cohort-cobalt/
+                      )
+                      assert.deepEqual(await run(request), saved)
+                      assert.equal(sent.length, 5)
+                      assert.deepEqual(sends, ["/fixture"])
+                    }
+                  )
                 } finally {
+                  saveMeasurement = false
                   combinedSkill = undefined
                   requestedSkill = undefined
                   await db.batch([
@@ -958,7 +1254,7 @@ test(
                     assert.ok(source.parts.map(getHandoff).some(Boolean))
                     assert.deepEqual(
                       sent[0].body.tools.map((t) => t.function.name),
-                      ["handoff"]
+                      ["handoff", projectRecallTool]
                     )
                     assert.deepEqual(
                       sent[1].body.tools.map((t) => t.function.name).sort(),

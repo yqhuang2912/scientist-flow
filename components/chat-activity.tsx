@@ -45,6 +45,13 @@ import {
   AttachmentTrigger,
 } from "@/components/ui/attachment"
 import { Button } from "@/components/ui/button"
+import { ProjectToolSource } from "@/components/project-tool-source"
+import {
+  projectDecisionMediaType,
+  projectRecordId,
+  toolCallAnchor,
+} from "@/lib/project-decisions"
+import { ProjectMemoryButton } from "@/components/project-memory-dialog"
 import { useParams } from "next/navigation"
 import { useWorkspaceDocument } from "@/components/workspace-document-provider"
 import { formatAttachmentSize } from "@/lib/chat-composer"
@@ -131,7 +138,15 @@ function ReasoningStep({
   )
 }
 
-function ToolStep({ part, active }: { part: ChatToolPart; active: boolean }) {
+function ToolStep({
+  part,
+  active,
+  anchor,
+}: {
+  part: ChatToolPart
+  active: boolean
+  anchor?: string
+}) {
   const [open, setOpen] = useState<boolean>()
   const tool = getToolPresentation(part, active)
   const skill = getSkillReadPresentation(part, active)
@@ -170,6 +185,27 @@ function ToolStep({ part, active }: { part: ChatToolPart; active: boolean }) {
       <TraceTitle title={tool.title}>{tool.title}</TraceTitle>
     </TraceLine>
   )
+  if (tool.memory) {
+    const { decision, sourceMessageId, evidence } = tool.memory
+    return (
+      <div className="space-y-1.5">
+        {line}
+        <div className="space-y-1.5 pl-6 text-sm">
+          <p className="wrap-anywhere">{decision}</p>
+          <ProjectToolSource evidence={evidence} />
+          <a
+            className="text-xs underline underline-offset-2"
+            href={
+              "#" +
+              encodeURIComponent(toolCallAnchor(sourceMessageId, evidence.toolCallId))
+            }
+          >
+            View tool call
+          </a>
+        </div>
+      </div>
+    )
+  }
   if (
     tool.output === undefined &&
     !tool.error &&
@@ -182,7 +218,9 @@ function ToolStep({ part, active }: { part: ChatToolPart; active: boolean }) {
       open={open ?? tool.status === "error"}
       onOpenChange={setOpen}
     >
-      <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+      <TraceCollapsibleTrigger id={anchor} className="focus:bg-muted">
+        {line}
+      </TraceCollapsibleTrigger>
       <TraceCollapsibleContent className="flex flex-col gap-2">
         {tool.reason && <p>{tool.reason}</p>}
         {tool.deniedReason && <p>{tool.deniedReason}</p>}
@@ -201,13 +239,17 @@ function ToolStep({ part, active }: { part: ChatToolPart; active: boolean }) {
 export function ChatActivity({
   part,
   active,
+  toolAnchor,
 }: {
   part: ChatPart
   active: boolean
+  toolAnchor?: string
 }) {
+  const chatId = useParams<{ chatId: string }>()?.chatId
   if (part.type === "reasoning")
     return <ReasoningStep part={part} active={active} />
-  if (isToolUIPart(part)) return <ToolStep part={part} active={active} />
+  if (isToolUIPart(part))
+    return <ToolStep part={part} active={active} anchor={toolAnchor} />
   if (part.type === "source-url") {
     const url = safeChatUrl(part.url)
     const line = (
@@ -234,6 +276,13 @@ export function ChatActivity({
       line
     )
   }
+  if (
+    part.type === "source-document" &&
+    part.mediaType === projectDecisionMediaType &&
+    chatId &&
+    projectRecordId.safeParse(part.sourceId).success
+  )
+    return <ProjectMemoryButton chatId={chatId} recordId={part.sourceId} />
   if (part.type === "source-document")
     return (
       <TraceLine>

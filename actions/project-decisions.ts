@@ -1,15 +1,23 @@
 "use server"
 
 import { z } from "zod"
+import { projectRecordId } from "@/lib/project-decisions"
 import {
   readProjectDecisions,
   withdrawProjectDecision,
 } from "@/lib/project-decisions.server"
 
-export async function listProjectDecisions(chatId: string) {
+export async function listProjectDecisions(chatId: string, recordId?: string) {
   try {
-    if (!z.nanoid().safeParse(chatId).success) throw new Error()
-    return { success: true as const, rows: await readProjectDecisions(chatId) }
+    if (
+      !z.nanoid().safeParse(chatId).success ||
+      !projectRecordId.optional().safeParse(recordId).success
+    )
+      throw new Error()
+    return {
+      success: true as const,
+      rows: await readProjectDecisions(chatId, recordId),
+    }
   } catch {
     return {
       success: false as const,
@@ -19,7 +27,10 @@ export async function listProjectDecisions(chatId: string) {
 }
 export async function withdrawDecision(chatId: string, id: string) {
   try {
-    if (!z.nanoid().safeParse(chatId).success || !/^D-[a-f0-9]{16}$/.test(id))
+    if (
+      !z.nanoid().safeParse(chatId).success ||
+      !projectRecordId.safeParse(id).success
+    )
       throw new Error()
     if (await withdrawProjectDecision(chatId, id))
       return { success: true as const }

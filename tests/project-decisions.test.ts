@@ -74,6 +74,7 @@ test("a fresh recipient execution reads committed decisions and excludes failed 
     creatorName: a.name,
     sourceMessageId: "current",
     sourcePart: 0,
+    toolEvidence: null,
     sourceRole: "user",
     sourceAuthor: "User",
     quote: "Evidence 3/8.",

@@ -3,16 +3,30 @@
 import * as React from "react"
 import { ThemeProvider as NextThemesProvider, useTheme } from "next-themes"
 
+const subscribe = () => () => {}
+
 function ThemeProvider({
   children,
+  scriptProps,
   ...props
 }: React.ComponentProps<typeof NextThemesProvider>) {
+  // The initial HTML needs the pre-paint script. On client mounts the
+  // provider's effects already apply the theme, so its script is just data.
+  const isClientRender = React.useSyncExternalStore(
+    subscribe,
+    () => true,
+    () => false
+  )
   return (
     <NextThemesProvider
       attribute="class"
       defaultTheme="system"
       enableSystem
       disableTransitionOnChange
+      scriptProps={{
+        ...scriptProps,
+        type: isClientRender ? "text/plain" : scriptProps?.type,
+      }}
       {...props}
     >
       <ThemeHotkey />

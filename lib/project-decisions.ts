@@ -3,6 +3,23 @@ import type { ProjectDecision } from "../db/schema"
 
 export const projectDecisionTool = "record_project_decision"
 export const projectDecisionLimit = 8
+export const projectRecordId = z.string().regex(/^D-[a-f0-9]{16}$/)
+export const projectDecisionMediaType =
+  "application/vnd.scientistflow.project-decision"
+export const projectRecallTool = "answer_from_project_memory"
+export const projectRecallInput = z.strictObject({
+  recordId: projectRecordId
+    .nullable()
+    .describe(
+      "The exact matching active record ID, or null when none matches."
+    ),
+  answer: z
+    .string()
+    .max(3000)
+    .describe(
+      "A short Markdown answer in the user's language giving the recorded conclusion and the observed fields, units or period. Use an empty string when there is no match."
+    ),
+})
 export const decisionInput = z.strictObject({
   decision: z.string().trim().min(1).max(400),
   source: z
@@ -21,6 +38,63 @@ export const decisionInput = z.strictObject({
   nextStep: z.string().trim().min(1).max(300).optional(),
 })
 export type DecisionInput = z.infer<typeof decisionInput>
+const pointer = z.string().min(2).max(180).startsWith("/")
+export const toolDecisionInput = z.strictObject({
+  decision: decisionInput.shape.decision.describe(
+    "State the observation and distinguish it from any criterion used to reach the conclusion."
+  ),
+  source: z
+    .string()
+    .regex(/^T-[a-f0-9]{64}$/)
+    .describe(
+      "Copy evidenceRef exactly from the current successful HTTP result."
+    ),
+  fields: z
+    .array(
+      z.strictObject({
+        path: pointer.describe(
+          "JSON Pointer into data, e.g. /observations/0/value."
+        ),
+        value: z
+          .string()
+          .min(1)
+          .max(240)
+          .describe("Exact scalar at that path, written as text."),
+      })
+    )
+    .min(1)
+    .max(5)
+    .describe(
+      "Select only the public supporting fields. Include identity, units or reporting period when needed to interpret the value."
+    ),
+})
+export const toolEvidenceSchema = z.object({
+  executionId: z.string(),
+  toolCallId: z.string(),
+  toolId: z.string(),
+  toolName: z.string(),
+  digest: z.string(),
+  fields: z
+    .array(
+      z.object({
+        path: pointer,
+        value: z.union([z.string(), z.number(), z.boolean()]),
+      })
+    )
+    .min(1)
+    .max(5),
+})
+export type ToolEvidence = z.infer<typeof toolEvidenceSchema>
+export function toolEvidenceText(fields: ToolEvidence["fields"]) {
+  return fields
+    .map(({ path, value }) => path + " = " + String(value))
+    .join(" · ")
+}
+export function toolCallAnchor(messageId: string, callId: string) {
+  return (
+    "tool/" + encodeURIComponent(messageId) + "/" + encodeURIComponent(callId)
+  )
+}
 export type EvidencePassage = {
   messageId: string
   part: number
@@ -41,7 +115,8 @@ export function renderProjectDecisions(rows: ProjectDecision[]) {
         recordId: row.id,
         decision: row.decision,
         recordedBy: row.creatorName,
-        evidence: {
+        recordedAt: row.createdAt,
+        evidence: row.toolEvidence ?? {
           report: row.sourceRole === "user" ? "user report" : "bot report",
           author: row.sourceAuthor,
           messageId: row.sourceMessageId,
@@ -52,7 +127,7 @@ export function renderProjectDecisions(rows: ProjectDecision[]) {
       }))
     ),
     "Cite the exact active record ID when continuing work from a decision. A quotation establishes what the source reported. Treat pending checks as unexecuted until there are actual results. Source labels are temporary tool inputs; cite the record ID in your answer and never ask the user for a source label.",
-    "For a question about existing decisions, answer from the list; an empty list means there is no recorded agreement. Only call record_project_decision for a new, adopted decision with supporting evidence. Copy an exact quote from a passage marked [S-…]. Do not record speculation or alternatives. If several decisions were adopted, submit their separate calls together. A successful receipt completes the write. Never re-record a saved decision.",
+    "For a question about existing decisions, answer from the list; an empty list means there is no recorded agreement. Use the evidence source required by the current record_project_decision tool. For message sources, copy an exact quote from a passage marked [S-…]. Do not record speculation or alternatives. A successful receipt completes the write. Never re-record a saved decision.",
   ].join("\n")
 }
 

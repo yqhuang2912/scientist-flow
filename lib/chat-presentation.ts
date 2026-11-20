@@ -5,7 +5,7 @@ import {
   type ToolUIPart,
   type UIMessage,
 } from "ai"
-import { projectDecisionTool } from "./project-decisions"
+import { projectDecisionTool, toolEvidenceSchema } from "./project-decisions"
 
 export type ChatPart = UIMessage["parts"][number]
 export type ChatToolPart = ToolUIPart | DynamicToolUIPart
@@ -174,9 +174,21 @@ export function getToolPresentation(part: ChatToolPart, active: boolean) {
       http?.success === false ||
       part.state === "output-error" ||
       part.state === "output-denied"
+    const evidence = saved && toolEvidenceSchema.safeParse(http.toolEvidence)
     return {
       name,
       label,
+      memory:
+        evidence &&
+        evidence.success &&
+        typeof http?.decision === "string" &&
+        typeof http.sourceMessageId === "string"
+          ? {
+              decision: http.decision,
+              sourceMessageId: http.sourceMessageId,
+              evidence: evidence.data,
+            }
+          : undefined,
       status: saved
         ? undefined
         : failed

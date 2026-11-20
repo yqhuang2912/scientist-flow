@@ -7,7 +7,8 @@ import {
   withdrawDecision,
 } from "@/actions/project-decisions"
 import type { ProjectDecision } from "@/db/schema"
-import { projectDecisionLimit } from "@/lib/project-decisions"
+import { projectDecisionLimit, toolCallAnchor } from "@/lib/project-decisions"
+import { ProjectToolSource } from "@/components/project-tool-source"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -27,9 +28,11 @@ import { toast } from "@/components/ui/toast"
 
 function DecisionList({
   chatId,
+  recordId,
   showSource,
 }: {
   chatId: string
+  recordId?: string
   showSource: (record: ProjectDecision) => boolean
 }) {
   const [rows, setRows] = useState<ProjectDecision[] | null>(null)
@@ -39,7 +42,7 @@ function DecisionList({
   const [pending, startTransition] = useTransition()
   useEffect(() => {
     let current = true
-    listProjectDecisions(chatId)
+    listProjectDecisions(chatId, recordId)
       .then((result) => {
         if (!current) return
         if (result.success) setRows(result.rows)
@@ -51,7 +54,7 @@ function DecisionList({
     return () => {
       current = false
     }
-  }, [chatId, revision])
+  }, [chatId, recordId, revision])
   function remove(id: string) {
     startTransition(async () => {
       try {
@@ -100,7 +103,9 @@ function DecisionList({
         )
       ) : !rows.length ? (
         <p className="text-sm text-muted-foreground">
-          No active research decisions.
+          {recordId
+            ? "This decision is no longer active in this project."
+            : "No active research decisions."}
         </p>
       ) : (
         <ol className="min-h-0 divide-y overflow-y-auto">
@@ -133,14 +138,20 @@ function DecisionList({
                   {row.createdAt.toLocaleString()}
                 </time>
               </p>
-              <blockquote className="space-y-1 border-l-2 pl-3 text-sm">
-                <span className="text-xs text-muted-foreground">
-                  {row.sourceRole === "user"
-                    ? "User report"
-                    : "Bot report · " + row.sourceAuthor}
-                </span>
-                <p className="wrap-anywhere whitespace-pre-wrap">{row.quote}</p>
-              </blockquote>
+              {row.toolEvidence ? (
+                <ProjectToolSource evidence={row.toolEvidence} />
+              ) : (
+                <blockquote className="space-y-1 border-l-2 pl-3 text-sm">
+                  <span className="text-xs text-muted-foreground">
+                    {row.sourceRole === "user"
+                      ? "User report"
+                      : "Bot report · " + row.sourceAuthor}
+                  </span>
+                  <p className="wrap-anywhere whitespace-pre-wrap">
+                    {row.quote}
+                  </p>
+                </blockquote>
+              )}
               {row.nextStep && (
                 <p className="text-sm wrap-anywhere">
                   <span className="text-muted-foreground">Next step · </span>
@@ -160,7 +171,7 @@ function DecisionList({
               {unavailable === row.id && (
                 <p role="status" className="text-xs text-muted-foreground">
                   Source message unavailable in the loaded conversation. The
-                  saved quotation is shown above.
+                  saved evidence is shown above.
                 </p>
               )}
             </li>
@@ -171,16 +182,32 @@ function DecisionList({
   )
 }
 
-export function ProjectMemoryButton({ chatId }: { chatId: string }) {
+export function ProjectMemoryButton({
+  chatId,
+  recordId,
+}: {
+  chatId: string
+  recordId?: string
+}) {
   const [open, setOpen] = useState(false)
   const source = useRef<HTMLElement | null>(null)
   function showSource(record: ProjectDecision) {
     const chat = document.querySelector(
       `[data-project-chat="${CSS.escape(chatId)}"]`
     )
-    const part = chat?.querySelector<HTMLElement>(
-      `[data-evidence-message="${CSS.escape(record.sourceMessageId)}"] [data-evidence-part="${record.sourcePart}"]`
-    )
+    const part = record.toolEvidence
+      ? chat?.querySelector<HTMLElement>(
+          "#" +
+            CSS.escape(
+              toolCallAnchor(
+                record.sourceMessageId,
+                record.toolEvidence.toolCallId
+              )
+            )
+        )
+      : chat?.querySelector<HTMLElement>(
+          `[data-evidence-message="${CSS.escape(record.sourceMessageId)}"] [data-evidence-part="${record.sourcePart}"]`
+        )
     if (!part || record.chatId !== chatId) return false
     source.current = part
     setOpen(false)
@@ -198,36 +225,54 @@ export function ProjectMemoryButton({ chatId }: { chatId: string }) {
           source.current.scrollIntoView({ block: "center" })
       }}
     >
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <DialogTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Project memory"
-                />
-              }
-            />
-          }
-        >
-          <BookMarkedIcon />
-        </TooltipTrigger>
-        <TooltipContent>Project memory</TooltipContent>
-      </Tooltip>
+      {recordId ? (
+        <DialogTrigger render={<Button size="sm" variant="outline" />}>
+          <BookMarkedIcon /> Project decision · {recordId}
+        </DialogTrigger>
+      ) : (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <DialogTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Project memory"
+                  />
+                }
+              />
+            }
+          >
+            <BookMarkedIcon />
+          </TooltipTrigger>
+          <TooltipContent>Project memory</TooltipContent>
+        </Tooltip>
+      )}
       <DialogContent
         className="max-h-[85dvh] grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-lg"
         finalFocus={() => source.current ?? true}
       >
         <DialogHeader>
           <DialogTitle>Project memory</DialogTitle>
-          <DialogDescription>
-            Up to {projectDecisionLimit} active research decisions for this
-            task.
-          </DialogDescription>
+          {recordId ? (
+            <DialogDescription>
+              Saved conclusion and original evidence.
+            </DialogDescription>
+          ) : (
+            <DialogDescription>
+              Up to {projectDecisionLimit} active research decisions for this
+              task.
+            </DialogDescription>
+          )}
         </DialogHeader>
-        {open && <DecisionList chatId={chatId} showSource={showSource} />}
+        {open && (
+          <DecisionList
+            chatId={chatId}
+            recordId={recordId}
+            showSource={showSource}
+          />
+        )}
       </DialogContent>
     </Dialog>
   )

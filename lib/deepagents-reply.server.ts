@@ -5,6 +5,7 @@ import type {
   LanguageModelV4Message,
 } from "@ai-sdk/provider"
 import { BaseChatModel } from "@langchain/core/language_models/chat_models"
+import type { StructuredToolInterface } from "@langchain/core/tools"
 import {
   AIMessage,
   HumanMessage,
@@ -28,6 +29,12 @@ import {
 } from "./chat-handoff"
 import type { resolveBotModel } from "./bot-model.server"
 import { ModelConnectionError } from "./model-credentials.server"
+import {
+  projectDecisionMediaType,
+  projectDecisionTool,
+  projectRecallInput,
+  projectRecallTool,
+} from "./project-decisions"
 
 type Route = ReturnType<Awaited<ReturnType<typeof resolveBotModel>>>
 const profile = "scientistflow:single-turn"
@@ -87,6 +94,7 @@ class PilotModel extends BaseChatModel {
   readonly modelName = profile
   private steps = 0
   private call?: PilotCall
+  private readonly completedCallIds = new Set<string>()
   constructor(
     private readonly route: Route,
     private readonly signal: AbortSignal,
@@ -115,7 +123,7 @@ class PilotModel extends BaseChatModel {
     if (
       step > 0 &&
       !(
-        step <= 2 &&
+        step <= 3 &&
         this.followup &&
         this.call &&
         last &&
@@ -138,7 +146,9 @@ class PilotModel extends BaseChatModel {
     let call: PilotCall | undefined
     // A recipient may return either an answer or a tool call. Only committed
     // answer text belongs in the public message before the tool result exists.
-    const bufferText = tools.length > 0 && !!this.followup
+    const canCite =
+      !this.followup && tools.some((t) => t.name === projectRecallTool)
+    const bufferText = tools.length > 0 && (!!this.followup || canCite)
     const reader = stream.getReader()
     try {
       for (;;) {
@@ -154,7 +164,7 @@ class PilotModel extends BaseChatModel {
           if (
             !tools.some((t) => t.name === value.toolName) ||
             !value.toolCallId ||
-            value.toolCallId === this.call?.id ||
+            this.completedCallIds.has(value.toolCallId) ||
             value.providerExecuted
           )
             throw new Error("Unexpected pilot tool call.")
@@ -181,7 +191,9 @@ class PilotModel extends BaseChatModel {
     }
     signal.throwIfAborted()
     if (call && (finish === "tool-calls" || finish === "stop")) {
+      if (canCite && call.name === "handoff" && text) this.onText(text)
       this.call = call
+      this.completedCallIds.add(call.id)
       return {
         generations: [
           {
@@ -229,6 +241,7 @@ export function deepAgentReply(options: {
   handoff?: (
     input: HandoffInput
   ) => Promise<{ success: boolean; message?: string }>
+  resolveCitation?: (recordId: string) => Promise<string | undefined>
   onError: (error: unknown) => string
 }) {
   const cancel = new AbortController()
@@ -250,6 +263,7 @@ export function deepAgentReply(options: {
       try {
         const accept = options.handoff
         let handedOff = false
+        let citation: string | undefined
         let rejection: string | undefined
         const recipient = options.recipient
         const definitions: LanguageModelV4FunctionTool[] = []
@@ -260,12 +274,17 @@ export function deepAgentReply(options: {
             description: handoffDescription,
             inputSchema: await asSchema(handoffInputSchema).jsonSchema,
           })
-        let phase: "initial" | "after-skill" | "answer" = "initial"
-        const allowsTool = (name: string) =>
-          phase === "initial" ||
-          (phase === "after-skill" && name !== "read_skill")
+        let phase: "initial" | "after-skill" | "after-http" | "answer" =
+          "initial"
+        const allowsTool = (name: string) => {
+          if (name === projectDecisionTool) return phase === "after-http"
+          return (
+            phase === "initial" ||
+            (phase === "after-skill" && name !== "read_skill")
+          )
+        }
         let verifiedFailure: string | undefined
-        const tools = accept
+        const tools: StructuredToolInterface[] = accept
           ? [
               tool(
                 async (input, config) => {
@@ -325,6 +344,7 @@ export function deepAgentReply(options: {
                       signal.throwIfAborted()
                       // Close the gate before awaiting I/O. Only a verified skill
                       // read reopens it, for one subsequent HTTP call.
+                      const followingSkill = phase === "after-skill"
                       phase = "answer"
                       write({
                         type: "tool-input-available",
@@ -356,6 +376,8 @@ export function deepAgentReply(options: {
                       if (output.success !== true)
                         verifiedFailure = result.value
                       else if (name === "read_skill") phase = "after-skill"
+                      else if (followingSkill && output.kind === "shared-http")
+                        phase = "after-http"
                       return result.value
                     },
                     { name, description, schema: objectInput }
@@ -363,6 +385,40 @@ export function deepAgentReply(options: {
                 }
               )
             )
+        const resolveCitation = options.resolveCitation
+        if (accept && resolveCitation) {
+          const description =
+            "Answer a recall question from one active decision in this project. This read-only action delivers the final answer with its verified source."
+          definitions.push({
+            type: "function",
+            name: projectRecallTool,
+            description,
+            inputSchema: await asSchema(projectRecallInput).jsonSchema,
+          })
+          tools.push(
+            tool(
+              async ({ recordId, answer }) => {
+                signal.throwIfAborted()
+                citation =
+                  recordId && answer.trim()
+                    ? await resolveCitation(recordId)
+                    : undefined
+                signal.throwIfAborted()
+                const reply = citation
+                  ? answer.trim()
+                  : "No matching active decision was found in this project."
+                publishText(reply)
+                return reply
+              },
+              {
+                name: projectRecallTool,
+                description,
+                schema: projectRecallInput,
+                returnDirect: true,
+              }
+            )
+          )
+        }
         const model = new PilotModel(
           options.route,
           signal,
@@ -402,13 +458,23 @@ export function deepAgentReply(options: {
         })
         await agent.invoke(
           { messages: publicText(options.messages) },
-          // Graph steps include middleware and tool nodes between the three
+          // Graph steps include middleware and tool nodes between the
           // model calls. The route and tool gates enforce the actual budgets.
-          { signal, recursionLimit: recipient ? 16 : 8 }
+          { signal, recursionLimit: recipient ? 20 : 8 }
         )
         if (verifiedFailure) publishText(verifiedFailure)
+        if (citation) {
+          write({ type: "text-end", id })
+          started = false
+          write({
+            type: "source-document",
+            sourceId: citation,
+            mediaType: projectDecisionMediaType,
+            title: citation,
+          })
+        }
         if (rejection) throw new ModelConnectionError(rejection)
-        if (!started && !handedOff)
+        if (!started && !handedOff && !citation)
           throw new ModelConnectionError("The model returned no public reply.")
       } catch (error) {
         if (!signal.aborted) {

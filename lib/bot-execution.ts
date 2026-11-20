@@ -14,7 +14,7 @@ export interface Delegation {
   from: { id: string; name: string }
   to: { id: string; name: string }
   task: string
-  evidence: { decisionId: string; messageId: string; part: number }[]
+  evidence: { decisionId: string; messageId: string; part: number | null }[]
 }
 export type ExecutionStatus = "running" | "completed" | "failed" | "cancelled"
 export interface ExecutionIdentity {

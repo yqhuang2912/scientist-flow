@@ -11,6 +11,11 @@ import type { ToolDefinition } from "../db/schema"
 import { reservedToolNames, toModelToolDefinition } from "./tool-definition"
 import { executeSharedHttpTool } from "./shared-http-executor"
 import { publicHttpsRequest } from "./public-https"
+import {
+  toolEvidenceRef,
+  type EvidenceScope,
+  type ToolObservation,
+} from "./tool-result-evidence"
 
 type Bound = ToolDefinition & { botId: string; botName: string }
 const past =
@@ -51,8 +56,10 @@ export function httpToolTurn(
   bindings: Bound[],
   lookup: (botId: string, toolId: string) => Promise<Bound | undefined>,
   claim: (toolId: string, inputHash: string) => Promise<boolean>,
-  send = publicHttpsRequest
+  send = publicHttpsRequest,
+  evidenceScope?: () => EvidenceScope | undefined
 ) {
+  const observations = new Map<string, ToolObservation>()
   const payloads = new Map<string, { botId: string; text: string }>()
   const uncertain = new Set<string>()
   const tools: ToolSet = Object.create(null)
@@ -141,9 +148,29 @@ export function httpToolTurn(
             if (result.postOutcomeUnknown) uncertain.add(def.id)
             return { ...base, success: false, message: result.message }
           }
+          const scope = evidenceScope?.()
+          let ref
+          if (
+            scope &&
+            scope.botId === context.botId &&
+            scope.executionId === context.executionId
+          ) {
+            const observation = {
+              ...scope,
+              toolCallId,
+              toolId: def.id,
+              toolName: def.name,
+              digest: result.digest,
+              data: result.data,
+            }
+            ref = toolEvidenceRef(observation)
+            observations.set(ref, observation)
+          }
           payloads.set(toolCallId, {
             botId: context.botId,
-            text: JSON.stringify(result.data),
+            text: JSON.stringify(
+              ref ? { evidenceRef: ref, data: result.data } : result.data
+            ),
           })
           return { ...base, success: true, digest: result.digest }
         } catch {
@@ -177,7 +204,12 @@ export function httpToolTurn(
           }
     )
   }
-  return { tools, names, forSpeaker }
+  return {
+    tools,
+    names,
+    forSpeaker,
+    observation: (ref: string) => observations.get(ref),
+  }
 }
 
 // Transform only the outward stream. The executor receives the original args;

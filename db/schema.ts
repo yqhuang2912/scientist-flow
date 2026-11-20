@@ -24,6 +24,7 @@ import {
 } from "../lib/model-catalog"
 
 import type { UIMessage } from "ai"
+import type { ToolEvidence } from "../lib/project-decisions"
 import type { ExecutionStatus, Delegation } from "../lib/bot-execution"
 
 export const modelConnections = pgTable(
@@ -293,7 +294,8 @@ export const projectDecisions = pgTable(
     }),
     creatorName: text("creator_name").notNull(),
     sourceMessageId: text("source_message_id").notNull(),
-    sourcePart: integer("source_part").notNull(),
+    sourcePart: integer("source_part"),
+    toolEvidence: jsonb("tool_evidence").$type<ToolEvidence>(),
     sourceRole: text("source_role", { enum: ["user", "assistant"] }).notNull(),
     sourceAuthor: text("source_author").notNull(),
     quote: text("quote").notNull(),
