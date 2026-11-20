@@ -5,7 +5,7 @@ import {
   attachmentMediaType,
   attachmentRejection,
   chatAttachmentParts,
-  inlineAttachmentFlags,
+  legacyAttachmentReferences,
   storedAttachmentSchema,
   shouldSubmitChatMessage,
 } from "../lib/chat-composer"
@@ -29,43 +29,61 @@ test("both pickers accept exactly 200 MB and reject the next byte", () => {
   )
 })
 
-test("Office and large PDFs stay as durable, compact chat references", async () => {
-  const office = new File(["test"], "评审意见.DOCX", {
+test("attachment context uses real message parts and recovers older file references only once", () => {
+  const file = new File(["test"], "评审意见.DOCX", {
     type: "application/octet-stream",
   })
-  const pdf = {
-    name: "2_医学成像的基本原理.pdf",
-    type: "",
-    size: 64_411_588,
-  } as File
-  assert.match(attachmentMediaType(office)!, /wordprocessingml/)
-  const files = [office, pdf]
-  const entries = files.map((f) => ({
-    name: f.name,
-    size: f.size,
-    isFile: true as const,
-    isDir: false as const,
-    relPath: "uploads/" + f.name,
-  }))
-  const { parts, workspaceFiles } = await chatAttachmentParts(
-    files,
-    entries,
-    "Review"
+  const reference = {
+    name: file.name,
+    mediaType: attachmentMediaType(file)!,
+    size: file.size,
+    relativePath: "uploads/" + file.name,
+  }
+  assert.match(reference.mediaType, /wordprocessingml/)
+  const legacy = {
+    id: "old",
+    role: "user" as const,
+    parts: [
+      {
+        type: "text" as const,
+        text:
+          "Workspace attachment: " +
+          JSON.stringify(reference.relativePath) +
+          ". File contents are stored in the task workspace and are not included in this message.",
+      },
+    ],
+    metadata: { workspaceFiles: { 0: reference } },
+  }
+  const [restored] = legacyAttachmentReferences([legacy], [])
+  assert.deepEqual(restored, { ...reference, contextOnly: true })
+  const { parts, workspaceFiles } = chatAttachmentParts(
+    [{ reference: restored, part: { type: "text", text: "Document body" } }],
+    "Follow up"
   )
-  assert.equal(parts[0].type, "text")
-  assert.equal(parts[1].type, "text")
-  assert.equal(parts[2].type, "text")
-  assert.equal(
-    storedAttachmentSchema.parse(workspaceFiles[2]).relativePath,
-    entries[1].relPath
-  )
-  assert.ok(JSON.stringify({ parts, workspaceFiles }).length < 1500)
-  const image = { name: "a.png", size: 210_000, type: "image/png" } as File
-  assert.deepEqual(inlineAttachmentFlags([office, image, image]), [
-    false,
-    true,
-    false,
+  assert.deepEqual(parts, [
+    { type: "text", text: "Follow up" },
+    { type: "text", text: "Document body" },
   ])
+  assert.equal(
+    storedAttachmentSchema.parse(workspaceFiles[1]).relativePath,
+    reference.relativePath
+  )
+  const followup = {
+    id: "next",
+    role: "user" as const,
+    parts,
+    metadata: { workspaceFiles },
+  }
+  assert.deepEqual(legacyAttachmentReferences([legacy, followup], []), [])
+  assert.deepEqual(legacyAttachmentReferences([legacy], [reference]), [])
+  assert.deepEqual(
+    legacyAttachmentReferences([{ ...legacy, metadata: undefined }], []),
+    []
+  )
+  assert.deepEqual(
+    legacyAttachmentReferences([{ ...legacy, role: "assistant" }], []),
+    []
+  )
 })
 
 test("a chat draft rejects blank messages without rewriting valid text", () => {

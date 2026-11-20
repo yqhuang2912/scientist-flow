@@ -15,7 +15,8 @@ import { CircleAlertIcon } from "lucide-react"
 import { useRouter } from "next/navigation"
 
 import { ChatTranscript } from "@/components/chat-transcript"
-import { chatAttachmentParts, type ChatComposerMessage } from "@/lib/chat-composer"
+import { attachmentMediaType, chatAttachmentParts, legacyAttachmentReferences, type ChatComposerMessage } from "@/lib/chat-composer"
+import { prepareChatAttachments } from "@/actions/chat-attachments"
 import { ChatComposer } from "@/components/chat-composer"
 import {
   loadChatTranscript,
@@ -163,14 +164,31 @@ function ChatView({
             : "Could not upload the attachment.",
       }
     }
-    const { parts, workspaceFiles } = await chatAttachmentParts(
-      files,
-      entries,
-      text
-    )
+    const current = entries.map((entry, i) => ({
+      name: files[i].name,
+      relativePath: entry.relPath,
+      size: entry.size,
+      mediaType: attachmentMediaType(files[i])!,
+    }))
+    const references = [
+      ...current,
+      ...legacyAttachmentReferences(messages, current),
+    ]
+    let prepared
+    try {
+      prepared = references.length
+        ? await prepareChatAttachments(chatId, references)
+        : []
+    } catch {
+      return { error: "Could not prepare the attachments. Check the task workspace and try again." }
+    }
+    const { parts, workspaceFiles } = chatAttachmentParts(prepared, text)
     const metadata = {
       ...(selectedBotId && { botId: selectedBotId }),
-      ...(files.length > 0 && { workspaceFiles }),
+      ...(prepared.length > 0 && { workspaceFiles }),
+    }
+    if (new TextEncoder().encode(JSON.stringify({ parts, metadata })).length > 480 * 1024) {
+      return { error: "This message is too large. Shorten the text or send fewer attachments together." }
     }
     await sendMessage({ parts, metadata }, { metadata })
   }

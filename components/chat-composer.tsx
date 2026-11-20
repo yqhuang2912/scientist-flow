@@ -1,6 +1,6 @@
 "use client"
 
-import { useId, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import type { ChatStatus } from "ai"
@@ -24,7 +24,9 @@ import {
   AttachmentDescription,
   AttachmentMedia,
   AttachmentTitle,
+  AttachmentTrigger,
 } from "@/components/ui/attachment"
+import { ImagePreview } from "@/components/image-preview"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,13 +55,30 @@ import {
   chatComposerSchema,
   shouldSubmitChatMessage,
   attachmentRejection,
+  attachmentMediaType,
   formatAttachmentSize,
-  inlineAttachmentFlags,
   type ChatComposerInput,
   type ChatComposerMessage,
 } from "@/lib/chat-composer"
 
 type ComposerBot = { id: string; name: string; avatar: string }
+
+function DraftImagePreview({ file }: { file: File }) {
+  const [url, setUrl] = useState("")
+  useEffect(() => () => { if (url) URL.revokeObjectURL(url) }, [url])
+  return (
+    <ImagePreview
+      source={{ name: file.name, url }}
+      onClose={() => setUrl("")}
+      trigger={
+        <AttachmentTrigger
+          aria-label={`Preview ${file.name}`}
+          onClick={() => setUrl(URL.createObjectURL(file))}
+        />
+      }
+    />
+  )
+}
 
 export function ChatComposer({
   bots,
@@ -91,7 +110,6 @@ export function ChatComposer({
   const text = useWatch({ control: form.control, name: "text" })
   const files = useWatch({ control: form.control, name: "files" }) ?? []
   const busy = status === "submitted" || status === "streaming"
-  const inline = inlineAttachmentFlags(files)
   const pending = form.formState.isSubmitting
   const canSend =
     (text.trim().length > 0 || files.length > 0) && !busy && !pending
@@ -203,7 +221,7 @@ export function ChatComposer({
           </FieldLabel>
           {files.length > 0 && (
             <div className="flex flex-wrap gap-2">
-              {files.map((file, index) => (
+              {files.map((file) => (
                 <Attachment
                   key={`${file.name}:${file.size}:${file.lastModified}`}
                   size="sm"
@@ -214,18 +232,13 @@ export function ChatComposer({
                   </AttachmentMedia>
                   <AttachmentContent>
                     <AttachmentTitle>{file.name}</AttachmentTitle>
-                    <AttachmentDescription
-                      title={
-                        inline[index]
-                          ? undefined
-                          : "The model receives the workspace path. The file contents stay in the workspace."
-                      }
-                    >
+                    <AttachmentDescription>
                       {formatAttachmentSize(file.size)}
-                      {!inline[index] && " · Workspace link"}
                     </AttachmentDescription>
                   </AttachmentContent>
+                  {attachmentMediaType(file)?.startsWith("image/") && <DraftImagePreview file={file} />}
                   <AttachmentAction
+                    className="relative z-20"
                     aria-label={`Remove ${file.name}`}
                     onClick={() => removeFile(file)}
                   >

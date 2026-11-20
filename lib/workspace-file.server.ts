@@ -338,7 +338,8 @@ export async function readWorkspaceFileBytes(
   taskDir: string,
   relative: string,
   limit: number,
-  sizeError: string
+  sizeError: string,
+  prefixBytes?: number
 ) {
   const target = await resolveWorkspaceFile(taskDir, relative)
   if (target.stat.size > BigInt(limit))
@@ -360,7 +361,7 @@ export async function readWorkspaceFileBytes(
         "CONFLICT",
         "The file changed while it was being read. Please reload."
       )
-    const bytes = Buffer.alloc(Number(target.stat.size) + 1)
+    const bytes = Buffer.alloc(Math.min(Number(target.stat.size) + 1, prefixBytes ?? Infinity))
     let length = 0
     while (length < bytes.length) {
       const chunk = await handle.read(

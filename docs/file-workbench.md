@@ -57,10 +57,18 @@ selected destination and reject name collisions. Composer attachments go into
 `uploads/` and receive a numbered suffix on collision.
 
 The composer accepts Word, Excel, PowerPoint, PDF, supported raster images,
-plain text, Markdown, CSV and JSON. Small model-compatible attachments can travel
-inline, with a shared raw-byte budget of 350 KiB per message. Office files and
-attachments exceeding the available budget display “Workspace link” in the
-composer. These messages carry the saved path. Their file contents stay on disk.
+plain text, Markdown, CSV and JSON. The application reads the saved upload on
+the workspace host before sending the message. DOCX (including comments), PPTX
+(slide text), XLSX (cell values), text PDFs and UTF-8 text supply labeled
+excerpts. Legacy binary Office files carry an explicit unavailable notice.
+Extraction checks up to 40 PDF pages and 16,000 characters per file, subject to
+a shared 96 KiB excerpt budget. Scanned PDFs that fit the media budget can be
+sent to PDF-capable models. There is no local OCR.
+
+Images supply actual raster data, downscaled when needed to fit the shared
+250 KiB media budget. The original upload remains available for click-to-open
+preview. Attachment cards show filenames and sizes. A follow-up can recover
+older path-only references from the same chat and include their contents once.
 
 ## Filesystem boundary and writes
 

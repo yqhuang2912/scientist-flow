@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 
-type ImageSource = { name: string; url: string; workspace?: boolean }
+type ImageSource = { name: string; url: string; workspace?: boolean; fallbackUrl?: string }
 
 function PreviewContent({ source }: { source: ImageSource }) {
   const [url, setUrl] = useState(source.workspace ? "" : source.url)
@@ -38,8 +38,9 @@ function PreviewContent({ source }: { source: ImageSource }) {
         localUrl = URL.createObjectURL(bytes)
         setUrl(localUrl)
       } catch (reason) {
-        if (!controller.signal.aborted)
-          setError(
+        if (controller.signal.aborted) return
+        if (source.fallbackUrl) setUrl(source.fallbackUrl)
+        else setError(
             reason instanceof Error
               ? reason.message
               : "Could not load this image."
@@ -51,7 +52,7 @@ function PreviewContent({ source }: { source: ImageSource }) {
       controller.abort()
       if (localUrl) URL.revokeObjectURL(localUrl)
     }
-  }, [source.url, source.workspace])
+  }, [source.url, source.workspace, source.fallbackUrl])
 
   return (
     <>

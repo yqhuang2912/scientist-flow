@@ -363,45 +363,19 @@ export function ChatFile({
       : undefined
   const kind = relative && workspaceOpenPolicy(relative).kind
   const diskImage =
-    relative && kind === "internal-image" && referenceSize !== undefined
+    relative && kind === "internal-image"
       ? workspaceImageSource({ chatId, relativePath: relative })
       : undefined
   const imageUrl = diskImage?.url ?? safeChatImageUrl(part.url, part.mediaType)
   const url = safeChatUrl(part.url)
   const name = part.filename || (imageUrl ? "Generated image" : "Attached file")
-  if (imageUrl)
-    return (
-      <figure className="flex max-w-full flex-col gap-2">
-        <ImagePreview
-          source={{ url: imageUrl, name, workspace: diskImage?.workspace }}
-          trigger={
-            <button
-              type="button"
-              aria-label={`Preview ${name}`}
-              className="block max-w-full cursor-zoom-in self-center rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-            >
-              {/* Model-produced images have arbitrary hosts; do not proxy them through Next. */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={imageUrl}
-                alt={name}
-                loading="lazy"
-                referrerPolicy="no-referrer"
-                className="max-h-96 max-w-full rounded-xl object-contain"
-              />
-            </button>
-          }
-        />
-        {part.filename && (
-          <figcaption className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-            <FileTypeIcon filename={part.filename} mediaType={part.mediaType} className="size-3.5 shrink-0" />
-            <span className="min-w-0 [overflow-wrap:anywhere]">{part.filename}</span>
-          </figcaption>
-        )}
-      </figure>
-    )
   return (
-    <Attachment state="done" size="sm">
+    <Attachment
+      state="done"
+      size="xs"
+      className="max-w-[min(100%,16rem)] min-w-0 flex-nowrap"
+      title={name}
+    >
       <AttachmentMedia variant="icon">
         <FileTypeIcon filename={part.filename || relative} mediaType={part.mediaType} />
       </AttachmentMedia>
@@ -410,10 +384,20 @@ export function ChatFile({
         <AttachmentDescription>
           {referenceSize === undefined
             ? part.mediaType
-            : `${formatAttachmentSize(referenceSize)} · Workspace attachment`}
+            : formatAttachmentSize(referenceSize)}
         </AttachmentDescription>
       </AttachmentContent>
-      {relative && (kind === "external" || kind === "internal-text") ? (
+      {imageUrl ? (
+        <ImagePreview
+          source={{
+            url: imageUrl,
+            name,
+            workspace: diskImage?.workspace,
+            fallbackUrl: diskImage && safeChatImageUrl(part.url, part.mediaType),
+          }}
+          trigger={<AttachmentTrigger aria-label={`Preview ${name}`} />}
+        />
+      ) : relative && (kind === "external" || kind === "internal-text") ? (
         <SavedDocumentTrigger relativePath={relative} name={name} />
       ) : (
         url && (

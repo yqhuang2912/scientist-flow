@@ -113,7 +113,7 @@ function AssistantParts({
   const blocks = groupChatParts(parts)
   return (
     // Match the visible avatar/copy glyphs, which sit inside their hit boxes.
-    <div className="flex min-w-0 flex-col gap-3 pl-1">
+    <div className="flex min-w-0 flex-wrap items-start gap-x-1.5 gap-y-3 pl-1 [&>:not([data-slot=attachment])]:basis-full">
       {blocks.map((block) => {
         if (block.kind === "activity")
           return (
@@ -189,14 +189,38 @@ const ChatTurn = memo(function ChatTurn({
     const saved = message.parts.map(
       (_, index) => storedAttachmentSchema.safeParse(paths?.[index]).data
     )
-    const firstText = message.parts.findIndex(
-      (part, index) => part.type === "text" && !saved[index]
+    const body = message.parts.flatMap((part, index) =>
+      part.type === "text" && !saved[index] ? [{ part, index }] : []
     )
-    const text = message.parts
-      .flatMap((part, index) =>
-        part.type === "text" && !saved[index] ? [part.text] : []
-      )
-      .join("\n\n")
+    const text = body.map(({ part }) => part.text).join("\n\n")
+    const attachments = message.parts.flatMap((part, index) => {
+      const ref = saved[index]
+      if (ref?.contextOnly) return []
+      const file =
+        part.type === "file"
+          ? part
+          : ref && part.type === "text"
+            ? {
+                type: "file" as const,
+                filename: ref.name,
+                mediaType: ref.mediaType,
+                url: "",
+              }
+            : undefined
+      if (!file) return []
+      return [
+        <ChatFile
+          key={index}
+          part={file}
+          referenceSize={ref?.size}
+          savedPath={
+            ref?.relativePath ??
+            paths?.[index] ??
+            ("workspacePath" in file ? file.workspacePath : undefined)
+          }
+        />,
+      ]
+    })
     return (
       <Message align="end">
         <MessageContent className="gap-2">
@@ -211,69 +235,42 @@ const ChatTurn = memo(function ChatTurn({
           >
             <BubbleContent>
               <div className="flex min-w-0 flex-col gap-2">
-                {message.parts.map((part, index) => {
-                  const attachment = saved[index]
-                  if (part.type === "file")
-                    return (
-                      <ChatFile
-                        key={index}
-                        part={part}
-                        savedPath={
-                          attachment?.relativePath ??
-                          paths?.[index] ??
-                          ("workspacePath" in part
-                            ? part.workspacePath
-                            : undefined)
-                        }
-                      />
-                    )
-                  if (part.type === "text" && attachment)
-                    return (
-                      <ChatFile
-                        key={index}
-                        part={{
-                          type: "file",
-                          filename: attachment.name,
-                          mediaType: attachment.mediaType,
-                          url: "",
-                        }}
-                        savedPath={attachment.relativePath}
-                        referenceSize={attachment.size}
-                      />
-                    )
-                  if (part.type !== "text") return null
-                  return (
-                    <div
-                      key={index}
-                      data-evidence-part={index}
-                      tabIndex={-1}
-                      className="min-w-0 rounded-sm focus-visible:outline-ring"
-                    >
-                      {addressedBot && index === firstText && (
-                        <span
-                          className="mr-2.5 inline-flex max-w-32 items-baseline gap-0.5 text-muted-foreground"
-                          title={`@${addressedBot.name}`}
-                        >
-                          <span className="relative -top-px">@</span>
-                          <span className="min-w-0 truncate">
-                            {addressedBot.name}
-                          </span>
-                        </span>
-                      )}
-                      <ChatMarkdown
-                        variant="user"
-                        className={cn(
-                          "min-w-0",
-                          addressedBot &&
-                            index === firstText &&
-                            "inline [&>p:first-child]:inline [&>p:first-child+*]:mt-4"
-                        )}
+                {attachments.length > 0 && (
+                  <div className="flex min-w-0 flex-wrap gap-1.5">
+                    {attachments}
+                  </div>
+                )}
+                {body.map(({ part, index }, position) => (
+                  <div
+                    key={index}
+                    data-evidence-part={index}
+                    tabIndex={-1}
+                    className="min-w-0 rounded-sm focus-visible:outline-ring"
+                  >
+                    {addressedBot && position === 0 && (
+                      <span
+                        className="mr-2.5 inline-flex max-w-32 items-baseline gap-0.5 text-muted-foreground"
+                        title={`@${addressedBot.name}`}
                       >
-                        {part.text}
-                      </ChatMarkdown>
-                    </div>
-                  )
-                })}
+                        <span className="relative -top-px">@</span>
+                        <span className="min-w-0 truncate">
+                          {addressedBot.name}
+                        </span>
+                      </span>
+                    )}
+                    <ChatMarkdown
+                      variant="user"
+                      className={cn(
+                        "min-w-0",
+                        addressedBot &&
+                          position === 0 &&
+                          "inline [&>p:first-child]:inline [&>p:first-child+*]:mt-4"
+                      )}
+                    >
+                      {part.text}
+                    </ChatMarkdown>
+                  </div>
+                ))}
               </div>
             </BubbleContent>
           </Bubble>

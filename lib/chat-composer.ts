@@ -1,10 +1,10 @@
 import { z } from "zod"
-import type { FileUIPart, TextUIPart } from "ai"
+import type { FileUIPart, TextUIPart, UIMessage } from "ai"
 import {
   uploadWorkspaceFileSchema,
+  MAX_UPLOAD_BYTES,
   workspaceFileNameSchema,
   workspaceFileTargetSchema,
-  type UploadedEntry,
 } from "./workspace-validation"
 
 export const chatComposerSchema = z
@@ -40,9 +40,8 @@ export function shouldSubmitChatMessage({
   return key === "Enter" && !shiftKey && !isComposing && keyCode !== 229
 }
 
-// Small, model-compatible attachments fit in the chat transport. Larger files
-// travel directly to workspace storage and leave a durable reference in chat.
-export const INLINE_ATTACHMENT_BUDGET = 350 * 1024
+const MAX_RECOVERED_ATTACHMENTS = 8
+
 const formats: Record<string, string> = {
   png: "image/png",
   jpg: "image/jpeg",
@@ -72,64 +71,66 @@ export function attachmentMediaType(file: Pick<File, "name" | "type">) {
       : undefined
 }
 
-export function inlineAttachmentFlags(files: File[]) {
-  // Leave room for base64 expansion and message metadata in Trigger's 512 KiB turn.
-  let remaining = INLINE_ATTACHMENT_BUDGET
-  return files.map((file) => {
-    const mime = attachmentMediaType(file)
-    if (
-      !mime ||
-      !/^(image\/|text\/|application\/(pdf|json)$)/.test(mime) ||
-      file.size > remaining
-    )
-      return false
-    remaining -= file.size
-    return true
-  })
-}
-
 export const storedAttachmentSchema = z.object({
   name: workspaceFileNameSchema,
-  relativePath: workspaceFileTargetSchema.refine((p) =>
-    p.startsWith("uploads/")
+  relativePath: workspaceFileTargetSchema.refine(
+    (p) => p.startsWith("uploads/") && p.split("/").length === 2
   ),
-  mediaType: z.string(),
-  size: z.number().int().positive(),
+  mediaType: z.string().max(160),
+  size: z.number().int().positive().max(MAX_UPLOAD_BYTES),
+  contextOnly: z.boolean().optional(),
 })
 export type StoredAttachment = z.infer<typeof storedAttachmentSchema>
+export type PreparedAttachment = {
+  reference: StoredAttachment
+  part: TextUIPart | FileUIPart
+}
 
-export async function chatAttachmentParts(
-  files: File[],
-  entries: UploadedEntry[],
-  text: string
+export function legacyAttachmentReferences(
+  messages: UIMessage[],
+  current: StoredAttachment[]
 ) {
+  const seen = new Set(current.map((r) => r.relativePath))
+  const missing: StoredAttachment[] = []
+  for (
+    let i = messages.length - 1;
+    i >= 0 && missing.length + current.length < MAX_RECOVERED_ATTACHMENTS;
+    i--
+  ) {
+    const message = messages[i]
+    const refs = (
+      message.metadata as
+        { workspaceFiles?: Record<string, unknown> } | undefined
+    )?.workspaceFiles
+    if (message.role !== "user" || !refs) continue
+    for (const [idx, part] of message.parts.entries()) {
+      const ref = storedAttachmentSchema.safeParse(refs[idx]).data
+      if (!ref || seen.has(ref.relativePath)) continue
+      seen.add(ref.relativePath)
+      const marker = "Workspace attachment: " + JSON.stringify(ref.relativePath)
+      if (
+        part.type === "text" &&
+        (part.text === marker ||
+          part.text ===
+            marker +
+              ". File contents are stored in the task workspace and are not included in this message.")
+      ) {
+        missing.push({ ...ref, contextOnly: true })
+        if (missing.length + current.length === MAX_RECOVERED_ATTACHMENTS) break
+      }
+    }
+  }
+  return missing
+}
+
+export function chatAttachmentParts(files: PreparedAttachment[], text: string) {
   const parts: (TextUIPart | FileUIPart)[] = text.trim()
     ? [{ type: "text", text }]
     : []
   const workspaceFiles: Record<number, StoredAttachment> = {}
-  const inline = inlineAttachmentFlags(files)
-  for (const [i, file] of files.entries()) {
-    const mediaType = attachmentMediaType(file)!
-    const info = {
-      name: file.name,
-      relativePath: entries[i].relPath,
-      size: file.size,
-      mediaType,
-    }
-    workspaceFiles[parts.length] = info
-    if (inline[i]) {
-      parts.push({
-        type: "file",
-        filename: file.name,
-        mediaType,
-        url: await fileToDataUrl(file, mediaType),
-      })
-    } else {
-      parts.push({
-        type: "text",
-        text: `Workspace attachment: ${JSON.stringify(info.relativePath)}. File contents are stored in the task workspace and are not included in this message.`,
-      })
-    }
+  for (const { reference, part } of files) {
+    workspaceFiles[parts.length] = reference
+    parts.push(part)
   }
   return { parts, workspaceFiles }
 }
@@ -149,16 +150,4 @@ export function attachmentRejection(file: File): string | undefined {
   if (!result.success) return result.error.issues[0].message
   if (!attachmentMediaType(file)) return "This file type cannot be attached."
   return undefined
-}
-
-function fileToDataUrl(file: File, mediaType: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () =>
-      typeof reader.result === "string"
-        ? resolve(reader.result)
-        : reject(new Error("Could not read the file."))
-    reader.onerror = () => reject(new Error("Could not read the file."))
-    reader.readAsDataURL(file.slice(0, file.size, mediaType))
-  })
 }

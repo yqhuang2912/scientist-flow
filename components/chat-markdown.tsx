@@ -1,13 +1,14 @@
 "use client"
 
 import { useParams } from "next/navigation"
+import { FileTypeIcon } from "@/components/file-type-icon"
 import { ImagePreview } from "@/components/image-preview"
 import { workspaceImageSource } from "@/lib/workspace-document"
 import { workspaceOpenPolicy } from "@/lib/workspace-open-policy"
 import { safeChatUrl, safeChatImageUrl } from "@/lib/chat-presentation"
-import type { Root } from "hast"
+import type { Element, ElementContent, Root } from "hast"
 import { visit } from "unist-util-visit"
-import { memo, useState, type ComponentProps } from "react"
+import { memo, type ComponentProps } from "react"
 import { cjk } from "@streamdown/cjk"
 import { code } from "@streamdown/code"
 import { math } from "@streamdown/math"
@@ -71,6 +72,24 @@ function workspaceImagePath(src: string) {
 // images get a local renderer, after sanitization and before URL filtering.
 function rehypeWorkspaceImages() {
   return (tree: Root) => {
+    // A linked Markdown image gets its own preview control. Text beside the
+    // image retains its original link without nesting a button inside an anchor.
+    visit(tree, "element", (node, index, parent) => {
+      if (node.tagName !== "a" || !parent || index === undefined ||
+          !node.children.some(child => child.type === "element" && child.tagName === "img")) return
+      const items: Element[] = []
+      let run: ElementContent[] = []
+      for (const child of node.children) {
+        if (child.type === "element" && child.tagName === "img") {
+          if (run.length) items.push({...node, children: run})
+          run = []
+          items.push(child)
+        } else run.push(child)
+      }
+      if (run.length) items.push({...node, children: run})
+      parent.children.splice(index, 1, ...items)
+      return index + items.length
+    })
     visit(tree, "element", (node) => {
       if (node.tagName !== "img") return
       if (
@@ -89,12 +108,10 @@ const chatRehypePlugins = [
 ]
 
 function MarkdownImage(props: ComponentProps<"img"> & ExtraProps) {
-  const [open, setOpen] = useState(false)
   const params = useParams<{ chatId?: string }>()
-  const DefaultImage = defaultComponents.img
   const src = typeof props.src === "string" ? props.src : ""
-  if (!src || src.startsWith("streamdown:")) return <DefaultImage {...props} />
-  const name = props.alt || "Image"
+  if (!src || src.startsWith("streamdown:")) return <>{props.alt}</>
+  const name = props.alt || workspaceImagePath(src)?.split("/").at(-1) || "Image"
   const remote =
     safeChatUrl(src) ??
     safeChatImageUrl(src, src.match(/^data:(image\/[a-z]+);base64,/)?.[1] ?? "")
@@ -107,53 +124,19 @@ function MarkdownImage(props: ComponentProps<"img"> & ExtraProps) {
   }
   if (!source) return <>{props.alt}</>
   return (
-    <>
-      <DefaultImage
-        {...props}
-        src={source.url}
-        className={cn(
-          props.className,
-          "cursor-zoom-in focus-visible:ring-2 focus-visible:ring-ring"
-        )}
-        role="button"
-        tabIndex={0}
-        aria-label={`Preview ${name}`}
-        aria-haspopup="dialog"
-        onClick={(event) => {
-          if (!event.currentTarget.closest("a")) setOpen(true)
-        }}
-        onKeyDown={(event) => {
-          if (
-            (event.key === "Enter" || event.key === " ") &&
-            !event.currentTarget.closest("a")
-          ) {
-            event.preventDefault()
-            setOpen(true)
-          }
-        }}
-      />
-      {open && <ImagePreview source={source} onClose={() => setOpen(false)} />}
-    </>
+    <ImagePreview
+      source={source}
+      trigger={
+        <button type="button" aria-label={`Preview ${name}`} className="inline-flex max-w-full items-center gap-2 rounded-lg border bg-card px-2 py-1 align-middle text-sm hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
+          <FileTypeIcon mediaType="image/png" className="size-4" />
+          <span className="truncate">{name}</span>
+        </button>
+      }
+    />
   )
-}
-
-function MarkdownParagraph(props: ComponentProps<"p"> & ExtraProps) {
-  // Streamdown renders a block around its image download controls.
-  const { node, ...rest } = props
-  if (
-    node?.children.some(
-      (child) =>
-        child.type === "element" &&
-        ["workspace-image", "img"].includes(child.tagName)
-    )
-  )
-    return <div {...rest} />
-  const DefaultParagraph = defaultComponents.p
-  return <DefaultParagraph {...props} />
 }
 
 const components = {
-  p: MarkdownParagraph,
   code: MarkdownCode,
   img: MarkdownImage,
   "workspace-image": MarkdownImage,

@@ -397,6 +397,11 @@ export async function runBotTurn({
       const generated =
         !incoming &&
         modelForStep.explicitEffort &&
+        !publicInput.some(
+          (message) => message.role === "user" &&
+            Array.isArray(message.content) &&
+            message.content.some((part) => part.type !== "text")
+        ) &&
         (await usesDeepAgent(context, bot.id, user))
           ? (await import("../lib/deepagents-reply.server")).deepAgentReply({
               route: initial,
