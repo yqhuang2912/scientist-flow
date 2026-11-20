@@ -1,6 +1,5 @@
 "use server"
 
-import { defaultStorage } from "@trigger.dev/sdk/ai"
 import { and, asc, eq, sql } from "drizzle-orm"
 import { nanoid } from "nanoid"
 import { z } from "zod"
@@ -18,12 +17,12 @@ const unavailable = {
   error: "Open this bot’s direct chat to manage its memory.",
 }
 
-async function directBotId(chatId: string) {
+async function directBotId(chatId: string, requireTriggerHistory = false) {
   if (!z.nanoid().safeParse(chatId).success) return null
   const chat = await getChat(chatId)
-  return chat?.kind === "direct" && chat.bots.length === 1
-    ? chat.bots[0].id
-    : null
+  if (!chat || chat.kind !== "direct" || chat.bots.length !== 1) return null
+  if (requireTriggerHistory && chat.nativeDirect) return null
+  return chat.bots[0].id
 }
 
 function failed(operation: string) {
@@ -64,8 +63,9 @@ export async function saveBotMemory(
       error: "Select a user message in this direct chat.",
     }
   try {
-    const botId = await directBotId(chatId)
+    const botId = await directBotId(chatId, true)
     if (!botId) return unavailable
+    const { defaultStorage } = await import("@trigger.dev/sdk/ai")
     const transcript = await defaultStorage.load({
       chatId,
       clientData: undefined,

@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react"
 
 import { ChatHeader } from "@/components/chat-header"
-import { ChatInterface } from "@/components/chat-interface"
 import { ChatWorkspaceLayout } from "@/components/chat-workspace-layout"
 import type { BotSummary } from "@/queries/bots"
 import type { ChatWithBot } from "@/queries/chats"
@@ -11,9 +10,10 @@ import type { ChatWithBot } from "@/queries/chats"
 interface ChatPageClientProps {
   chat: ChatWithBot
   bots: BotSummary[]
+  children: React.ReactNode
 }
 
-export function ChatPageClient({ chat, bots }: ChatPageClientProps) {
+export function ChatPageClient({ chat, bots, children }: ChatPageClientProps) {
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
   // Bump this to remount ResearchWorkspaceInner after config changes
   const [workspaceKey, setWorkspaceKey] = useState(0)
@@ -46,11 +46,7 @@ export function ChatPageClient({ chat, bots }: ChatPageClientProps) {
         workspaceOpen={workspaceOpen}
         onWorkspaceOpenChange={setWorkspaceOpen}
       />
-      <ChatInterface
-        chatId={chat.id}
-        bots={chat.bots}
-        isGroup={chat.kind === "group"}
-      />
+      {children}
     </ChatWorkspaceLayout>
   )
 }

@@ -238,6 +238,8 @@ export const chats = pgTable("chats", {
     .primaryKey()
     .$defaultFn(() => nanoid()),
   kind: chatKind("kind").notNull().default("direct"),
+  // Assigned only when provisioning the installation's new, empty pilot chat.
+  nativeOwner: text("native_owner").unique(),
   name: text("name"),
   lastMessagePreview: text("last_message_preview"),
   lastMessageAt: timestamp("last_message_at", { withTimezone: true })
@@ -258,6 +260,10 @@ export const botExecutions = pgTable(
       .notNull()
       .references(() => chats.id, { onDelete: "cascade" }),
     userMessageId: text("user_message_id").notNull(),
+    userText: text("user_text"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
     slot: integer("slot").notNull(),
     runId: text("run_id").notNull(),
     botId: text("bot_id").notNull(),

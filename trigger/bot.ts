@@ -2,7 +2,6 @@ import { and, asc, eq, getTableColumns, inArray } from "drizzle-orm"
 
 import {
   bots,
-  botMemories,
   botSkills,
   skills,
   chatMembers,
@@ -65,22 +64,6 @@ export async function readChatSkillInstructions(
       )
     )
   return row
-}
-
-export async function getChatBotMemories(chatId: string, botId: string) {
-  try {
-    return await db
-      .select({ botId: botMemories.botId, text: botMemories.text })
-      .from(chatMembers)
-      .innerJoin(botMemories, eq(botMemories.botId, chatMembers.botId))
-      .where(and(eq(chatMembers.chatId, chatId), eq(chatMembers.botId, botId)))
-      .orderBy(asc(botMemories.createdAt), asc(botMemories.id))
-  } catch {
-    console.error("Could not read bot memory for chat", chatId)
-    throw new Error(
-      "Could not load bot preferences. Please retry this message."
-    )
-  }
 }
 
 export async function getTriggerChatContext(

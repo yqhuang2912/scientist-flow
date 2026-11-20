@@ -15,7 +15,8 @@ export async function claimExecution(
   userMessageId: string,
   botId: string,
   runId: string,
-  delegation: Delegation | null
+  delegation: Delegation | null,
+  userText?: string
 ) {
   const slot = delegation ? 1 : 0
   const values = {
@@ -23,6 +24,7 @@ export async function claimExecution(
     messageId: nanoid(),
     chatId,
     userMessageId,
+    userText,
     botId,
     runId,
     slot,
@@ -52,7 +54,7 @@ export async function claimExecution(
 export async function finishExecution(
   id: string,
   status: Exclude<ExecutionStatus, "running">,
-  message: UIMessage,
+  message: UIMessage | null,
   delegation: Delegation | null
 ) {
   await db

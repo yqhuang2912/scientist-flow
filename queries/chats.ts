@@ -9,6 +9,7 @@ import type { ModelChoice } from "@/lib/model-catalog"
 export interface ChatWithBot {
   id: string
   kind: "direct" | "group"
+  nativeDirect: boolean
   name: string | null
   lastMessagePreview: string | null
   lastMessageAt: Date
@@ -36,6 +37,7 @@ export async function getChat(chatId: string): Promise<ChatWithBot | null> {
     .select({
       id: chats.id,
       kind: chats.kind,
+      nativeOwner: chats.nativeOwner,
       name: chats.name,
       lastMessagePreview: chats.lastMessagePreview,
       lastMessageAt: chats.lastMessageAt,
@@ -53,7 +55,11 @@ export async function getChat(chatId: string): Promise<ChatWithBot | null> {
     .where(eq(chats.id, chatId))
     .orderBy(asc(chatMembers.joinedAt))
   const row = rows[0]
-  if (!row) {
+  if (
+    !row ||
+    (row.nativeOwner !== null &&
+      row.nativeOwner !== process.env.SCIENTISTFLOW_INSTALLATION_ID)
+  ) {
     return null
   }
 
@@ -80,6 +86,7 @@ export async function getChat(chatId: string): Promise<ChatWithBot | null> {
   return {
     id: row.id,
     kind: row.kind,
+    nativeDirect: row.nativeOwner !== null,
     name: row.name,
     lastMessagePreview: row.lastMessagePreview,
     lastMessageAt: row.lastMessageAt,

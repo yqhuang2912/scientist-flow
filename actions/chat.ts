@@ -1,8 +1,6 @@
 "use server"
 
 import { hydrateExecutions } from "@/lib/bot-execution.server"
-import { auth } from "@trigger.dev/sdk"
-import { chat, defaultStorage } from "@trigger.dev/sdk/ai"
 import { and, eq, inArray } from "drizzle-orm"
 import { nanoid } from "nanoid"
 
@@ -16,11 +14,9 @@ import {
 } from "@/lib/model-connections.server"
 import { ModelConnectionError } from "@/lib/model-credentials.server"
 
-const createChatSession = chat.createStartSessionAction("chat-agent")
-const readChatTranscript = chat.createLoadTranscriptAction(defaultStorage)
-
-async function assertChatExists(chatId: string) {
-  if (!(await getChat(chatId))) {
+async function assertTriggerChat(chatId: string) {
+  const chat = await getChat(chatId)
+  if (!chat || chat.nativeDirect) {
     throw new Error("Chat not found")
   }
 }
@@ -31,15 +27,16 @@ export async function startChatSession(params: {
 }) {
   if (process.env.SCIENTISTFLOW_INSTALLATION_ID)
     await assertInstallationRequest()
-  await assertChatExists(params.chatId)
-  return createChatSession(params)
+  await assertTriggerChat(params.chatId)
+  const { chat } = await import("@trigger.dev/sdk/ai")
+  return chat.createStartSessionAction("chat-agent")(params)
 }
 
 export async function mintChatAccessToken(chatId: string) {
   if (process.env.SCIENTISTFLOW_INSTALLATION_ID)
     await assertInstallationRequest()
-  await assertChatExists(chatId)
-
+  await assertTriggerChat(chatId)
+  const { auth } = await import("@trigger.dev/sdk")
   return auth.createPublicToken({
     scopes: {
       read: { sessions: chatId },
@@ -53,8 +50,9 @@ export async function loadChatTranscript(params: {
   chatId: string
   limit?: number
 }) {
-  await assertChatExists(params.chatId)
-  const transcript = await readChatTranscript(params)
+  await assertTriggerChat(params.chatId)
+  const { chat, defaultStorage } = await import("@trigger.dev/sdk/ai")
+  const transcript = await chat.createLoadTranscriptAction(defaultStorage)(params)
   return {
     ...transcript,
     messages: await hydrateExecutions(params.chatId, transcript.messages),

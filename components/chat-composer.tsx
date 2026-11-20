@@ -87,6 +87,7 @@ export function ChatComposer({
   onSubmit,
   status,
   onStop,
+  textOnly = false,
 }: {
   bots: ComposerBot[]
   selectedBotId: string
@@ -96,6 +97,7 @@ export function ChatComposer({
   ) => void | Promise<void | { error: string }>
   status: ChatStatus
   onStop: () => void
+  textOnly?: boolean
 }) {
   const inputId = useId()
   const composing = useRef(false)
@@ -119,6 +121,10 @@ export function ChatComposer({
 
   function addFiles(incoming: FileList | File[] | null) {
     if (!incoming) return
+    if (textOnly) {
+      form.setError("root", { message: "This chat supports text messages only." })
+      return
+    }
     form.clearErrors("root")
     const accepted: File[] = []
     for (const file of Array.from(incoming)) {
@@ -280,7 +286,7 @@ export function ChatComposer({
             />
             <InputGroupAddon align="block-end" className="justify-between">
               <div className="flex min-w-0 items-center gap-1">
-                <Tooltip>
+                {!textOnly && <Tooltip>
                   <TooltipTrigger
                     render={
                       <InputGroupButton
@@ -295,7 +301,7 @@ export function ChatComposer({
                     <PlusIcon />
                   </TooltipTrigger>
                   <TooltipContent>Attach files</TooltipContent>
-                </Tooltip>
+                </Tooltip>}
                 {bots.length > 0 && (
                   <DropdownMenu>
                     <DropdownMenuTrigger

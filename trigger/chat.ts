@@ -1,3 +1,4 @@
+import { getChatBotMemories } from "../queries/bot-memories"
 import {
   groupPilotRecipient,
   usesDeepAgent,
@@ -39,7 +40,6 @@ import {
 import { z } from "zod"
 
 import {
-  getChatBotMemories,
   getChatSkillBindings,
   readChatSkillInstructions,
   getChatToolBindings,
