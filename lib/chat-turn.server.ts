@@ -1,42 +1,29 @@
+import "server-only"
 import { getChatBotMemories } from "../queries/bot-memories"
-import {
-  groupPilotRecipient,
-  usesDeepAgent,
-} from "../lib/deepagents-pilot.server"
+import { groupPilotRecipient, usesDeepAgent } from "./deepagents-pilot.server"
 import {
   handoffDescription,
   handoffInputSchema,
   type HandoffInput,
-} from "../lib/chat-handoff"
-import { resolveBotModel } from "../lib/bot-model.server"
-import {
-  chatMemberChoice,
-  validateChoice,
-} from "../lib/model-connections.server"
+} from "./chat-handoff"
+import { resolveBotModel } from "./bot-model.server"
+import { ChatLeaseLost } from "./chat-jobs.server"
+import { deepAgentReply } from "./deepagents-reply.server"
+import { chatMemberChoice, validateChoice } from "./model-connections.server"
 import {
   claimExecution,
   finishExecution,
   hydrateExecutions,
-} from "../lib/bot-execution.server"
+} from "./bot-execution.server"
 import {
   authorMetadata,
   publicModelHistory,
   executionInstructions,
   mergeExecutionMessages,
   type Delegation,
-} from "../lib/bot-execution"
-import { portableHistory } from "../lib/gateway-step.server"
-import { ModelConnectionError } from "../lib/model-credentials.server"
-import { chat, defaultStorage, type ChatStreamText } from "@trigger.dev/sdk/ai"
-import {
-  readUIMessageStream,
-  type UIMessage,
-  type UIMessageChunk,
-  type ModelMessage,
-  isStepCount,
-  tool,
-  type ToolSet,
-} from "ai"
+} from "./bot-execution"
+import { ModelConnectionError } from "./model-credentials.server"
+import { type UIMessage, type UIMessageChunk, tool } from "ai"
 import { z } from "zod"
 
 import {
@@ -44,32 +31,26 @@ import {
   readChatSkillInstructions,
   getChatToolBindings,
   claimToolPost,
-  getTriggerChatContext,
-  type TriggerBot,
-} from "./bot"
-import { resolveReplyBot } from "../lib/chat-bot-context"
-import { botTextTransform } from "../lib/chat-bot-text"
+  getChatContext,
+} from "../queries/chat-bindings"
+import { resolveReplyBot, type BotIdentity } from "./chat-bot-context"
 import {
   decisionInput,
   projectContextForSteps,
   projectDecisionTool,
   projectRecallTool,
   toolDecisionInput,
-} from "../lib/project-decisions"
-import { projectEvidence } from "../lib/project-evidence"
+} from "./project-decisions"
+import { projectEvidence } from "./project-evidence"
 import {
   readProjectDecisions,
   recordProjectDecision,
   recordToolProjectDecision,
-} from "../lib/project-decisions.server"
+} from "./project-decisions.server"
 
-import { pastRead, skillTurn } from "../lib/bot-skill-turn"
+import { pastRead, skillTurn } from "./bot-skill-turn"
 
-import {
-  historyHttpTools,
-  httpToolTurn,
-  redactToolInputs,
-} from "../lib/bot-http-tools"
+import { httpToolTurn } from "./bot-http-tools"
 
 const decisionDefinition = {
   description:
@@ -77,15 +58,6 @@ const decisionDefinition = {
   inputSchema: decisionInput,
   contextSchema: z.object({ botId: z.string() }),
 }
-const pastDecision = tool({
-  ...decisionDefinition,
-  toModelOutput: () => ({
-    type: "text",
-    value:
-      "Historical project decision activity. Consult the current active project records.",
-  }),
-})
-
 const readSkillInput = z.object({
   name: z
     .string()
@@ -97,76 +69,13 @@ const readSkillDefinition = {
   inputSchema: readSkillInput,
   contextSchema: z.object({ botId: z.string() }),
 }
-const readSkillSchema = tool({
-  ...readSkillDefinition,
-  toModelOutput: () => ({ type: "text", value: pastRead }),
-})
-
-const handoffToolSchema = tool({
-  description: handoffDescription,
-  inputSchema: handoffInputSchema,
-})
-
-export const chatAgent = chat.agent({
-  id: "chat-agent",
-  storage: defaultStorage,
-  telemetry: { recordUserMessage: false, recordClientData: false },
-  clientDataSchema: z.object({
-    botId: z.string().min(1).optional(),
-  }),
-  tools: async ({ chatId }): Promise<ToolSet> => {
-    const chatContext = await getTriggerChatContext(chatId)
-
-    const schemas = historyHttpTools(await getChatToolBindings(chatId))
-    if (chatContext?.kind !== "group") {
-      return { ...schemas, read_skill: readSkillSchema }
-    }
-
-    return {
-      ...schemas,
-      handoff: handoffToolSchema,
-      [projectDecisionTool]: pastDecision,
-      read_skill: readSkillSchema,
-    }
-  },
-  run: async ({ chatId, clientData, signal, streamText, ctx, messages }) => {
-    await runBotTurn({
-      chatId,
-      requestedBotId: clientData?.botId,
-      signal,
-      streamText,
-      runId: ctx.run.id,
-      messages,
-      transcript: chat.history.all(),
-      saveHistory: (history) => chat.history.set(history),
-      publish: async (stream, parentExecutionId) => {
-        if (parentExecutionId)
-          return chat.forwardSubAgent(stream, { toolCallId: parentExecutionId })
-        const [wire, capture] = stream.tee()
-        const collect = async () => {
-          let last: UIMessage | undefined
-          for await (const m of readUIMessageStream({ stream: capture }))
-            last = m
-          return last
-        }
-        const [, message] = await Promise.all([
-          chat.pipe(wire, { signal }),
-          collect(),
-        ])
-        return message
-      },
-    })
-  },
-})
-
 type BotTurn = {
   chatId: string
   requestedBotId?: string
   runId: string
   signal: AbortSignal
-  streamText: ChatStreamText
+  lease?: string
   httpTransport?: Parameters<typeof httpToolTurn>[3]
-  messages: ModelMessage[]
   transcript: UIMessage[]
   publish: (
     stream: ReadableStream<UIMessageChunk>,
@@ -175,21 +84,19 @@ type BotTurn = {
   saveHistory: (history: UIMessage[]) => void
 }
 
-// The Trigger adapter owns the session transport. Each call to perform below
-// owns its model loop, permissions, public transcript and durable message.
+// Each speaker owns its model, tool permissions and durable execution record.
 export async function runBotTurn({
   chatId,
   requestedBotId,
   runId,
   signal,
-  streamText,
+  lease,
   httpTransport,
-  messages,
   transcript,
   publish,
   saveHistory,
 }: BotTurn) {
-  const context = await getTriggerChatContext(chatId)
+  const context = await getChatContext(chatId)
   if (!context) throw new Error("Chat not found")
   const first = resolveReplyBot(context, requestedBotId)
   const history = await hydrateExecutions(chatId, transcript)
@@ -206,8 +113,16 @@ export async function runBotTurn({
   )
 
   const completed: UIMessage[] = []
-  const perform = async (bot: TriggerBot, incoming: Delegation | null) => {
-    const claim = await claimExecution(chatId, user.id, bot.id, runId, incoming)
+  const perform = async (bot: BotIdentity, incoming: Delegation | null) => {
+    if (signal.reason instanceof ChatLeaseLost) throw signal.reason
+    const claim = await claimExecution(
+      chatId,
+      user.id,
+      bot.id,
+      runId,
+      incoming,
+      lease
+    )
     const execution = claim.row
     if (!claim.claimed) {
       if (execution.message) completed.push(execution.message)
@@ -216,13 +131,8 @@ export async function runBotTurn({
         : null
     }
     const meta = authorMetadata(execution)
-    const options = {
-      generateMessageId: () => execution.messageId,
-      messageMetadata: () => meta,
-      onError: safeError,
-    }
     let delegation: Delegation | null = null
-    let intent: { target: TriggerBot; task: string } | undefined
+    let intent: { target: BotIdentity; task: string } | undefined
     let failure: string | undefined
     let final: UIMessage | undefined
     try {
@@ -353,18 +263,6 @@ export async function runBotTurn({
         }),
       })
       const ownTools = http.names(bot.id)
-      const scope = (allowDecision: boolean) => ({
-        activeTools: Object.keys(tools).filter(
-          (name) => allowDecision || name !== projectDecisionTool
-        ),
-        toolsContext: {
-          ...Object.fromEntries(
-            Object.keys(http.tools).map((k) => [k, { botId: bot.id }])
-          ),
-          read_skill: { botId: bot.id },
-          [projectDecisionTool]: { botId: bot.id },
-        },
-      })
       const instructions = executionInstructions({
         bot,
         context,
@@ -374,62 +272,12 @@ export async function runBotTurn({
         catalog: pilotRecipient && !incoming ? "" : skill.catalog(bot.id),
         ownTools: pilotRecipient && !incoming ? [] : ownTools,
       })
-      const publicInput = evidence
-        ? await publicModelHistory(
-            evidence.labelHistory(visibleHistory),
-            members,
-            bot.id
-          )
-        : portableHistory(messages)
+      const publicInput = await publicModelHistory(
+        evidence ? evidence.labelHistory(visibleHistory) : visibleHistory,
+        members,
+        bot.id
+      )
       const initial = modelForStep(0)
-      const legacyStream = () =>
-        streamText({
-          ...initial,
-          system: instructions,
-          messages: publicInput,
-          tools,
-          ...scope(true),
-          abortSignal: signal,
-          stopWhen: [isStepCount(6), () => !!intent],
-          experimental_transform: [
-            botTextTransform(members),
-            redactToolInputs(
-              new Set([...Object.keys(http.tools), projectDecisionTool])
-            ),
-          ],
-          onError: ({ error }) => {
-            failure = safeError(error)
-          },
-          prepareStep: async ({ steps }) => {
-            const saved = steps.some((s) =>
-              s.toolResults.some(
-                (r) =>
-                  r.toolName === projectDecisionTool &&
-                  (r.output as { success?: boolean } | null)?.success
-              )
-            )
-            return {
-              ...(steps.length ? modelForStep(steps.length) : initial),
-              instructions: [
-                instructions,
-                group ? await project(steps.length) : "",
-                saved && canDelegate
-                  ? "The decision is committed. If a delegation was requested, call handoff now."
-                  : "",
-                skill.hasRead(bot.id)
-                  ? "Follow your retrieved skill's exact procedure and required wording in the visible answer."
-                  : "",
-              ]
-                .filter(Boolean)
-                .join("\n\n"),
-              ...scope(!saved),
-            }
-          },
-        }).toUIMessageStream(options)
-      if (pilotRecipient && !modelForStep.explicitEffort)
-        throw new ModelConnectionError(
-          "Select an explicit reasoning effort for this bot."
-        )
       const directPilot =
         !group &&
         modelForStep.explicitEffort &&
@@ -442,7 +290,7 @@ export async function runBotTurn({
         (await usesDeepAgent(context, bot.id, user))
       const generated =
         directPilot || pilotRecipient
-          ? (await import("../lib/deepagents-reply.server")).deepAgentReply({
+          ? deepAgentReply({
               route: initial,
               instructions: pilotRecipient
                 ? [
@@ -514,7 +362,34 @@ export async function runBotTurn({
               messageId: execution.messageId,
               onError: safeError,
             })
-          : legacyStream()
+          : deepAgentReply({
+              route: initial,
+              general: true,
+              instructions,
+              stepInstructions: async (step) =>
+                [
+                  instructions,
+                  group ? await project(step) : "",
+                  committed.size && canDelegate
+                    ? "The decision is committed. If a delegation was requested, call handoff now."
+                    : "",
+                  skill.hasRead(bot.id)
+                    ? "Follow your retrieved skill's exact procedure and required wording in the visible answer."
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join("\n\n"),
+              canRecordDecision: () => committed.size === 0,
+              messages: publicInput,
+              recipient: { botId: bot.id, tools, followup: modelForStep },
+              resolveCitation: group
+                ? async (id) => (await readProjectDecisions(chatId, id))[0]?.id
+                : undefined,
+              signal,
+              metadata: meta,
+              messageId: execution.messageId,
+              onError: safeError,
+            })
       const stream = generated.pipeThrough(
         new TransformStream<UIMessageChunk, UIMessageChunk>({
           transform(chunk, controller) {
@@ -596,13 +471,16 @@ export async function runBotTurn({
               },
             ],
       }
-      await finishExecution(
-        execution.id,
-        status,
-        message,
-        delegation ?? incoming
-      )
-      completed.push(message)
+      if (!(signal.reason instanceof ChatLeaseLost)) {
+        await finishExecution(
+          execution.id,
+          status,
+          message,
+          delegation ?? incoming,
+          lease
+        )
+        completed.push(message)
+      }
     }
     return delegation
   }

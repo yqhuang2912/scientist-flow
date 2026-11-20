@@ -12,7 +12,11 @@ Copy `.env.example` to `.env.local` and replace both placeholders with connectio
 npm run db:push
 ```
 
-The starter schema includes a `bots` table; add more tables to `db/schema.ts` before pushing schema changes.
+## Chat runtime
+
+Run `npm run dev` locally or `npm run build` followed by `npm start` for a long-running Node.js server. Configure the installation ID and encryption key from `.env.example` and keep them stable across restarts.
+
+Next.js stores accepted user messages in Neon before dispatching them to the TypeScript Deep Agents runner. Closing a tab detaches the viewer. The Stop button requests cancellation. On startup the server checks for queued turns and takes over expired worker leases. An interrupted speaker can repeat a model request. Completed speakers retain their message IDs and the shared HTTP tool keeps its per-turn POST claims.
 
 ## Adding components
 

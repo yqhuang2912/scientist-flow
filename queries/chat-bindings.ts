@@ -1,3 +1,4 @@
+import "server-only"
 import { and, asc, eq, getTableColumns, inArray } from "drizzle-orm"
 
 import {
@@ -12,20 +13,7 @@ import {
 } from "../db/schema"
 import { db } from "../lib/db"
 
-export type TriggerBot = Pick<
-  typeof bots.$inferSelect,
-  "id" | "name" | "job" | "instructions"
->
-
-export type TriggerChatContext = {
-  kind: "direct" | "group"
-  bots: TriggerBot[]
-}
-
-export async function getTriggerBotById(botId: string) {
-  const rows = await db.select().from(bots).where(eq(bots.id, botId)).limit(1)
-  return rows[0] ?? null
-}
+import type { BotChatContext, BotIdentity } from "../lib/chat-bot-context"
 
 function memberSkillIds(chatId: string, botId: string) {
   return db
@@ -66,9 +54,9 @@ export async function readChatSkillInstructions(
   return row
 }
 
-export async function getTriggerChatContext(
+export async function getChatContext(
   chatId: string
-): Promise<TriggerChatContext | null> {
+): Promise<BotChatContext | null> {
   const rows = await db
     .select({
       kind: chats.kind,
@@ -88,7 +76,7 @@ export async function getTriggerChatContext(
     return null
   }
 
-  const memberBots = rows.reduce<TriggerBot[]>((allBots, currentRow) => {
+  const memberBots = rows.reduce<BotIdentity[]>((allBots, currentRow) => {
     if (
       currentRow.botId &&
       currentRow.botName &&

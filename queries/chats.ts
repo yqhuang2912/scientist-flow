@@ -9,7 +9,6 @@ import type { ModelChoice } from "@/lib/model-catalog"
 export interface ChatWithBot {
   id: string
   kind: "direct" | "group"
-  nativeDirect: boolean
   name: string | null
   lastMessagePreview: string | null
   lastMessageAt: Date
@@ -86,7 +85,6 @@ export async function getChat(chatId: string): Promise<ChatWithBot | null> {
   return {
     id: row.id,
     kind: row.kind,
-    nativeDirect: row.nativeOwner !== null,
     name: row.name,
     lastMessagePreview: row.lastMessagePreview,
     lastMessageAt: row.lastMessageAt,

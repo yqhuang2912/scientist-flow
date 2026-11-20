@@ -10,8 +10,9 @@ No package upgrade or database change is required.
 
 ## Responsibilities
 
-- `components/chat-interface.tsx` retains the existing Trigger.dev transport,
-  transcript loader, `useChat` identity, bot selection, input and stop action.
+- `components/chat-interface.tsx` submits messages to the Next.js chat route,
+  polls the active reply, and reconnects to the saved transcript when the page
+  reopens. The Stop button cancels the active turn on the server.
 - `components/chat-transcript.tsx` renders identity lines, message surfaces,
   ordered content and the official scroller. Avatars live in the identity line,
   allowing the body to align with their outer edge. Mentions share the first
@@ -43,11 +44,9 @@ Incomplete historic/interrupted calls do not animate indefinitely. Tool
 input/output is text, with a visible 32,768-character display limit; oversized
 approval input cannot be approved without a complete review.
 
-The latest assistant's approval requests use `addToolApprovalResponse` and
-`lastAssistantMessageIsCompleteWithApprovalResponses`, as supported by the
-installed Trigger.dev transport. Old requests cannot be acted on. This adds
-presentation/continuation support, not new tool definitions or approval rules.
-The current production agent defines only `handoff`.
+The browser fixture exercises approval controls with simulated requests.
+Production Deep Agents use the bot's assigned skills and HTTP tools. Group
+chats also support handoffs and project decisions.
 
 Existing Streamdown plugins render Markdown, highlighted code, CJK, KaTeX
 (`$$…$$` by default) and Mermaid. HTTP(S) sources are links; document sources

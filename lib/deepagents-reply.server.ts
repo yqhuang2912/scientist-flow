@@ -2,6 +2,7 @@ import "server-only"
 import { isDeepStrictEqual } from "node:util"
 import type {
   LanguageModelV4FunctionTool,
+  LanguageModelV4FilePart,
   LanguageModelV4Message,
 } from "@ai-sdk/provider"
 import { BaseChatModel } from "@langchain/core/language_models/chat_models"
@@ -73,7 +74,14 @@ function providerMessage(message: BaseMessage): LanguageModelV4Message {
       ],
     }
   const text = { type: "text" as const, text: message.text }
-  if (HumanMessage.isInstance(message)) return { role: "user", content: [text] }
+  if (HumanMessage.isInstance(message)) {
+    const files = message.additional_kwargs.workspaceFiles as
+      LanguageModelV4FilePart[] | undefined
+    return {
+      role: "user",
+      content: [...(text.text ? [text] : []), ...(files ?? [])],
+    }
+  }
   if (AIMessage.isInstance(message))
     return {
       role: "assistant",
@@ -101,7 +109,8 @@ class PilotModel extends BaseChatModel {
     private readonly definitions: LanguageModelV4FunctionTool[],
     private readonly followup: ((step: number) => Route) | undefined,
     private readonly allowsTool: (name: string) => boolean,
-    private readonly onText: (delta: string) => void
+    private readonly onText: (delta: string) => void,
+    private readonly general = false
   ) {
     super({ maxRetries: 0, cache: false })
   }
@@ -123,13 +132,12 @@ class PilotModel extends BaseChatModel {
     if (
       step > 0 &&
       !(
-        step <= 3 &&
+        step <= (this.general ? 5 : 3) &&
         this.followup &&
         this.call &&
         last &&
         ToolMessage.isInstance(last) &&
-        last.tool_call_id === this.call.id &&
-        last.name === this.call.name
+        this.completedCallIds.has(last.tool_call_id)
       )
     )
       throw new Error("Unexpected pilot model step.")
@@ -143,12 +151,14 @@ class PilotModel extends BaseChatModel {
     })
     let text = ""
     let finish: string | undefined
-    let call: PilotCall | undefined
+    const calls = new Map<string, PilotCall>()
     // A recipient may return either an answer or a tool call. Only committed
     // answer text belongs in the public message before the tool result exists.
     const canCite =
       !this.followup && tools.some((t) => t.name === projectRecallTool)
-    const bufferText = tools.length > 0 && (!!this.followup || canCite)
+    const bufferText = this.general
+      ? tools.some((t) => t.name === projectRecallTool)
+      : tools.length > 0 && (!!this.followup || canCite)
     const reader = stream.getReader()
     try {
       for (;;) {
@@ -175,9 +185,13 @@ class PilotModel extends BaseChatModel {
             name: value.toolName,
             args: schema.parse(JSON.parse(value.input)),
           }
-          if (call && !isDeepStrictEqual(call, next))
+          const previous = calls.get(next.id)
+          if (
+            (previous && !isDeepStrictEqual(previous, next)) ||
+            (!this.general && calls.size && !previous)
+          )
             throw new Error("Only one tool call is permitted.")
-          call = next
+          calls.set(next.id, next)
         }
         if (value.type === "finish") finish = value.finishReason.unified
         if (value.type === "text-delta") {
@@ -190,15 +204,19 @@ class PilotModel extends BaseChatModel {
       reader.releaseLock()
     }
     signal.throwIfAborted()
+    const call = calls.values().next().value
     if (call && (finish === "tool-calls" || finish === "stop")) {
       if (canCite && call.name === "handoff" && text) this.onText(text)
       this.call = call
-      this.completedCallIds.add(call.id)
+      for (const id of calls.keys()) this.completedCallIds.add(id)
       return {
         generations: [
           {
             text,
-            message: new AIMessage({ content: text, tool_calls: [call] }),
+            message: new AIMessage({
+              content: text,
+              tool_calls: [...calls.values()],
+            }),
           },
         ],
       }
@@ -219,9 +237,39 @@ function publicText(messages: ModelMessage[]) {
         : message.content
             .flatMap((part) => (part.type === "text" ? [part.text] : []))
             .join("\n")
-    if (!text.trim()) return []
+    const files: LanguageModelV4FilePart[] = []
+    if (message.role === "user" && Array.isArray(message.content)) {
+      for (const part of message.content) {
+        if (part.type !== "file") continue
+        // Workspace preparation produces bounded data URLs. Never download a
+        // caller-supplied remote URL when rebuilding the public history.
+        const data = part.data
+        if (
+          !data ||
+          typeof data !== "object" ||
+          !("type" in data) ||
+          data.type !== "url"
+        )
+          throw new Error("Unsupported workspace attachment.")
+        const url = String(data.url)
+        const match = /^data:[^;,]+;base64,([a-z0-9+/=]+)$/i.exec(url)
+        if (!match) throw new Error("Invalid workspace attachment.")
+        files.push({
+          type: "file",
+          mediaType: part.mediaType,
+          filename: part.filename,
+          data: { type: "data", data: match[1] },
+        })
+      }
+    }
+    if (!text.trim() && !files.length) return []
     return [
-      message.role === "user" ? new HumanMessage(text) : new AIMessage(text),
+      message.role === "user"
+        ? new HumanMessage({
+            content: text,
+            additional_kwargs: { workspaceFiles: files },
+          })
+        : new AIMessage(text),
     ]
   })
 }
@@ -229,10 +277,13 @@ function publicText(messages: ModelMessage[]) {
 export function deepAgentReply(options: {
   route: Route
   instructions: string
+  stepInstructions?: (step: number) => Promise<string>
+  canRecordDecision?: () => boolean
   messages: ModelMessage[]
   signal: AbortSignal
   messageId: string
   metadata: { executionId: string; engine?: "deepagents" }
+  general?: boolean
   recipient?: {
     botId: string
     tools: ToolSet
@@ -277,6 +328,11 @@ export function deepAgentReply(options: {
         let phase: "initial" | "after-skill" | "after-http" | "answer" =
           "initial"
         const allowsTool = (name: string) => {
+          if (options.general)
+            return (
+              name !== projectDecisionTool ||
+              options.canRecordDecision?.() !== false
+            )
           if (name === projectDecisionTool) return phase === "after-http"
           return (
             phase === "initial" ||
@@ -337,8 +393,7 @@ export function deepAgentReply(options: {
                         !recipient ||
                         !toolCallId ||
                         !allowsTool(name) ||
-                        !shared.execute ||
-                        !shared.toModelOutput
+                        !shared.execute
                       )
                         throw new Error("Unexpected recipient tool execution.")
                       signal.throwIfAborted()
@@ -350,22 +405,34 @@ export function deepAgentReply(options: {
                         type: "tool-input-available",
                         toolName: name,
                         toolCallId,
-                        input: {},
+                        input: name === "handoff" ? input : {},
                       })
-                      const output = await shared.execute(input, {
-                        toolCallId,
-                        context: {
-                          botId: recipient.botId,
-                          executionId: options.metadata.executionId,
-                        },
-                        abortSignal: signal,
-                        messages: [],
-                      })
+                      const validated = await asSchema(
+                        shared.inputSchema
+                      ).validate?.(input)
+                      if (validated && !validated.success)
+                        throw new Error("Invalid tool input.")
+                      const output = await shared.execute(
+                        validated?.value ?? input,
+                        {
+                          toolCallId,
+                          context: {
+                            botId: recipient.botId,
+                            executionId: options.metadata.executionId,
+                          },
+                          abortSignal: signal,
+                          messages: [],
+                        }
+                      )
                       write({
                         type: "tool-output-available",
                         toolCallId,
                         output,
                       })
+                      if (options.general && name === "handoff") {
+                        handedOff = output.success === true
+                      }
+                      if (!shared.toModelOutput) return JSON.stringify(output)
                       const result = await shared.toModelOutput({
                         toolCallId,
                         input,
@@ -373,20 +440,24 @@ export function deepAgentReply(options: {
                       })
                       if (result.type !== "text")
                         throw new Error("Expected a text tool result.")
-                      if (output.success !== true)
+                      if (!options.general && output.success !== true)
                         verifiedFailure = result.value
                       else if (name === "read_skill") phase = "after-skill"
                       else if (followingSkill && output.kind === "shared-http")
                         phase = "after-http"
                       return result.value
                     },
-                    { name, description, schema: objectInput }
+                    {
+                      name,
+                      description,
+                      schema: objectInput,
+                    }
                   )
                 }
               )
             )
         const resolveCitation = options.resolveCitation
-        if (accept && resolveCitation) {
+        if (resolveCitation) {
           const description =
             "Answer a recall question from one active decision in this project. This read-only action delivers the final answer with its verified source."
           definitions.push({
@@ -427,8 +498,10 @@ export function deepAgentReply(options: {
           allowsTool,
           (delta) => {
             if (!verifiedFailure) publishText(delta)
-          }
+          },
+          options.general
         )
+        let step = 0
         const agent = createDeepAgent({
           model,
           systemPrompt: options.instructions,
@@ -438,12 +511,16 @@ export function deepAgentReply(options: {
           middleware: [
             createMiddleware({
               name: "PilotToolScope",
-              wrapModelCall: (request, handler) => {
+              wrapModelCall: async (request, handler) => {
+                if (handedOff) return new AIMessage("")
                 if (verifiedFailure) return new AIMessage(verifiedFailure)
+                const instructions = options.stepInstructions
+                  ? await options.stepInstructions(step++)
+                  : options.instructions
                 return handler({
                   ...request,
                   tools: tools.filter((tool) => allowsTool(tool.name)),
-                  systemMessage: new SystemMessage(options.instructions),
+                  systemMessage: new SystemMessage(instructions),
                 })
               },
             }),
@@ -460,7 +537,7 @@ export function deepAgentReply(options: {
           { messages: publicText(options.messages) },
           // Graph steps include middleware and tool nodes between the
           // model calls. The route and tool gates enforce the actual budgets.
-          { signal, recursionLimit: recipient ? 20 : 8 }
+          { signal, recursionLimit: options.general ? 40 : recipient ? 20 : 8 }
         )
         if (verifiedFailure) publishText(verifiedFailure)
         if (citation) {

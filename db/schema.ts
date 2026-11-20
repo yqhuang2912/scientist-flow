@@ -2,6 +2,7 @@ import { nanoid } from "nanoid"
 import { relations, sql } from "drizzle-orm"
 import type { HttpToolConfig, ToolInputSchema } from "../lib/tool-definition"
 import {
+  boolean,
   index,
   integer,
   jsonb,
@@ -23,6 +24,7 @@ import {
   type ModelChoice,
 } from "../lib/model-catalog"
 
+import type { ChatJobState } from "../lib/chat-job"
 import type { UIMessage } from "ai"
 import type { ToolEvidence } from "../lib/project-decisions"
 import type { ExecutionStatus, Delegation } from "../lib/bot-execution"
@@ -249,6 +251,35 @@ export const chats = pgTable("chats", {
     .notNull()
     .defaultNow(),
 })
+
+export const chatTurns = pgTable(
+  "chat_turns",
+  {
+    chatId: text("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    owner: text("owner").notNull(),
+    inputHash: text("input_hash").notNull(),
+    userMessage: jsonb("user_message").$type<UIMessage>().notNull(),
+    replies: jsonb("replies").$type<UIMessage[]>().notNull().default([]),
+    state: text("state").$type<ChatJobState>().notNull().default("queued"),
+    cancelRequested: boolean("cancel_requested").notNull().default(false),
+    lease: text("lease"),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.chatId, t.id] }),
+    uniqueIndex("chat_turns_active_idx")
+      .on(t.chatId)
+      .where(sql`${t.state} in ('queued','running')`),
+    index("chat_turns_worker_idx").on(t.owner, t.state, t.leaseUntil),
+  ]
+)
 
 export const botMemoryLimit = 12
 

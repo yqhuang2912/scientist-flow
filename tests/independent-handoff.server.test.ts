@@ -14,7 +14,7 @@ import { serializeSkillToMarkdown } from "../lib/skill-definition"
 import { randomBytes, randomInt, randomUUID } from "node:crypto"
 import { nanoid } from "nanoid"
 import { eq, inArray } from "drizzle-orm"
-import { readUIMessageStream, streamText, type UIMessage } from "ai"
+import { readUIMessageStream, type UIMessage } from "ai"
 import { botFormSchema } from "../db/schema"
 import { choiceProblem, parseCatalog } from "../lib/model-catalog"
 import {
@@ -121,7 +121,7 @@ test(
   { skip: process.env.SCIENTISTFLOW_MODEL_DB_TEST !== "1" },
   async (t) => {
     const { db } = await import("../lib/db")
-    const { runBotTurn } = await import("../trigger/chat")
+    const { runBotTurn } = await import("../lib/chat-turn.server")
     const {
       botExecutions,
       bots,
@@ -430,7 +430,6 @@ test(
         requestedBotId: a,
         runId: nanoid(),
         signal: controller.signal,
-        streamText,
         httpTransport: async (req: ToolRequest) => {
           sends.push(req.url.pathname)
           if (combinedSkill) {
@@ -462,7 +461,6 @@ test(
           }
         },
         transcript: [...history, input],
-        messages: [{ role: "system", content: "UNFILTERED_RUNNER_HISTORY" }],
         publish: async (stream, parent) => {
           let message: UIMessage | undefined
           for await (const m of readUIMessageStream({ stream })) message = m
@@ -551,7 +549,7 @@ test(
         db.insert(botTools).values({ botId: b, toolId: httpId }),
       ])
       await t.test(
-        "one direct bot uses the pilot, another uses the original runner, and replay reuses the claimed message",
+        "one direct bot uses the pilot, another uses its assigned tools, and replay reuses the claimed message",
         async () => {
           const direct = nanoid(),
             other = nanoid()
@@ -568,8 +566,6 @@ test(
                 chatId: id,
                 runId: nanoid(),
                 signal: new AbortController().signal,
-                streamText,
-                messages: [{ role: "user", content: "Question" }],
                 transcript: [input],
                 publish: async (stream) => {
                   let last
@@ -615,7 +611,7 @@ test(
             const legacy = await invoke(other)
             assert.equal(
               (legacy.metadata as { engine?: string }).engine,
-              undefined
+              "deepagents"
             )
             assert.equal(sent[1].key, "Bearer fixture-rowan")
             assert.ok(sent[1].body.tools.length)

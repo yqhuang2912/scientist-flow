@@ -7,9 +7,12 @@ import {
   botMemories,
   botMemoryFormSchema,
   botMemoryLimit,
+  chatTurns,
   bots,
 } from "@/db/schema"
 import { db } from "@/lib/db"
+import { assertInstallationRequest } from "@/lib/installation-request.server"
+import { installationOwner } from "@/lib/model-credentials.server"
 import { getChat } from "@/queries/chats"
 
 const unavailable = {
@@ -17,11 +20,11 @@ const unavailable = {
   error: "Open this bot’s direct chat to manage its memory.",
 }
 
-async function directBotId(chatId: string, requireTriggerHistory = false) {
+async function directBotId(chatId: string) {
+  await assertInstallationRequest()
   if (!z.nanoid().safeParse(chatId).success) return null
   const chat = await getChat(chatId)
   if (!chat || chat.kind !== "direct" || chat.bots.length !== 1) return null
-  if (requireTriggerHistory && chat.nativeDirect) return null
   return chat.bots[0].id
 }
 
@@ -63,20 +66,20 @@ export async function saveBotMemory(
       error: "Select a user message in this direct chat.",
     }
   try {
-    const botId = await directBotId(chatId, true)
+    const botId = await directBotId(chatId)
     if (!botId) return unavailable
-    const { defaultStorage } = await import("@trigger.dev/sdk/ai")
-    const transcript = await defaultStorage.load({
-      chatId,
-      clientData: undefined,
-    })
-    if (
-      !transcript.messages.some(
-        (m) =>
-          m.id === sourceId &&
-          m.role === "user" &&
-          m.parts.some((p) => p.type === "text" && p.text.trim())
+    const [source] = await db
+      .select({ message: chatTurns.userMessage })
+      .from(chatTurns)
+      .where(
+        and(
+          eq(chatTurns.chatId, chatId),
+          eq(chatTurns.id, sourceId),
+          eq(chatTurns.owner, installationOwner())
+        )
       )
+    if (
+      !source?.message.parts.some((p) => p.type === "text" && p.text.trim())
     ) {
       return {
         success: false as const,
