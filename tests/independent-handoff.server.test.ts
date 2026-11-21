@@ -140,6 +140,8 @@ test(
   async (t) => {
     const { db } = await import("../lib/db")
     const { runBotTurn } = await import("../lib/chat-turn.server")
+    const { checkTurnFinalization, checkResumedHandoff } =
+      await import("./fixtures/turn-finalization")
     const {
       botExecutions,
       bots,
@@ -473,14 +475,17 @@ test(
       input: UIMessage,
       controller = new AbortController(),
       onParent?: () => Promise<void>,
-      groupId = chatId
+      groupId = chatId,
+      prior = history,
+      lease?: string
     ) {
-      let transcript: UIMessage[] = []
+      let replies: UIMessage[] = []
       await runBotTurn({
         chatId: groupId,
         requestedBotId:
           (input.metadata as { botId?: string } | undefined)?.botId ?? a,
-        runId: nanoid(),
+        runId: lease ?? nanoid(),
+        lease,
         signal: controller.signal,
         httpTransport: async (req: ToolRequest) => {
           sends.push(req.url.pathname)
@@ -512,18 +517,18 @@ test(
             ]),
           }
         },
-        transcript: [...history, input],
+        transcript: [...prior, input],
         publish: async (stream, parent) => {
           let message: UIMessage | undefined
           for await (const m of readUIMessageStream({ stream })) message = m
           if (!parent) await onParent?.()
           return message
         },
-        saveHistory: (all) => {
-          transcript = all
+        saveReplies: (messages) => {
+          replies = messages
         },
       })
-      return transcript.slice(history.length)
+      return [input, ...replies]
     }
     const flag = pilotBotFile() // unique fixture installation, separate from the real worker
     await mkdir(dirname(flag), { recursive: true })
@@ -602,7 +607,7 @@ test(
       ])
       await t.test(
         "ordinary three-member group saves the recipient's current observation without a pilot",
-        async () => {
+        async (groupTest) => {
           const project = nanoid(),
             observer = nanoid(),
             skill = nanoid()
@@ -786,6 +791,22 @@ test(
             assert.equal(quoteRow?.quote, "The study uses two cohorts.")
             assert.equal(quoteRow?.toolEvidence, null)
             assert.deepEqual(sends, ["/fixture"])
+            for (const count of [20, 500]) {
+              await groupTest.test(
+                `final delivery after ${count} historical turns`,
+                async (sub) => {
+                  await checkTurnFinalization(
+                    sub,
+                    count,
+                    a,
+                    b,
+                    input,
+                    (id, prior, lease) =>
+                      run(input, undefined, undefined, id, prior, lease)
+                  )
+                }
+              )
+            }
           } finally {
             recall = undefined
             combinedSkill = undefined
@@ -798,6 +819,41 @@ test(
               db.delete(botSkills).where(eq(botSkills.skillId, skill)),
               db.delete(skills).where(eq(skills.id, skill)),
               db.delete(bots).where(eq(bots.id, observer)),
+            ])
+          }
+        }
+      )
+      await t.test(
+        "a replacement worker restores the committed sender and finishes the interrupted recipient",
+        async (sub) => {
+          const group = nanoid()
+          sent = []
+          try {
+            await db.batch([
+              db.insert(chats).values({ id: group, kind: "group" }),
+              db.insert(chatMembers).values(
+                [a, b].map((botId) => ({ botId, chatId: group }))
+              ),
+            ])
+            const input = { ...user(), metadata: { botId: a } }
+            await checkResumedHandoff(
+              sub,
+              group,
+              a,
+              b,
+              input,
+              (lease, signal) =>
+                run(input, signal, undefined, group, history, lease)
+            )
+            assert.equal(
+              sent.filter((r) => r.key === "Bearer fixture-iris").length,
+              2
+            )
+          } finally {
+            sent = []
+            await db.batch([
+              db.delete(modelRequests).where(eq(modelRequests.chatId, group)),
+              db.delete(chats).where(eq(chats.id, group)),
             ])
           }
         }
@@ -854,7 +910,7 @@ test(
             ])
             const input = user()
             const invoke = async (id: string) => {
-              let history: UIMessage[] = []
+              let replies: UIMessage[] = []
               await runBotTurn({
                 chatId: id,
                 runId: nanoid(),
@@ -866,11 +922,11 @@ test(
                     last = message
                   return last
                 },
-                saveHistory: (all) => {
-                  history = all
+                saveReplies: (messages) => {
+                  replies = messages
                 },
               })
-              return history[1]
+              return replies[0]
             }
             sent = []
             const reply = await invoke(direct)

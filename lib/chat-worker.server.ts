@@ -83,10 +83,8 @@ async function execute(job: Job, lease: string) {
         }
         return latest
       },
-      saveHistory: (all) => {
-        replies = all
-          .slice(all.findIndex((m) => m.role === "user" && m.id === job.id) + 1)
-          .filter((m) => m.role === "assistant")
+      saveReplies: (messages) => {
+        replies = messages
       },
     })
     if (controller.signal.reason instanceof ChatLeaseLost) return

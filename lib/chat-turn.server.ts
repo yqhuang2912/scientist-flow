@@ -84,7 +84,7 @@ type BotTurn = {
     stream: ReadableStream<UIMessageChunk>,
     parentExecutionId: string | null
   ) => Promise<UIMessage | undefined>
-  saveHistory: (history: UIMessage[]) => void
+  saveReplies: (replies: UIMessage[]) => void
 }
 
 // Each speaker owns its model, tool permissions and durable execution record.
@@ -97,7 +97,7 @@ export async function runBotTurn({
   httpTransport,
   transcript,
   publish,
-  saveHistory,
+  saveReplies,
 }: BotTurn) {
   const context = await getChatContext(chatId)
   if (!context) throw new Error("Chat not found")
@@ -528,12 +528,9 @@ export async function runBotTurn({
       )
     }
   } finally {
-    saveHistory(
-      await hydrateExecutions(
-        chatId,
-        mergeExecutionMessages(history, completed)
-      )
-    )
+    // A previous lease may already have committed speakers for this turn.
+    const [, ...replies] = await hydrateExecutions(chatId, [user, ...completed])
+    saveReplies(replies)
   }
 }
 
