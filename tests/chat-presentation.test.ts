@@ -82,6 +82,17 @@ test("handoff preserves chronological parts and attributes earlier text to the s
   )
 })
 
+test("an empty streaming message has one speaker before and after its first text", () => {
+  const start = message([], "james")
+  const before = getAssistantSegments(start, null, true)
+  const after = getAssistantSegments({ ...start, parts: [text("First fragment")] }, null, true)
+  assert.equal(before.length, 1)
+  assert.equal(after.length, 1)
+  assert.equal(before[0].botId, "james")
+  assert.equal(before[0].key, after[0].key)
+  assert.equal(getAssistantSegments(start, null).length, 0)
+})
+
 test("streaming into a recipient keeps the sender segment key stable", () => {
   const initial = getAssistantSegments(
     message([thinking, handoff], "james"),

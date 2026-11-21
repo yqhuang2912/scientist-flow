@@ -5,12 +5,16 @@ import {
   ModelConnectionError,
 } from "@/lib/model-credentials.server"
 import { chatJobInput } from "@/lib/chat-job"
+import { revisionInput, versionChoice } from "@/lib/chat-revision"
 import {
   cancelChatTurn,
   chatSnapshot,
   enqueueChatTurn,
+  reviseChatTurn,
+  chooseReplyVersion,
   turnProgress,
   TurnConflict,
+  TurnNotFound,
 } from "@/lib/chat-jobs.server"
 import { textEventResponse } from "@/lib/chat-live.server"
 import { isActiveTurn } from "@/lib/chat-job"
@@ -37,6 +41,30 @@ async function handle(request: Request, { params }: Context) {
     }
     const chat = await getChat(chatId)
     if (!chat) return new Response("Chat not found.", { status: 404 })
+    if (request.method === "PUT") {
+      const choice = versionChoice.safeParse(
+        await request.json().catch(() => null)
+      )
+      if (!turnId || !choice.success)
+        return new Response("Invalid reply version.", { status: 400 })
+      await chooseReplyVersion(chatId, turnId, choice.data.versionId)
+      return new Response(null, { status: 204 })
+    }
+    if (request.method === "PATCH") {
+      const revision = revisionInput.safeParse(
+        await request.json().catch(() => null)
+      )
+      if (!turnId || !revision.success)
+        return new Response("Invalid message revision.", { status: 400 })
+      const ack = await reviseChatTurn(
+        chatId,
+        turnId,
+        revision.data,
+        chat.bots.map((bot) => bot.id)
+      )
+      wakeChatWorker()
+      return Response.json(ack, { headers: { "Cache-Control": "no-store" } })
+    }
     if (request.method === "POST") {
       const input = chatJobInput.safeParse(
         await request.json().catch(() => null)
@@ -65,6 +93,8 @@ async function handle(request: Request, { params }: Context) {
       headers: { "Cache-Control": "no-store" },
     })
   } catch (e) {
+    if (e instanceof TurnNotFound)
+      return new Response(e.message, { status: 404 })
     if (e instanceof TurnConflict)
       return new Response(e.message, { status: 409 })
     if (e instanceof ModelConnectionError)
@@ -72,4 +102,4 @@ async function handle(request: Request, { params }: Context) {
     return new Response("Could not access this chat turn.", { status: 500 })
   }
 }
-export { handle as GET, handle as POST, handle as DELETE }
+export { handle as GET, handle as POST, handle as PATCH, handle as PUT, handle as DELETE }

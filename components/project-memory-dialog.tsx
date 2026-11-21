@@ -1,6 +1,8 @@
 "use client"
 
 import { useEffect, useRef, useState, useTransition } from "react"
+import { flushSync } from "react-dom"
+import { SHOW_REPLY_EVIDENCE } from "@/lib/chat-revision"
 import { BookMarkedIcon, ExternalLinkIcon, Trash2Icon } from "lucide-react"
 import {
   listProjectDecisions,
@@ -197,7 +199,7 @@ export function ProjectMemoryButton({
     const chat = document.querySelector(
       `[data-project-chat="${CSS.escape(chatId)}"]`
     )
-    const part = record.toolEvidence
+    const findPart = () => record.toolEvidence
       ? chat?.querySelector<HTMLElement>(
           "#" +
             CSS.escape(
@@ -210,7 +212,22 @@ export function ProjectMemoryButton({
       : chat?.querySelector<HTMLElement>(
           `[data-evidence-message="${CSS.escape(record.sourceMessageId)}"] [data-evidence-part="${record.sourcePart}"]`
         )
-    if (!part || record.chatId !== chatId) return false
+    if (!chat || record.chatId !== chatId) return false
+    let part = findPart()
+    if (!part) {
+      flushSync(() => chat.dispatchEvent(new CustomEvent(SHOW_REPLY_EVIDENCE, {
+        bubbles: true, detail: record.sourceMessageId,
+      })))
+      part = findPart()
+    }
+    if (!part) return false
+    for (
+      let ancestor = part.parentElement;
+      ancestor;
+      ancestor = ancestor.parentElement
+    ) {
+      if (ancestor instanceof HTMLDetailsElement) ancestor.open = true
+    }
     source.current = part
     setOpen(false)
     return true

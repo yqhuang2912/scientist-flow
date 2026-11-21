@@ -60,7 +60,8 @@ test("ordinary group turns stream a committed reply and quarantine candidates un
         errors: string[] = []
       let lookups = 0
       const model = new MockLanguageModelV4({
-        doStream: async ({ tools }) => {
+        doStream: async ({ tools, toolChoice }) => {
+          assert.deepEqual(toolChoice, { type: "required" })
           const recall = tools?.find((tool) => tool.name === projectRecallTool)
           assert.ok(recall?.type === "function")
           assert.deepEqual(Object.keys(recall.inputSchema.properties ?? {}), [

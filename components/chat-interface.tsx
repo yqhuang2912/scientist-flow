@@ -1,6 +1,7 @@
 "use client"
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -20,6 +21,7 @@ import {
   type CheckpointCommand,
   type WorkflowCheckpoint,
 } from "@/lib/workflow-checkpoint"
+import type { ReviseMessage } from "@/lib/chat-revision"
 import { ChatTranscript } from "./chat-transcript"
 import { ChatComposer } from "./chat-composer"
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert"
@@ -74,6 +76,7 @@ export function ChatInterface({
   }, [snapshot.messages, working, live])
   const [pendingBotId, setPendingBotId] = useState(chat.bots[0]?.id ?? "")
   const [networkError, setNetworkError] = useState<string | null>(null)
+  const [pendingRevisionId, setPendingRevisionId] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [workflowRetryAvailable, setWorkflowRetryAvailable] = useState(false)
   const reservationKey = chat.template
@@ -105,9 +108,11 @@ export function ChatInterface({
   const pending = useRef<{ input: string; id: string } | null>(null)
   const version = useRef(0)
   const submitting = useRef(false)
+  const savingVersion = useRef<Promise<void> | null>(null)
+  const [selectingVersion, setSelectingVersion] = useState(false)
   const lastKnownTurn = snapshot.messages.findLast(m => m.role === "user")?.id
   useEffect(() => {
-    if (sending) return
+    if (sending || selectingVersion) return
     const epoch = version.current
     return watchChatRefresh({
       refreshOnActivity: row => row.chatId === chat.id && !snapshot.activeId && (isActiveTurn(row.state) || row.turnId !== lastKnownTurn),
@@ -118,13 +123,14 @@ export function ChatInterface({
       canRead: () =>
         epoch === version.current &&
         !submitting.current &&
+        !savingVersion.current &&
         (!!snapshot.activeId || !pending.current),
       onSnapshot: setSnapshot,
       onProgress: (turn) =>
         setSnapshot((current) => mergeTurnProgress(current, turn)),
       onNetworkError: setNetworkError,
     })
-  }, [chat.id, chat.kind, snapshot.activeId, sending, url, lastKnownTurn])
+  }, [chat.id, chat.kind, snapshot.activeId, sending, selectingVersion, url, lastKnownTurn])
 
   async function submit({
     text,
@@ -144,6 +150,7 @@ export function ChatInterface({
     setNetworkError(null)
     setSending(true)
     try {
+      await savingVersion.current
       const entries: UploadedEntry[] = []
       await uploadFiles(
         { chatId: chat.id, attachment: true },
@@ -181,6 +188,20 @@ export function ChatInterface({
           pending.current = null
         return { error: await response.text() }
       }
+      await acceptResponse(response)
+      pending.current = null
+    } catch (e) {
+      return {
+        error: e instanceof Error ? e.message : "Could not submit the message.",
+      }
+    } finally {
+      submitting.current = false
+      setSending(false)
+    }
+  }
+
+  const acceptResponse = useCallback(
+    async (response: Response) => {
       const ack: ChatTurnAck = await response.json()
       window.dispatchEvent(
         new CustomEvent<ChatAcceptedDetail>(CHAT_ACCEPTED_EVENT, {
@@ -206,16 +227,95 @@ export function ChatInterface({
       }
       ++version.current
       setSnapshot((current) => mergeTurnAck(current, ack, final))
-      pending.current = null
-    } catch (e) {
-      return {
-        error: e instanceof Error ? e.message : "Could not submit the message.",
+    },
+    [chat.id, url]
+  )
+
+  const revise = useCallback<ReviseMessage>(
+    async (source, revision) => {
+      if (snapshot.activeId || submitting.current)
+        return { error: "A reply is already running." }
+      submitting.current = true
+      ++version.current
+      setPendingRevisionId(revision.action === "retry" ? revision.replyId : source.id)
+      const sourceBot = (source.metadata as { botId?: string } | undefined)
+        ?.botId
+      setPendingBotId(
+        (revision.action === "edit" && revision.mentionedBotIds[0]) ||
+          sourceBot ||
+          chat.bots[0]?.id ||
+          ""
+      )
+      setSending(true)
+      setNetworkError(null)
+      try {
+        await savingVersion.current
+        const response = await fetch(
+          url + "?id=" + encodeURIComponent(source.id),
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(revision),
+          }
+        )
+        if (!response.ok) throw new Error(await response.text())
+        await acceptResponse(response)
+      } catch (error) {
+        return {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Could not resend the message.",
+        }
+      } finally {
+        submitting.current = false
+        setSending(false)
+        setPendingRevisionId(null)
       }
-    } finally {
-      submitting.current = false
-      setSending(false)
-    }
-  }
+    },
+    [snapshot.activeId, chat.bots, url, acceptResponse]
+  )
+
+  const chooseVersion = useCallback(
+    async (attemptId: string, versionId: string) => {
+      if (savingVersion.current || submitting.current)
+        throw new Error("Another change is in progress.")
+      setSelectingVersion(true)
+      const save = async () => {
+        const response = await fetch(
+          url + "?id=" + encodeURIComponent(attemptId),
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ versionId }),
+          }
+        )
+        if (!response.ok) throw new Error(await response.text())
+        setSnapshot((current) => ({
+          ...current,
+          messages: current.messages.map((message) =>
+            message.id === attemptId
+              ? {
+                  ...message,
+                  metadata: {
+                    ...(message.metadata as object),
+                    replyChoice: versionId,
+                  },
+                }
+              : message
+          ),
+        }))
+      }
+      savingVersion.current = save()
+      try {
+        await savingVersion.current
+      } finally {
+        savingVersion.current = null
+        setSelectingVersion(false)
+      }
+    },
+    [url]
+  )
 
   async function stop() {
     if (!snapshot.activeId) return
@@ -382,6 +482,10 @@ export function ChatInterface({
             ? "ready"
             : status
         }
+        onRevise={revise}
+        chooseVersion={chooseVersion}
+        revisionBusy={sending || selectingVersion || !!snapshot.activeId}
+        pendingRevisionId={pendingRevisionId}
         pendingBotId={working?.botId ?? pendingBotId}
         workingMessageId={waiting ? undefined : working?.messageId}
       />

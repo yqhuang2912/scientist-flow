@@ -17,6 +17,7 @@ import {
 } from "./chat-jobs.server"
 import { installationOwner } from "./model-credentials.server"
 import { liveWriter } from "./chat-live.server"
+import { chatTurnGroups, projectReplyVersions, retryTarget } from "./chat-revision"
 import { runWorkflow, type WorkflowInput } from "./workflow-run.server"
 
 type Job = typeof chatTurns.$inferSelect
@@ -84,19 +85,57 @@ async function execute(job: Job, lease: string) {
       await settleTurn(lease, replies, null)
       return
     }
-    const history = (await chatSnapshot(job.chatId)).messages
-    const index = history.findIndex((m) => m.role === "user" && m.id === job.id)
+    const projection = projectReplyVersions(
+      (await chatSnapshot(job.chatId)).messages
+    )
+    const groups = chatTurnGroups(projection.messages)
+    const history = groups.flatMap((group) => group.current)
+    const retry = retryTarget(job.userMessage)
+    const index = history.findIndex(
+      (m) => m.role === "user" && m.id === (retry?.turnId ?? job.id)
+    )
     if (index < 0) throw new Error("Missing queued message")
     // A recovered turn rebuilds only unfinished speakers. Completed messages
     // are restored from bot_executions, including a handoff awaiting its recipient.
-    replies = history.slice(index + 1).filter((m) => m.role === "assistant")
+    replies = [...job.replies]
+    const transcript = [...history.slice(0, index), job.userMessage]
+    let incoming = null
+    if (retry) {
+      const [original] = await db
+        .select({
+          parent: botExecutions.parentExecutionId,
+          packet: botExecutions.delegation,
+        })
+        .from(botExecutions)
+        .where(
+          and(
+            eq(botExecutions.chatId, job.chatId),
+            eq(botExecutions.messageId, retry.replyId)
+          )
+        )
+      if (original?.parent && original.packet) {
+        incoming = original.packet
+        const [sender] = await db
+          .select({ message: botExecutions.message })
+          .from(botExecutions)
+          .where(
+            and(
+              eq(botExecutions.chatId, job.chatId),
+              eq(botExecutions.id, original.parent)
+            )
+          )
+        if (sender?.message) transcript.push(sender.message)
+      }
+    }
     await runBotTurn({
       chatId: job.chatId,
       requestedBotId: (job.userMessage.metadata as { botId: string }).botId,
       runId: lease,
       lease,
       signal: controller.signal,
-      transcript: history.slice(0, index + 1),
+      transcript,
+      historyResolved: true,
+      retrySpeaker: retry ? { incoming } : undefined,
       publish: async (stream, _parentExecutionId, flushFirstBody) => {
         let latest: UIMessage | undefined
         let lastWrite = 0

@@ -160,6 +160,10 @@ class PilotModel extends BaseChatModel {
         : tools.length
           ? tools
           : undefined,
+      // In a group, public prose is itself an output tool. Asking the provider
+      // to choose a tool gives us answer deltas without publishing an unchecked
+      // preamble that might still be followed by an evidence lookup.
+      ...(groupReply && { toolChoice: { type: "required" as const } }),
       providerOptions: route.providerOptions,
       abortSignal: signal,
     })

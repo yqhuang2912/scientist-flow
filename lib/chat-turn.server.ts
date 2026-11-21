@@ -80,6 +80,8 @@ type BotTurn = {
   lease?: string
   httpTransport?: Parameters<typeof httpToolTurn>[3]
   transcript: UIMessage[]
+  historyResolved?: boolean
+  retrySpeaker?: { incoming: Delegation | null }
   publish: (
     stream: ReadableStream<UIMessageChunk>,
     parentExecutionId: string | null,
@@ -97,13 +99,15 @@ export async function runBotTurn({
   lease,
   httpTransport,
   transcript,
+  historyResolved,
+  retrySpeaker,
   publish,
   saveReplies,
 }: BotTurn) {
   const context = await getChatContext(chatId)
   if (!context) throw new Error("Chat not found")
   const first = resolveReplyBot(context, requestedBotId)
-  const history = await hydrateExecutions(chatId, transcript)
+  const history = historyResolved ? transcript : await hydrateExecutions(chatId, transcript)
   const user = history.findLast((m) => m.role === "user")
   if (!user) throw new Error("The task message is missing.")
   const group = context.kind === "group"
@@ -112,7 +116,7 @@ export async function runBotTurn({
     user.metadata as { mentionedBotIds?: string[] } | undefined
   )?.mentionedBotIds
   const multiple = !!mentionedIds && mentionedIds.length > 1
-  const pilotRecipient = multiple
+  const pilotRecipient = multiple || retrySpeaker
     ? undefined
     : await groupPilotRecipient(chatId, context, first.id, history, user)
 
@@ -204,7 +208,7 @@ export async function runBotTurn({
           }
         }
       }
-      const canDelegate = group && !incoming && !multiple
+      const canDelegate = group && !incoming && !multiple && !retrySpeaker
       const acceptHandoff = async ({ botName, reason }: HandoffInput) => {
         const matches = members.filter(
           (m) =>
@@ -514,6 +518,10 @@ export async function runBotTurn({
     return delegation
   }
   try {
+    if (retrySpeaker) {
+      await perform(first, retrySpeaker.incoming, 0)
+      return
+    }
     if (multiple) {
       // Each explicit addressee answers the original message as an independent speaker.
       const speakers = mentionedIds.map((id) => resolveReplyBot(context, id))

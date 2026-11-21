@@ -1,7 +1,7 @@
 "use client"
 import { toolCallAnchor } from "@/lib/project-decisions"
 
-import { memo, useState } from "react"
+import { memo, useEffect, useState } from "react"
 import { useParams } from "next/navigation"
 import { useWorkspaceDocument } from "./workspace-document-provider"
 import { Button } from "./ui/button"
@@ -35,10 +35,14 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
-import { Trace, TraceIcon, TraceLine, TraceTitle } from "@/components/ui/trace"
+import { Trace } from "@/components/ui/trace"
+import { Spinner } from "@/components/ui/spinner"
 import { mentionPattern } from "@/lib/chat-mentions"
 import { ChatMention, ChatMarkdown } from "@/components/chat-markdown"
 import { ChatMessageActions } from "@/components/chat-message-actions"
+import { ChatMessageEditor } from "@/components/chat-message-editor"
+import { toast } from "@/components/ui/toast"
+import { chatTurnGroups, projectReplyVersions, retryTarget, SHOW_REPLY_EVIDENCE, type ReplyVersions, type ReviseMessage } from "@/lib/chat-revision"
 import { BotName } from "@/components/bot-name"
 import { ChatAvatar } from "@/components/chat-avatar"
 import {
@@ -107,16 +111,26 @@ function SpeakerAvatar({
   )
 }
 
-function Responding() {
+function AssistantHeader({
+  bot,
+  name,
+  waitingForText,
+}: {
+  bot?: ChatSpeaker
+  name: string
+  waitingForText: boolean
+}) {
   return (
-    <Trace>
-      <TraceLine status="running">
-        <TraceIcon>
-          <MessageCircleIcon />
-        </TraceIcon>
-        <TraceTitle>Responding</TraceTitle>
-      </TraceLine>
-    </Trace>
+    <MessageHeader>
+      <SpeakerAvatar bot={bot} />
+      <BotName name={name} job={bot?.job} />
+      {waitingForText && (
+        <Spinner
+          aria-label="Waiting for reply"
+          className="shrink-0 text-muted-foreground motion-reduce:animate-none"
+        />
+      )}
+    </MessageHeader>
   )
 }
 
@@ -124,7 +138,6 @@ function AssistantParts({
   message,
   speaker,
   parts,
-  bots,
   streaming,
   busy,
   onApproval,
@@ -132,7 +145,6 @@ function AssistantParts({
   message: UIMessage
   speaker?: { name: string; id: string | null }
   parts: IndexedChatPart[]
-  bots: ChatSpeaker[]
   streaming: boolean
   busy: boolean
   onApproval?: RespondToApproval
@@ -195,7 +207,7 @@ function AssistantParts({
               <ChatMarkdown
                 isAnimating={streaming && block.part.state === "streaming"}
               >
-                {cleanBotText(block.part.text, bots, streaming)}
+                {block.part.text}
               </ChatMarkdown>
             </div>
           )
@@ -203,7 +215,6 @@ function AssistantParts({
           return <ChatFile key={block.key} part={block.part} />
         return null
       })}
-      {streaming && blocks.length === 0 && <Responding />}
     </div>
   )
 }
@@ -215,6 +226,10 @@ const ChatTurn = memo(function ChatTurn({
   streaming,
   busy,
   onRemember,
+  onRevise,
+  versions,
+  chooseVersion,
+  revisionBusy,
   onApproval,
 }: {
   message: UIMessage
@@ -223,8 +238,14 @@ const ChatTurn = memo(function ChatTurn({
   streaming: boolean
   busy: boolean
   onRemember?: (draft: MemoryDraft) => void
+  onRevise?: ReviseMessage
+  versions?: ReplyVersions
+  chooseVersion?: (attemptId: string, versionId: string) => Promise<void>
+  revisionBusy?: boolean
   onApproval?: RespondToApproval
 }) {
+  const [editing, setEditing] = useState(false)
+  const [choosing, setChoosing] = useState(false)
   if (message.role === "system") return null
   if (message.role === "user") {
     const metadata = message.metadata as
@@ -289,7 +310,13 @@ const ChatTurn = memo(function ChatTurn({
             You
             <SpeakerAvatar user />
           </MessageHeader>
-          <Bubble
+          {editing && onRevise ? (
+            <>
+              {attachments.length > 0 && <div className="flex flex-wrap gap-2">{attachments}</div>}
+              <ChatMessageEditor message={message} text={text} bots={bots} hasFiles={attachments.length > 0}
+                disabled={!!revisionBusy} revise={onRevise} close={() => setEditing(false)} />
+            </>
+          ) : <Bubble
             align="end"
             variant="muted"
             className="max-w-full sm:max-w-[85%]"
@@ -329,9 +356,11 @@ const ChatTurn = memo(function ChatTurn({
                 ))}
               </div>
             </BubbleContent>
-          </Bubble>
-          <ChatMessageActions
+          </Bubble>}
+          {!editing && <ChatMessageActions
             text={text}
+            disabled={revisionBusy}
+            edit={onRevise && (() => setEditing(true))}
             remember={
               onRemember && bots[0]
                 ? {
@@ -340,7 +369,7 @@ const ChatTurn = memo(function ChatTurn({
                   }
                 : undefined
             }
-          />
+          />}
         </MessageContent>
       </Message>
     )
@@ -349,11 +378,12 @@ const ChatTurn = memo(function ChatTurn({
   const handoff = message.parts.map(getHandoff).find(Boolean)
   const segments = getAssistantSegments(
     message,
-    isGroup ? null : (bots[0]?.id ?? null)
+    isGroup ? null : (bots[0]?.id ?? null),
+    streaming
   )
   return (
     <MessageGroup className="gap-5">
-      {segments.map((segment) => {
+      {segments.map((segment, index) => {
         if (
           isGroup &&
           !streaming &&
@@ -371,34 +401,74 @@ const ChatTurn = memo(function ChatTurn({
               ? handoff.targetName
               : null
         const name = bot?.name ?? pastName ?? "Assistant"
+        const parts = segment.parts.map(({ part, index }) => ({
+          index,
+          part: part.type === "text"
+            ? { ...part, text: cleanBotText(part.text, bots, streaming) }
+            : part,
+        }))
+        const waitingForText = streaming && index === segments.length - 1 &&
+          !parts.some(({ part }) => part.type === "text" && /\S/.test(part.text))
         return (
-          <Message key={segment.key}>
+          <Message key={versions && segments.length === 1 ? versions.replies[0].id : segment.key}>
             <MessageContent className="gap-2">
-              <MessageHeader>
-                <SpeakerAvatar bot={bot} />
-                <BotName
-                  name={name}
-                  job={bot?.job}
-                />
-              </MessageHeader>
+              <AssistantHeader
+                bot={bot}
+                name={name}
+                waitingForText={waitingForText}
+              />
               <AssistantParts
                 message={message}
                 speaker={isGroup ? { id: segment.botId, name } : undefined}
-                parts={segment.parts}
-                bots={bots}
+                parts={parts}
                 streaming={streaming}
                 busy={busy}
                 onApproval={onApproval}
               />
-              {!!(message.metadata as { workflowStep?: number } | undefined)?.workflowStep && <WorkflowEvidence message={message} />}
+              {!!(message.metadata as { workflowStep?: number } | undefined)
+                ?.workflowStep && <WorkflowEvidence message={message} />}
               {!streaming && (
                 <ChatMessageActions
-                  text={segment.parts
-                    .map(({ part }) =>
-                      part.type === "text"
-                        ? cleanBotText(part.text, bots, false)
-                        : ""
-                    )
+                  disabled={revisionBusy || choosing}
+                  retry={
+                    versions && onRevise && index === segments.length - 1
+                      ? async () => {
+                          const result = await onRevise(versions.user, {
+                            action: "retry",
+                            replyId: versions.replies[0].id,
+                            after: versions.lastAttempt,
+                          })
+                          if (result?.error)
+                            toast.add({ type: "error", title: result.error })
+                        }
+                      : undefined
+                  }
+                  versions={
+                    index === segments.length - 1 ? versions : undefined
+                  }
+                  choose={
+                    chooseVersion && versions?.lastAttempt
+                      ? async (id) => {
+                          if (id === message.id) return
+                          setChoosing(true)
+                          try {
+                            await chooseVersion(versions.lastAttempt!, id)
+                          } catch (error) {
+                            toast.add({
+                              type: "error",
+                              title:
+                                error instanceof Error
+                                  ? error.message
+                                  : "Could not select reply version.",
+                            })
+                          } finally {
+                            setChoosing(false)
+                          }
+                        }
+                      : undefined
+                  }
+                  text={parts
+                    .map(({ part }) => (part.type === "text" ? part.text : ""))
                     .filter(Boolean)
                     .join("\n\n")}
                 />
@@ -419,6 +489,10 @@ export function ChatTranscript({
   status,
   pendingBotId,
   workingMessageId,
+  pendingRevisionId,
+  onRevise,
+  chooseVersion,
+  revisionBusy,
   onApproval,
 }: {
   directChatId?: string
@@ -428,9 +502,19 @@ export function ChatTranscript({
   status: ChatStatus
   pendingBotId?: string
   workingMessageId?: string
+  pendingRevisionId?: string | null
+  onRevise?: ReviseMessage
+  chooseVersion?: (attemptId: string, versionId: string) => Promise<void>
+  revisionBusy?: boolean
   onApproval?: RespondToApproval
 }) {
   const [draft, setDraft] = useState<MemoryDraft | null>(null)
+  const [evidenceId, setEvidenceId] = useState("")
+  useEffect(() => {
+    const reveal = (event: Event) => setEvidenceId((event as CustomEvent<string>).detail)
+    window.addEventListener(SHOW_REPLY_EVIDENCE, reveal)
+    return () => window.removeEventListener(SHOW_REPLY_EVIDENCE, reveal)
+  }, [])
   const revisions = new Map<string, string>()
   for (const message of messages) {
     const meta = message.metadata as
@@ -444,12 +528,33 @@ export function ChatTranscript({
   }
   const last = messages.at(-1)
   const busy = status === "streaming" || status === "submitted"
-  const pendingBot =
-    (workingMessageId ? bots.find((bot) => bot.id === pendingBotId) : undefined) ??
-    bots.find((bot) => bot.id === (last && getMessageBotId(last))) ??
-    bots.find((bot) => bot.id === pendingBotId)
-  const waiting =
-    busy && (!last || last.role !== "assistant" || last.parts.length === 0 || (!!workingMessageId && !messages.some(m => m.id === workingMessageId)))
+  const currentReply = workingMessageId
+    ? messages.find(m => m.id === workingMessageId)
+    : last
+  const activeReplyId =
+    status === "streaming" && currentReply?.role === "assistant"
+      ? currentReply.id
+      : undefined
+  const waiting = busy && !activeReplyId
+  const pendingSpeakerId =
+    status === "streaming" && !workingMessageId && last?.role === "user"
+      ? getMessageBotId(last) ?? pendingBotId
+      : pendingBotId
+  const projected = projectReplyVersions(messages)
+  const pendingRoot = pendingRevisionId && projected.byMessage.get(pendingRevisionId)?.replies[0]
+  const pendingBot = bots.find(bot => bot.id === ((pendingRoot && getMessageBotId(pendingRoot)) || pendingSpeakerId))
+  const groups = chatTurnGroups(projected.messages)
+  const evidenceSlot = projected.byMessage.get(evidenceId)
+  const evidenceVersion = evidenceSlot?.replies.findIndex(reply => reply.id === evidenceId) ?? -1
+  const citedMessage = evidenceId && !groups.some(group => group.current.some(message => message.id === evidenceId))
+    ? messages.find(message => message.id === evidenceId)
+    : undefined
+  const pendingAfter = waiting && (pendingRevisionId || (last?.role === "user" && (retryTarget(last)?.replyId ?? last.id)))
+  const waitingHeader = waiting && (
+    <Message><MessageContent>
+      <AssistantHeader bot={pendingBot} name={pendingBot?.name ?? "Assistant"} waitingForText />
+    </MessageContent></Message>
+  )
   return (
     <MessageScrollerProvider autoScroll defaultScrollPosition="end">
       <MessageScroller className="flex-1">
@@ -470,61 +575,97 @@ export function ChatTranscript({
                 </Empty>
               </MessageScrollerItem>
             )}
-            {messages
-              .filter((message) => message.role !== "system")
-              .map((message) => {
-                const meta = message.metadata as
-                  { executionId?: string } | undefined
-                const revisionId =
-                  meta?.executionId && revisions.get(meta.executionId)
-                return (
-                  <MessageScrollerItem
-                    key={message.id}
-                    id={"chat-message-" + message.id}
-                    messageId={message.id}
-                    data-evidence-message={message.id}
-                    scrollAnchor={message.role === "user"}
-                  >
-                    {revisionId && (
-                      <a
-                        className="mb-2 inline-block text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
-                        href={"#chat-message-" + revisionId}
-                      >
-                        此评判已修订，查看修正结论与依据
-                      </a>
-                    )}
-                    <ChatTurn
-                      onRemember={
-                        directChatId && !isGroup ? setDraft : undefined
+            {groups.flatMap(({ current }) =>
+              current
+                .filter((message) => message.role !== "system")
+                .map((message) => {
+                  const meta = message.metadata as
+                    | {
+                        executionId?: string
+                        workflow?: unknown
+                        checkpointNote?: boolean
                       }
-                      message={message}
-                      bots={bots}
-                      isGroup={isGroup}
-                      streaming={
-                        status === "streaming" && message.id === (workingMessageId ?? last?.id)
-                      }
-                      busy={busy}
-                      onApproval={
-                        message.id === last?.id ? onApproval : undefined
-                      }
-                    />
-                  </MessageScrollerItem>
-                )
-              })}
-            {waiting && (
-              <MessageScrollerItem messageId="responding">
-                <Message>
-                  <MessageContent>
-                    <MessageHeader>
-                      <SpeakerAvatar bot={pendingBot} />
-                      <BotName
-                        name={pendingBot?.name ?? "Assistant"}
-                        job={pendingBot?.job}
+                    | undefined
+                  const revisionId =
+                    meta?.executionId && revisions.get(meta.executionId)
+                  const slot = projected.byMessage.get(message.id)
+                  const ordinary =
+                    !current[0]?.id.startsWith("workflow_") &&
+                    !(
+                      current[0]?.metadata as { workflow?: unknown } | undefined
+                    )?.workflow
+                  return (
+                    <MessageScrollerItem
+                      key={slot?.replies[0].id ?? message.id}
+                      id={"chat-message-" + message.id}
+                      messageId={message.id}
+                      data-evidence-message={message.id}
+                    >
+                      {revisionId && (
+                        <a
+                          className="mb-2 inline-block text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                          href={"#chat-message-" + revisionId}
+                        >
+                          此评判已修订，查看修正结论与依据
+                        </a>
+                      )}
+                      <ChatTurn
+                        versions={ordinary ? slot : undefined}
+                        chooseVersion={chooseVersion}
+                        onRevise={
+                          ordinary && !meta?.checkpointNote
+                            ? onRevise
+                            : undefined
+                        }
+                        revisionBusy={revisionBusy}
+                        onRemember={
+                          directChatId && !isGroup ? setDraft : undefined
+                        }
+                        message={message}
+                        bots={bots}
+                        isGroup={isGroup}
+                        streaming={message.id === activeReplyId}
+                        busy={busy}
+                        onApproval={
+                          message.id === last?.id ? onApproval : undefined
+                        }
                       />
-                    </MessageHeader>
-                    <Responding />
-                  </MessageContent>
-                </Message>
+                      {(pendingAfter === message.id ||
+                        (slot && pendingAfter === slot.replies[0].id)) && (
+                        <div className="mt-6">{waitingHeader}</div>
+                      )}
+                    </MessageScrollerItem>
+                  )
+                })
+            )}
+            {waiting && !pendingAfter && (
+              <MessageScrollerItem messageId="responding">
+                {waitingHeader}
+              </MessageScrollerItem>
+            )}
+            {citedMessage && (
+              <MessageScrollerItem
+                messageId={"evidence-" + evidenceId}
+                data-evidence-message={evidenceId}
+              >
+                <details
+                  open
+                  key={evidenceId}
+                  className="rounded-md border px-3 py-2"
+                >
+                  <summary className="cursor-pointer text-sm text-muted-foreground">
+                    {evidenceVersion >= 0
+                      ? `Cited reply · Version ${evidenceVersion + 1}`
+                      : "Cited message"}
+                  </summary>
+                  <ChatTurn
+                    message={citedMessage}
+                    bots={bots}
+                    isGroup={isGroup}
+                    streaming={false}
+                    busy={false}
+                  />
+                </details>
               </MessageScrollerItem>
             )}
           </MessageScrollerContent>

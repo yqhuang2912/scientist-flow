@@ -53,7 +53,8 @@ export function getHandoff(part: ChatPart) {
 
 export function getAssistantSegments(
   message: UIMessage,
-  fallbackBotId: string | null
+  fallbackBotId: string | null,
+  includePending = false
 ) {
   if (typeof record(message.metadata)?.executionId === "string") {
     return [
@@ -98,7 +99,7 @@ export function getAssistantSegments(
     const handoff = getHandoff(part)
     if (handoff) nextSpeaker = handoff.targetId
   })
-  if (current.parts.some(({ part }) => part.type !== "step-start"))
+  if ((includePending && segments.length === 0) || current.parts.some(({ part }) => part.type !== "step-start"))
     segments.push(current)
   return segments
 }
