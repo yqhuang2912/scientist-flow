@@ -34,7 +34,7 @@ export function snapshotToolEvidence(
   scope: EvidenceScope,
   source: ToolObservation,
   input: z.infer<typeof toolDecisionInput>
-): ToolEvidence | undefined {
+): ToolEvidence | { error: string } {
   if (
     source.chatId !== scope.chatId ||
     source.botId !== scope.botId ||
@@ -42,10 +42,14 @@ export function snapshotToolEvidence(
     source.messageId !== scope.messageId ||
     toolEvidenceRef(source) !== input.source
   )
-    return
+    return {
+      error: "The evidence does not match this execution's HTTP result.",
+    }
   const fields: ToolEvidence["fields"] = []
   for (const { path, value } of input.fields) {
-    if (/~(?![01])/.test(path) || fields.some((f) => f.path === path)) return
+    const field = "Field " + (fields.length + 1)
+    if (/~(?![01])/.test(path) || fields.some((f) => f.path === path))
+      return { error: field + " needs a distinct, valid JSON Pointer." }
     let node = source.data
     for (const encoded of path.slice(1).split("/")) {
       const key = encoded.replace(/~1/g, "/").replace(/~0/g, "~")
@@ -59,7 +63,11 @@ export function snapshotToolEvidence(
         !Object.hasOwn(node, key) ||
         (Array.isArray(node) && !/^(0|[1-9]\d*)$/.test(key))
       )
-        return
+        return {
+          error:
+            field +
+            " does not resolve to a public field inside data. Start the pointer at the contents of data, without a /data prefix.",
+        }
       node = (node as Record<string, unknown>)[key]
     }
     if (
@@ -69,7 +77,11 @@ export function snapshotToolEvidence(
       String(node) !== value ||
       node === "[redacted]"
     )
-      return
+      return {
+        error:
+          field +
+          " must match the exact scalar value from the HTTP result. Copy the original digits or string without formatting.",
+      }
     fields.push({ path, value: node })
   }
   const { executionId, toolCallId, toolId, toolName, digest } = source

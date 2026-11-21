@@ -38,6 +38,52 @@ const ok = () => ({
   body: Readable.from(['{"count":3}']),
 })
 
+test("finishing a skill read after an HTTP call starts cannot qualify it as evidence", async () => {
+  const scope = {
+    chatId: "group",
+    botId: "recipient",
+    executionId: "run",
+    messageId: "reply",
+  }
+  const bound = {
+    ...definition,
+    id: "lookup",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    botId: scope.botId,
+    botName: "Recipient",
+  }
+  let read = false
+  const turn = httpToolTurn(
+    [bound],
+    async () => bound,
+    async () => true,
+    async () => {
+      read = true
+      return ok()
+    },
+    () => (read ? scope : undefined)
+  )
+  const lookup = turn.tools.count_items
+  const call = async (toolCallId: string) => {
+    const output = await lookup.execute!(
+      {},
+      { toolCallId, messages: [], context: scope }
+    )
+    assert.ok(output.success)
+    const result = await lookup.toModelOutput!({
+      input: {},
+      toolCallId,
+      output,
+    })
+    assert.equal(result.type, "text")
+    return JSON.parse(result.value)
+  }
+  assert.deepEqual(await call("early"), { count: 3 })
+  const later = await call("later")
+  assert.equal(turn.observation(later.evidenceRef)?.toolCallId, "later")
+})
+
 test("Bot forms distinguish absent tool IDs from clearing and deduplicate selected tool IDs", () => {
   const base = {
       modelChoice: {

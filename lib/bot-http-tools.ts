@@ -90,6 +90,9 @@ export function httpToolTurn(
           message,
         })
         if (!binding) return fail("This bot does not have this tool.")
+        // A skill read finishing during an in-flight request cannot authorize
+        // that earlier call as a skill-guided observation.
+        const scope = evidenceScope?.()
         try {
           const live = await lookup(binding.botId, binding.id)
           if (
@@ -148,7 +151,6 @@ export function httpToolTurn(
             if (result.postOutcomeUnknown) uncertain.add(def.id)
             return { ...base, success: false, message: result.message }
           }
-          const scope = evidenceScope?.()
           let ref
           if (
             scope &&

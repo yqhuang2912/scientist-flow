@@ -197,9 +197,27 @@ test(
           { tool_calls: [call(0, projectRecallTool, await recall(body))] },
           "tool_calls"
         )
-      if (pilotResponse) {
+      if (pilotResponse || combinedSkill) {
         if (combinedSkill && key === "Bearer fixture-rowan") {
           const last = body.messages.at(-1)
+          const publicQuote = "The study uses two cohorts."
+          const publicSource = JSON.stringify(body.messages).match(
+            /\[(S-[a-f0-9]+)\] The study uses two cohorts\./
+          )?.[1]
+          if (publicSource && last?.role !== "tool")
+            return sse(
+              body.model,
+              {
+                tool_calls: [
+                  call(0, "record_project_decision", {
+                    decision: "Use two cohorts for this study",
+                    source: publicSource,
+                    quote: publicQuote,
+                  }),
+                ],
+              },
+              "tool_calls"
+            )
           if (last?.role !== "tool")
             return sse(
               body.model,
@@ -220,7 +238,12 @@ test(
             assert.ok(receipt.success)
             return sse(
               body.model,
-              { content: receipt.decision + " · " + receipt.id },
+              {
+                content:
+                  (receipt.decision ?? "Recorded project decision") +
+                  " · " +
+                  receipt.id,
+              },
               "stop"
             )
           }
@@ -235,6 +258,9 @@ test(
                 tool_calls: [
                   call(0, "record_project_decision", {
                     source: evidenceRef,
+                    ...(!pilotResponse && {
+                      quote: "An irrelevant model-supplied quotation",
+                    }),
                     decision:
                       "Observed " +
                       value +
@@ -428,11 +454,12 @@ test(
     async function run(
       input: UIMessage,
       controller = new AbortController(),
-      onParent?: () => Promise<void>
+      onParent?: () => Promise<void>,
+      groupId = chatId
     ) {
       let transcript: UIMessage[] = []
       await runBotTurn({
-        chatId,
+        chatId: groupId,
         requestedBotId:
           (input.metadata as { botId?: string } | undefined)?.botId ?? a,
         runId: nanoid(),
@@ -555,6 +582,155 @@ test(
         }),
         db.insert(botTools).values({ botId: b, toolId: httpId }),
       ])
+      await t.test(
+        "ordinary three-member group saves the recipient's current observation without a pilot",
+        async () => {
+          const project = nanoid(),
+            observer = nanoid(),
+            skill = nanoid()
+          const name = "measure-" + randomBytes(5).toString("hex")
+          try {
+            await db.batch([
+              db.insert(chats).values({ id: project, kind: "group" }),
+              db
+                .insert(bots)
+                .values({ id: observer, name: "Observer", job: "Observe" }),
+              db
+                .insert(chatMembers)
+                .values(
+                  [a, b, observer].map((botId) => ({ chatId: project, botId }))
+                ),
+              db
+                .insert(skills)
+                .values({
+                  id: skill,
+                  name,
+                  description: "Check measurements",
+                  instructions:
+                    "Lookup topic: cohort-cobalt-17\nDouble the observed value.",
+                }),
+              db.insert(botSkills).values({ botId: b, skillId: skill }),
+            ])
+            combinedSkill = name
+            saveMeasurement = true
+            const input: UIMessage = {
+              ...user(),
+              metadata: { botId: a, mentionedBotIds: [a] },
+              parts: [
+                {
+                  type: "text",
+                  text: "@Iris delegate the measurement check to Rowan and save the result with evidence.",
+                },
+              ],
+            }
+            const turn = await run(input, undefined, undefined, project)
+            const [, sender, recipient] = turn
+            assert.equal(turn.length, 3)
+            assert.ok(sender.parts.map(getHandoff).some(Boolean))
+            const request = sent.find(
+              ({ body }) =>
+                body.messages.at(-1)?.tool_call_id ===
+                "fixture-call-0-" + httpName
+            )
+            assert.match(
+              String(request?.body.messages.at(-1)?.content),
+              /"evidenceRef":"T-/,
+              "B must receive evidence for this HTTP call in the ordinary group"
+            )
+            assert.deepEqual(
+              recipient.parts.map((p) => p.type),
+              [
+                "tool-read_skill",
+                "tool-" + httpName,
+                "tool-record_project_decision",
+                "text",
+              ]
+            )
+            const receipt = recipient.parts[2]
+            assert.ok("output" in receipt)
+            const memory = getToolPresentation(receipt, false).memory
+            assert.ok(memory)
+            const rows = () =>
+              db
+                .select()
+                .from(projectDecisions)
+                .where(eq(projectDecisions.chatId, project))
+            const [stored] = await rows()
+            assert.deepEqual(memory.evidence, stored.toolEvidence)
+            assert.match(
+              getToolPresentation(receipt, false).title,
+              new RegExp(stored.id)
+            )
+            assert.equal(stored.creatorBotId, b)
+            assert.equal(stored.sourceMessageId, recipient.id)
+            assert.equal(stored.quote, "/value = " + observation)
+            assert.deepEqual(stored.toolEvidence?.fields, [
+              { path: "/value", value: observation },
+            ])
+            assert.equal(
+              stored.toolEvidence?.toolCallId,
+              "fixture-call-0-" + httpName
+            )
+            assert.equal(
+              stored.toolEvidence?.executionId,
+              (recipient.metadata as { executionId: string }).executionId
+            )
+            assert.deepEqual(sends, ["/fixture"])
+            assert.equal((await rows()).length, 1)
+            const modelSends = sent.length
+            assert.deepEqual(
+              await run(input, undefined, undefined, project),
+              turn
+            )
+            assert.equal((await rows()).length, 1)
+            assert.deepEqual(sends, ["/fixture"])
+            assert.equal(sent.length, modelSends)
+            const quoted: UIMessage = {
+              ...input,
+              id: nanoid(),
+              parts: [
+                {
+                  type: "text",
+                  text: "The study uses two cohorts. Ask Rowan to record this agreement.",
+                },
+              ],
+            }
+            const [, , quoteReply] = await run(
+              quoted,
+              undefined,
+              undefined,
+              project
+            )
+            assert.ok(
+              quoteReply.parts.some(
+                (p) =>
+                  p.type === "tool-record_project_decision" &&
+                  "output" in p &&
+                  (p.output as { success: boolean }).success
+              )
+            )
+            const quoteRow = (await rows()).find(
+              (row) => row.sourceMessageId === quoted.id
+            )
+            assert.equal(quoteRow?.creatorBotId, b)
+            assert.equal(quoteRow?.quote, "The study uses two cohorts.")
+            assert.equal(quoteRow?.toolEvidence, null)
+            assert.deepEqual(sends, ["/fixture"])
+          } finally {
+            combinedSkill = undefined
+            saveMeasurement = false
+            sends.length = 0
+            sent = []
+            await db.batch([
+              db.delete(modelRequests).where(eq(modelRequests.chatId, project)),
+              db.delete(chats).where(eq(chats.id, project)),
+              db.delete(botSkills).where(eq(botSkills.skillId, skill)),
+              db.delete(skills).where(eq(skills.id, skill)),
+              db.delete(bots).where(eq(bots.id, observer)),
+            ])
+          }
+        }
+      )
       await t.test(
         "explicit mentions claim independent speakers in order and replay both replies",
         async () => {

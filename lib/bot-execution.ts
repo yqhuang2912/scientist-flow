@@ -163,7 +163,7 @@ export function executionInstructions({
     catalog,
     incoming ? recipientContext(incoming) : "",
     canDelegate
-      ? "When asked to save and delegate, save the decision first, then use handoff with the concrete remaining task."
+      ? "When asked to save an already supported decision and then delegate, save it first. If another member needs to gather evidence before a conclusion can be recorded, hand off the lookup and requested save together."
       : "",
     ownTools.length
       ? "Your assigned HTTP tools: " +

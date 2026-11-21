@@ -161,10 +161,8 @@ export async function recordToolProjectDecision(
   let writeError: string | undefined
   if (live) {
     const snapshot = snapshotToolEvidence(scope, live, parsed.data)
-    if (!snapshot)
-      return rejected(
-        "Decision not saved. The evidence does not match this execution's HTTP result."
-      )
+    if ("error" in snapshot)
+      return rejected("Decision not saved. " + snapshot.error)
     const saved = await persistDecision(
       scope.chatId,
       scope.botId,

@@ -68,6 +68,22 @@ export const toolDecisionInput = z.strictObject({
       "Select only the public supporting fields. Include identity, units or reporting period when needed to interpret the value."
     ),
 })
+// Function-calling providers expect an object at the root. The source-specific
+// writers still validate their strict schemas before touching project memory.
+export const recipientDecisionInput = decisionInput.extend({
+  source: z
+    .string()
+    .describe(
+      "Copy the T- evidenceRef from this execution's HTTP result, or the S- label of a public message."
+    ),
+  quote: decisionInput.shape.quote
+    .optional()
+    .describe("Public message source only: its exact quotation."),
+  nextStep: decisionInput.shape.nextStep.describe(
+    "Optional next step for a public message decision only."
+  ),
+  fields: toolDecisionInput.shape.fields.optional(),
+})
 export const toolEvidenceSchema = z.object({
   executionId: z.string(),
   toolCallId: z.string(),

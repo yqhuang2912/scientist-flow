@@ -182,6 +182,25 @@ test(
         decision: "Retry after losing the receipt",
       })
       assert.deepEqual(cold, one)
+      // A historical receipt for this exact tool already exists. Neither
+      // another group nor a new execution can use it as a fresh observation.
+      for (const other of [
+        { ...scope, chatId: otherChat },
+        { ...scope, executionId: nanoid(), messageId: nanoid() },
+      ]) {
+        const replay = await recordToolProjectDecision(
+          other,
+          () => undefined,
+          input
+        )
+        assert.equal(replay.success, false)
+      }
+      const fabricated = await recordToolProjectDecision(
+        scope,
+        () => undefined,
+        { ...input, fields: [{ path: "/samples/0/value", value: "999999" }] }
+      )
+      assert.equal(fabricated.success, false)
       const rows = await readProjectDecisions(chatId)
       assert.equal(rows.length, 1)
       assert.deepEqual(rows[0].toolEvidence?.fields, [
