@@ -91,6 +91,24 @@ type RequestBody = {
   }[]
   tools: { function: { name: string } }[]
 }
+function projectPrompt(body: RequestBody) {
+  return body.messages
+    .filter((m) => m.role === "system")
+    .flatMap((m) =>
+      typeof m.content === "string"
+        ? [m.content]
+        : Array.isArray(m.content)
+          ? m.content.map((p) => p.text)
+          : []
+    )
+    .join("\n")
+}
+function activeRecords(prompt: string) {
+  const match =
+    /Active research decisions for this project\.[^\n]*\n([^\n]+)/.exec(prompt)
+  assert.ok(match, "Expected active project records in the model's context")
+  return JSON.parse(match[1])
+}
 function sse(
   model: string,
   delta: object,
@@ -592,9 +610,16 @@ test(
           try {
             await db.batch([
               db.insert(chats).values({ id: project, kind: "group" }),
-              db
-                .insert(bots)
-                .values({ id: observer, name: "Observer", job: "Observe" }),
+              db.insert(bots).values({
+                id: observer,
+                name: "Observer",
+                job: "Observe",
+                modelChoice: {
+                  connectionId: ca,
+                  modelId: firstModel,
+                  effort: "low",
+                },
+              }),
               db
                 .insert(chatMembers)
                 .values(
@@ -685,6 +710,51 @@ test(
             assert.equal((await rows()).length, 1)
             assert.deepEqual(sends, ["/fixture"])
             assert.equal(sent.length, modelSends)
+            // A fresh observer turn gets neither B's reply nor its tool result
+            // in the transcript. Its citation must come from the saved record.
+            recall = async (body) => {
+              const [record] = activeRecords(projectPrompt(body))
+              assert.equal(record.recordId, stored.id)
+              assert.deepEqual(record.evidence, stored.toolEvidence)
+              assert.ok(
+                !JSON.stringify(
+                  body.messages.filter((m) => m.role !== "system")
+                ).includes(stored.id)
+              )
+              return { recordId: record.recordId, answer: record.decision }
+            }
+            const followup: UIMessage = {
+              ...user(),
+              metadata: { botId: observer, mentionedBotIds: [observer] },
+              parts: [
+                {
+                  type: "text",
+                  text: "What did we measure? Cite the project record.",
+                },
+              ],
+            }
+            const [, observerReply] = await run(
+              followup,
+              undefined,
+              undefined,
+              project
+            )
+            assert.equal(
+              (observerReply.metadata as { botId: string }).botId,
+              observer
+            )
+            assert.deepEqual(observerReply.parts, [
+              { type: "text", text: stored.decision, state: "done" },
+              {
+                type: "source-document",
+                sourceId: stored.id,
+                mediaType: projectDecisionMediaType,
+                title: stored.id,
+              },
+            ])
+            assert.deepEqual(sends, ["/fixture"])
+            assert.equal((await rows()).length, 1)
+            recall = undefined
             const quoted: UIMessage = {
               ...input,
               id: nanoid(),
@@ -717,6 +787,7 @@ test(
             assert.equal(quoteRow?.toolEvidence, null)
             assert.deepEqual(sends, ["/fixture"])
           } finally {
+            recall = undefined
             combinedSkill = undefined
             saveMeasurement = false
             sends.length = 0
@@ -931,21 +1002,8 @@ test(
                         (t) => t.function.name === projectRecallTool
                       )
                     )
-                    const prompt = body.messages
-                      .filter((m) => m.role === "system")
-                      .flatMap((m) =>
-                        typeof m.content === "string"
-                          ? [m.content]
-                          : Array.isArray(m.content)
-                            ? m.content.map((p) => p.text)
-                            : []
-                      )
-                      .join("\n")
-                    const list = JSON.parse(
-                      prompt.match(
-                        /Active research decisions for this project\.[^\n]*\n([^\n]+)/
-                      )![1]
-                    )
+                    const prompt = projectPrompt(body)
+                    const list = activeRecords(prompt)
                     const record = list.find((r: { decision: string }) =>
                       r.decision.includes("Wave latency")
                     )
