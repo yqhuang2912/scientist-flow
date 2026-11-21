@@ -1,6 +1,13 @@
 "use client"
 
-import { useEffect, useId, useRef, useState } from "react"
+import {
+  useEffect,
+  useEffectEvent,
+  useId,
+  useRef,
+  useState,
+  type RefObject,
+} from "react"
 import { useController, useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import type { ChatStatus } from "ai"
@@ -73,6 +80,7 @@ function DraftImagePreview({ file }: { file: File }) {
 export function ChatComposer({
   bots,
   chatId,
+  dropArea,
   onSubmit,
   status,
   onStop,
@@ -80,6 +88,7 @@ export function ChatComposer({
 }: {
   bots: ComposerBot[]
   chatId?: string
+  dropArea?: RefObject<HTMLElement | null>
   onSubmit: (
     message: ChatComposerMessage
   ) => void | Promise<void | { error: string }>
@@ -90,6 +99,7 @@ export function ChatComposer({
   const inputId = useId()
   const [mentions, setMentions] = useState<Mention[]>([])
   const submitting = useRef(false)
+  const formElement = useRef<HTMLFormElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const form = useForm<ChatComposerInput, unknown, ChatComposerDraft>({
@@ -151,6 +161,40 @@ export function ChatComposer({
     )
   }
 
+  const acceptDrop = useEffectEvent((files: FileList) => addFiles(files))
+  useEffect(() => {
+    const area = dropArea?.current ?? formElement.current
+    if (!area) return
+    function dragOver(event: DragEvent) {
+      if (!event.dataTransfer?.types.includes("Files")) return
+      event.preventDefault()
+      event.dataTransfer.dropEffect = "copy"
+      setDragging(true)
+    }
+    function dragLeave(event: DragEvent) {
+      if (
+        event.relatedTarget instanceof Node &&
+        area?.contains(event.relatedTarget)
+      )
+        return
+      setDragging(false)
+    }
+    function drop(event: DragEvent) {
+      setDragging(false)
+      if (!event.dataTransfer?.files.length) return
+      event.preventDefault()
+      acceptDrop(event.dataTransfer.files)
+    }
+    area.addEventListener("dragover", dragOver)
+    area.addEventListener("dragleave", dragLeave)
+    area.addEventListener("drop", drop)
+    return () => {
+      area.removeEventListener("dragover", dragOver)
+      area.removeEventListener("dragleave", dragLeave)
+      area.removeEventListener("drop", drop)
+    }
+  }, [dropArea])
+
   async function submit(message: ChatComposerDraft) {
     if (busy || submitting.current) return
     submitting.current = true
@@ -186,24 +230,9 @@ export function ChatComposer({
 
   return (
     <form
+      ref={formElement}
       aria-label="Chat message"
       onSubmit={(event) => void form.handleSubmit(submit)(event)}
-      onDragOver={(event) => {
-        if (!event.dataTransfer.types.includes("Files")) return
-        event.preventDefault()
-        setDragging(true)
-      }}
-      onDragLeave={(event) => {
-        // Ignore the drag leaving a child element for the form itself.
-        if (event.currentTarget.contains(event.relatedTarget as Node)) return
-        setDragging(false)
-      }}
-      onDrop={(event) => {
-        if (!event.dataTransfer.types.includes("Files")) return
-        event.preventDefault()
-        setDragging(false)
-        addFiles(event.dataTransfer.files)
-      }}
       className={cn(
         dragging && "rounded-2xl ring-2 ring-ring/40 ring-offset-2"
       )}

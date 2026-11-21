@@ -14,6 +14,60 @@ import {
   uploadWorkspaceFileSchema,
 } from "../lib/workspace-validation"
 
+test("common chat attachments are recognised by name when the OS omits the MIME type", () => {
+  for (const name of [
+    "debug.LOG",
+    "analysis.py",
+    "paper.tex",
+    "references.bib",
+    "analysis.R",
+    "chart.tsx",
+    "settings.yaml",
+    "schema.sql",
+    "config.toml",
+    "report.html",
+    "metrics.tsv",
+    "events.jsonl",
+    "results.csv",
+    "notes.ipynb",
+    "Makefile",
+    "graph.TIFF",
+    "figure.png",
+    "photo.jpg",
+    "report.pdf",
+    "slides.pptx",
+    "review.docx",
+    "sheet.xlsx",
+  ]) {
+    for (const type of ["", "application/octet-stream"]) {
+      const file = new File(["fixture"], name, { type })
+      assert.equal(attachmentRejection(file), undefined, name)
+    }
+  }
+  assert.equal(
+    attachmentMediaType({ name: "debug.LOG", type: "" }),
+    "text/plain"
+  )
+  assert.equal(
+    attachmentMediaType({
+      name: "experiment.out",
+      type: "text/plain; charset=UTF-8",
+    }),
+    "text/plain"
+  )
+  for (const name of [
+    "program.exe",
+    "shortcut.lnk",
+    "weights.onnx",
+    "picture.svg",
+  ]) {
+    assert.equal(
+      attachmentRejection(new File(["fixture"], name, { type: "text/plain" })),
+      "This file type cannot be attached."
+    )
+  }
+})
+
 test("both pickers accept exactly 200 MB and reject the next byte", () => {
   for (const size of [MAX_UPLOAD_BYTES, MAX_UPLOAD_BYTES + 1]) {
     const file = { name: "答辩.pptx", size, type: "" } as File

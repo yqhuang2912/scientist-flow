@@ -1,5 +1,6 @@
 import { z } from "zod"
 import type { FileUIPart, TextUIPart, UIMessage } from "ai"
+import { chatAttachmentFormat } from "./chat-attachment-format"
 import { workspaceOpenPolicy } from "./workspace-open-policy"
 import {
   uploadWorkspaceFileSchema,
@@ -47,33 +48,8 @@ export function shouldSubmitChatMessage({
 
 const MAX_RECOVERED_ATTACHMENTS = 8
 
-const formats: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  webp: "image/webp",
-  gif: "image/gif",
-  avif: "image/avif",
-  pdf: "application/pdf",
-  txt: "text/plain",
-  md: "text/markdown",
-  markdown: "text/markdown",
-  csv: "text/csv",
-  json: "application/json",
-  doc: "application/msword",
-  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  ppt: "application/vnd.ms-powerpoint",
-  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  xls: "application/vnd.ms-excel",
-  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-}
 export function attachmentMediaType(file: Pick<File, "name" | "type">) {
-  const extension = file.name.split(".").pop()?.toLowerCase() ?? ""
-  return Object.hasOwn(formats, extension)
-    ? formats[extension]
-    : Object.values(formats).includes(file.type)
-      ? file.type
-      : undefined
+  return chatAttachmentFormat(file.name, file.type)?.mediaType
 }
 
 export const storedAttachmentSchema = z.object({
@@ -88,12 +64,15 @@ export const storedAttachmentSchema = z.object({
 export type StoredAttachment = z.infer<typeof storedAttachmentSchema>
 export function workspaceMentionMediaType(relativePath: string) {
   const policy = workspaceOpenPolicy(relativePath)
-  if (policy.kind === "internal-text")
-    return attachmentMediaType({ name: relativePath, type: "" }) ?? "text/plain"
   if (policy.kind === "blocked" || policy.kind === "unsupported")
     return undefined
-  if (/\.(pdf|docx|xlsx|pptx|png|jpe?g|gif|webp|avif)$/i.test(relativePath))
-    return attachmentMediaType({ name: relativePath, type: "" })
+  const format = chatAttachmentFormat(relativePath)
+  if (
+    format &&
+    format.reader !== "legacy-office" &&
+    format.reader !== "preview-image"
+  )
+    return format.mediaType
 }
 export const messageAttachmentSchema = z.union([
   storedAttachmentSchema.extend({

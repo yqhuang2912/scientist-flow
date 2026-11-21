@@ -1,6 +1,6 @@
 import "server-only"
-import path from "node:path"
 import type { FileUIPart, TextUIPart } from "ai"
+import { chatAttachmentFormat } from "./chat-attachment-format"
 import {
   workspaceMentionMediaType,
   type MessageAttachment,
@@ -52,26 +52,25 @@ async function readAttachment(
   imageBudget: number,
   textBudget: number
 ): Promise<Part> {
-  const ext = path.posix.extname(ref.relativePath).toLowerCase()
+  const reader = chatAttachmentFormat(ref.relativePath, ref.mediaType)?.reader
   const filename = "origin" in ref ? ref.relativePath : ref.name
   const title = JSON.stringify(filename)
-  const office = [".docx", ".pptx", ".xlsx"].includes(ext)
-  const image = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif"].includes(
-    ext
-  )
-  if (
-    !office &&
-    !image &&
-    !("origin" in ref && ref.origin === "workspace") &&
-    ![".pdf", ".txt", ".md", ".markdown", ".json", ".csv"].includes(ext)
-  )
+  const office = reader === "docx" || reader === "pptx" || reader === "xlsx"
+  if (!reader)
+    return notice("Attachment " + title + ": this format cannot be read.")
+  if (reader === "legacy-office")
     return notice(
       "Attachment " +
         title +
         ": this format cannot be read. For legacy Office documents, request a DOCX, PPTX or XLSX copy."
     )
-  const prefixBytes =
-    office || image || ext === ".pdf" ? undefined : (MAX_CHARS + 1) * 4
+  if (reader === "preview-image")
+    return notice(
+      "Attachment " +
+        title +
+        " can be previewed in the workspace. Ask for a PNG or JPEG copy to inspect its contents."
+    )
+  const prefixBytes = reader === "text" ? (MAX_CHARS + 1) * 4 : undefined
   const { raw, target } = await readWorkspaceFileBytes(
     taskDir,
     ref.relativePath,
@@ -85,11 +84,15 @@ async function readAttachment(
         title +
         " changed size after upload. Request the current file."
     )
-  if (image) {
+  if (reader === "image") {
     const { default: sharp } = await import("sharp")
     const picture = sharp(raw, { pages: 1, limitInputPixels: 64_000_000 })
     const { format, width, height } = await picture.metadata()
-    if (!["png", "jpeg", "gif", "webp", "heif", "avif"].includes(format ?? ""))
+    if (
+      !["png", "jpeg", "gif", "webp", "heif", "avif", "tiff"].includes(
+        format ?? ""
+      )
+    )
       throw new Error("Invalid raster")
     if (
       raw.length <= imageBudget &&
@@ -129,8 +132,8 @@ async function readAttachment(
     throw new Error("Image exceeds model input budget")
   }
   let text: string
-  if (office) text = await officeAttachmentText(raw, ext, MAX_CHARS)
-  else if (ext === ".pdf") text = await pdfText(raw)
+  if (office) text = await officeAttachmentText(raw, "." + reader, MAX_CHARS)
+  else if (reader === "pdf") text = await pdfText(raw)
   else {
     text = new TextDecoder("utf-8", { fatal: true }).decode(raw, {
       stream: raw.length < ref.size,
@@ -139,7 +142,7 @@ async function readAttachment(
   }
   if (!text.trim()) {
     if (!ref.size) return notice("Attachment " + title + " is empty.")
-    if (ext === ".pdf" && raw.length <= imageBudget)
+    if (reader === "pdf" && raw.length <= imageBudget)
       return {
         type: "file",
         mediaType: "application/pdf",
@@ -169,9 +172,10 @@ export async function prepareSavedAttachments(
   refs: MessageAttachment[]
 ): Promise<PreparedAttachment[]> {
   const result: PreparedAttachment[] = []
-  const mediaCount = refs.filter((ref) =>
-    /\.(png|jpe?g|webp|gif|avif|pdf)$/i.test(ref.relativePath)
-  ).length
+  const mediaCount = refs.filter((ref) => {
+    const reader = chatAttachmentFormat(ref.relativePath, ref.mediaType)?.reader
+    return reader === "image" || reader === "pdf"
+  }).length
   const imageBudget = Math.floor((250 * 1024) / Math.max(1, mediaCount))
   const textBudget = Math.floor((96 * 1024) / Math.max(1, refs.length))
   for (const ref of refs) {

@@ -36,6 +36,7 @@ export function ChatInterface({
   const [pendingBotId, setPendingBotId] = useState(chat.bots[0]?.id ?? "")
   const [networkError, setNetworkError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
+  const chatDropArea = useRef<HTMLDivElement>(null)
   const uploaded = useRef(new WeakMap<File, UploadedEntry>())
   const pending = useRef<{ input: string; id: string } | null>(null)
   const version = useRef(0)
@@ -171,6 +172,7 @@ export function ChatInterface({
   const isGroup = chat.kind === "group"
   return (
     <div
+      ref={chatDropArea}
       data-project-chat={isGroup ? chat.id : undefined}
       className="flex min-h-0 flex-1 flex-col"
     >
@@ -210,6 +212,7 @@ export function ChatInterface({
         <ChatComposer
           bots={chat.bots}
           chatId={chat.id}
+          dropArea={chatDropArea}
           onSubmit={submit}
           status={status}
           onStop={stop}

@@ -26,6 +26,56 @@ import {
 } from "../lib/chat-composer"
 import { publicModelHistory } from "../lib/bot-execution"
 
+test("uploaded log, source, config and table files supply their UTF-8 contents to chat; TIFF supplies image bytes", async (t) => {
+  const root = await mkdtemp(
+    path.join(await realpath(os.tmpdir()), "sf-chat-formats-")
+  )
+  t.after(() => rm(root, { recursive: true, force: true }))
+  await mkdir(path.join(root, "uploads"))
+  const samples = [
+    ["debug.LOG", "训练完成，score=0.86"],
+    ["plot.py", "chart_title = 'Fixture 24'"],
+    ["config.yaml", "sample_count: 31"],
+    ["metrics.tsv", "subject\tvalue\nA3\t19"],
+    ["paper.tex", "\\section{Measurement}"],
+    ["notes.ipynb", '{"cells":[{"source":["score = 91"]}]}'],
+    ["Makefile", "fixture: report"],
+  ]
+  for (const [name, text] of samples) {
+    await writeFile(path.join(root, "uploads", name), text)
+    const [result] = await prepareSavedAttachments(root, [
+      {
+        name,
+        relativePath: "uploads/" + name,
+        size: Buffer.byteLength(text),
+        mediaType: attachmentMediaType({ name, type: "" })!,
+      },
+    ])
+    assert.ok(
+      result.part.type === "text" && result.part.text.includes(text),
+      name
+    )
+  }
+  const image = await sharp({
+    create: { width: 16, height: 16, channels: 3, background: "white" },
+  })
+    .tiff()
+    .toBuffer()
+  await writeFile(path.join(root, "uploads", "figure.tif"), image)
+  const [result] = await prepareSavedAttachments(root, [
+    {
+      name: "figure.tif",
+      relativePath: "uploads/figure.tif",
+      size: image.length,
+      mediaType: "image/tiff",
+    },
+  ])
+  assert.ok(
+    result.part.type === "file" &&
+      result.part.url.startsWith("data:image/jpeg;base64,")
+  )
+})
+
 test("workspace mentions search nested files and snapshot their contents inside the task", async (t) => {
   const base = await mkdtemp(
     path.join(await realpath(os.tmpdir()), "sf-mentions-")
