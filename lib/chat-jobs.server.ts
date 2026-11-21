@@ -19,7 +19,10 @@ import type { ChatJobInput, ChatSnapshot, ChatTurnAck } from "./chat-job"
 import type { UIMessage } from "ai"
 import type { WorkflowInput } from "./workflow-run.server"
 
+import type { WorkflowCheckpoint } from "./workflow-checkpoint"
+
 const t = chatTurns
+export const workerMayClaim = sql`${t.userMessage} #>> '{metadata,checkpoint,phase}' is distinct from 'waiting'`
 export class TurnConflict extends Error {}
 export class ChatLeaseLost extends Error {}
 
@@ -27,6 +30,7 @@ export async function turnProgress(chatId: string, id: string) {
   const [row] = await db
     .select({
       turnId: t.id,
+      checkpoint: sql<WorkflowCheckpoint | null>`${t.userMessage} #> '{metadata,checkpoint}'`,
       replies: t.replies,
       state: t.state,
       error: t.error,
@@ -62,7 +66,8 @@ export async function chatSnapshot(chatId: string): Promise<ChatSnapshot> {
 export async function enqueueChatTurn(
   chatId: string,
   input: ChatJobInput,
-  workflow?: WorkflowInput
+  workflow?: WorkflowInput,
+  checkpoint?: WorkflowCheckpoint
 ): Promise<ChatTurnAck> {
   const owner = installationOwner()
   const hash = createHash("sha256")
@@ -120,6 +125,7 @@ export async function enqueueChatTurn(
       mentionedBotIds: input.mentionedBotIds,
       workspaceFiles,
       ...(workflow && { workflow }),
+      ...(checkpoint && { checkpoint }),
     },
     parts,
   }
@@ -172,7 +178,7 @@ export async function cancelChatTurn(chatId: string, id: string) {
     .update(t)
     .set({
       cancelRequested: true,
-      state: sql`case when ${t.state}='queued' then 'cancelled' else ${t.state} end`,
+      state: sql`case when ${t.state}='queued' or ${t.userMessage} #>> '{metadata,checkpoint,phase}'='waiting' then 'cancelled' else ${t.state} end`,
     })
     .where(
       and(
@@ -195,7 +201,7 @@ export async function leaseChatTurn(lease: string, activeChats: string[] = []) {
     })
     .where(
       sql`(${t.chatId},${t.id}) = (select chat_id,id from ${t} where owner=${owner} and
-      ${notInArray(t.chatId, activeChats)} and
+      ${notInArray(t.chatId, activeChats)} and ${workerMayClaim} and
       (state='queued' or (state='running' and lease_until <= now()))
       order by created_at,id for update skip locked limit 1)`
     )

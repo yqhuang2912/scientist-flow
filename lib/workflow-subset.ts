@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { z } from "zod"
-import type { WorkflowDraft } from "./workflow-draft"
+import { nodeBotIds, type WorkflowDraft } from "./workflow-draft"
 
 export const subsetPath = "data/subset.json"
 export const workflowTurnId = (versionId: string) => "workflow_" + versionId
@@ -16,14 +16,32 @@ export function orderedPair(graph: WorkflowDraft) {
     graph.edges.length !== 1 ||
     !first ||
     !second ||
-    first.botId === second.botId ||
+    !nodeBotIds(first).length ||
+    !nodeBotIds(second).length ||
     !first.instructions.trim() ||
     !second.instructions.trim()
   )
     throw new Error(
-      "This runner needs two distinct assigned bots connected by one directed edge."
+      "This runner needs two assigned nodes connected by one directed edge."
     )
   return [first, second] as const
+}
+
+export function subsetExecutionPlan(graph: WorkflowDraft) {
+  return orderedPair(graph).flatMap((node, index) =>
+    nodeBotIds(node).map((botId) => ({
+      id: node.id,
+      title: "title" in node ? node.title : undefined,
+      instructions: "mentions" in node
+        ? [...node.mentions]
+            .filter(m => m.value === botId)
+            .sort((a, b) => b.end - a.end)
+            .reduce((text, m) => text.slice(0, m.end) + "（你）" + text.slice(m.end), node.instructions)
+        : node.instructions,
+      botId,
+      stage: index + 1,
+    }))
+  )
 }
 
 const label = z.string().trim().min(1).max(240)

@@ -61,7 +61,13 @@ const defaultInstructions =
   "Answer briefly, cite sources, and ask before running anything destructive."
 
 interface BotDialogProps {
-  initialAvatarSeed: string
+  initialAvatarSeed?: string
+  onCreated?: (bot: {
+    id: string
+    name: string
+    avatar: string
+    job: string
+  }) => void
   bot?: {
     id: string
     avatar: string
@@ -81,6 +87,7 @@ export function BotDialog({
   open: openProp,
   onOpenChange,
   showTrigger = true,
+  onCreated,
 }: BotDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false)
   const guard = useRef<SettingsLeaveGuard>(null)
@@ -114,6 +121,7 @@ export function BotDialog({
             bot={bot}
             initialAvatarSeed={initialAvatarSeed}
             standalone
+            onCreated={onCreated}
             guard={guard}
             onClose={() => handleOpenChange(false)}
             onManageLibrary={(tab) => {
@@ -131,10 +139,11 @@ export function BotForm({
   bot,
   initialAvatarSeed,
   standalone = false,
+  onCreated,
   guard,
   onManageLibrary,
   onClose,
-}: Pick<BotDialogProps, "bot"> & {
+}: Pick<BotDialogProps, "bot" | "onCreated"> & {
   initialAvatarSeed?: string
   standalone?: boolean
   guard: Ref<SettingsLeaveGuard>
@@ -264,6 +273,7 @@ export function BotForm({
           return
         }
 
+        if (!savedBot) onCreated?.(result.bot)
         if (standalone) onClose()
         else {
           setSavedBot(result.bot)

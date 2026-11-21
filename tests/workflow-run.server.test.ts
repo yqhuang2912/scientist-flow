@@ -9,8 +9,29 @@ import {
   digest,
   measureSubset,
   orderedPair,
+  subsetExecutionPlan,
   verifyReview,
 } from "../lib/workflow-subset"
+
+import { editableNode, nodeBotIds, workflowBotIds, workflowDraftSchema } from "../lib/workflow-draft"
+
+test("nodes retain stable assignments across save and reload, including namesakes and legacy steps", () => {
+  const a = nanoid(), b = nanoid()
+  const first = editableNode({ id: nanoid(), botId: a, instructions: "Measure", position: { x: 11, y: 17 } }, [{id: a, name: "Ada"}])
+  const task = { ...first, title: "Verify", id: nanoid(), instructions: "@Ada @Ada @Ada",
+    mentions: [b, a, b].map((value, i) => ({kind: "bot" as const, value, label: "Ada", start: i*5, end:i*5+4})).reverse() }
+  const graph = { nodes: [task, first], edges: [{ source: first.id, target: task.id }], viewport: { x: 0, y: 0, zoom: 1 } }
+  const saved = workflowDraftSchema.parse(JSON.parse(JSON.stringify(graph)))
+  assert.deepEqual(saved, graph)
+  assert.deepEqual(nodeBotIds(task), [b,a])
+  assert.deepEqual(workflowBotIds(graph), [b,a])
+  assert.equal(subsetExecutionPlan(saved)[1].instructions, "@Ada（你） @Ada @Ada（你）")
+  assert.deepEqual(subsetExecutionPlan(saved).map(s => [s.stage, s.botId]), [[1,a],[2,b],[2,a]])
+  assert.equal(workflowDraftSchema.safeParse({...graph, nodes:[{...task, instructions:"edited"}, first]}).success, false)
+  const unassigned = {...task, mentions:[]}
+  assert.equal(workflowDraftSchema.safeParse({...graph, nodes:[unassigned,first]}).success, true)
+  assert.throws(() => subsetExecutionPlan({...graph, nodes:[unassigned,first]}), /assigned nodes/)
+})
 
 const sample = {
   sample: "one",
@@ -97,7 +118,7 @@ test("a lower stratum mean can include both a regression and a tie; a review mus
 })
 
 test(
-  "pinned two-step run survives a rejected request, reopens its real report and replays without duplicate calls",
+  "multi-bot task nodes in a pinned two-step run survive a rejected request, reopen their real report and replay without duplicate calls",
   {
     skip:
       !process.env.DATABASE_URL ||
@@ -113,23 +134,26 @@ test(
       connectionId = nanoid(),
       secondConnectionId = nanoid()
     const owner = nanoid(),
-      botIds = [nanoid(), nanoid()]
+      botIds = [nanoid(), nanoid(), nanoid()]
     const oldOwner = process.env.SCIENTISTFLOW_INSTALLATION_ID
     const originalFetch = globalThis.fetch
     const gateway = "http://127.0.0.1:18218/v1"
     const brief = "Compare the fixed subset for project " + chatId
-    const steps = botIds.map((botId, i) => ({
-      id: nanoid(),
-      botId,
-      instructions: "v1-step-" + i,
-      position: { x: i, y: 0 },
-    }))
-    const graph = {
-      nodes: [steps[1], steps[0]],
-      edges: [{ source: steps[0].id, target: steps[1].id }],
-      viewport: { x: 0, y: 0, zoom: 1 },
-    }
-    assert.deepEqual(orderedPair(graph), steps)
+    const roster = botIds.map((id,i) => ({id, name:"Fixture " + i}))
+    const stages = [[0, 1], [2, 0]]
+    const steps = stages.map((members, i) => {
+      const instructions = "v1-step-" + i + " " + members.map(index => "@" + roster[index].name).join(" ")
+      return {
+        id: nanoid(), title: i === 0 ? "Measure" : "Review", instructions, position: {x:i, y:0},
+        mentions: members.map(index => {
+          const bot = roster[index]
+          const start = instructions.indexOf("@" + bot.name)
+          return {kind: "bot" as const, value: bot.id, label: bot.name, start, end: start + 1 + bot.name.length}
+        })
+      }
+    })
+    const graph = { nodes: [steps[1],steps[0]], edges: [{source: steps[0].id, target: steps[1].id}], viewport:{ x:0,y:0,zoom:1 } }
+    assert.deepEqual(orderedPair(graph),steps)
     const taskDir = path.join(root, chatId)
     await mkdir(path.join(taskDir, "outputs"), { recursive: true })
     await mkdir(path.join(taskDir, "data"))
@@ -233,14 +257,15 @@ test(
             { status: 429 }
           )
         assert.ok(
-          prompt.includes(prompts.length === 2 ? "v1-step-0" : "v1-step-1")
+          prompt.includes(prompts.length <= 3 ? "v1-step-0" : "v1-step-1")
         )
         assert.ok(prompt.includes("1.000000 | 0.000000"))
-        if (prompts.length >= 3)
-          assert.ok(prompt.includes("Mira report unique to " + chatId))
+        if (prompts.length === 3) assert.ok(prompt.includes("First participant " + chatId))
+        if (prompts.length >= 4) assert.ok(prompt.includes("Mira report unique to " + chatId))
         const answer =
           prompts.length === 2
-            ? "Mira report unique to " + chatId
+            ? "First participant " + chatId
+            : prompts.length === 3 ? "Mira report unique to " + chatId
             : JSON.stringify({
                 improvedStrata: 1,
                 improvedPairs: 1,
@@ -322,7 +347,7 @@ test(
       const before = await chatSnapshot(chatId)
       assert.deepEqual(
         before.messages.map((m) => m.role),
-        ["user", "assistant", "assistant"]
+        ["user", "assistant", "assistant", "assistant", "assistant"]
       )
       for (const message of before.messages.slice(1)) {
         const meta = message.metadata as {
@@ -339,7 +364,7 @@ test(
       assert.equal((await startWorkflow(chat, true)).state, "completed")
       assert.deepEqual(await chatSnapshot(chatId), before)
       assert.equal(await leaseChatTurn(nanoid()), undefined)
-      assert.equal(prompts.length, 3)
+      assert.equal(prompts.length, 5)
       const executions = await db
         .select()
         .from(botExecutions)
@@ -347,9 +372,10 @@ test(
         .orderBy(botExecutions.slot)
       assert.deepEqual(
         executions.map((e) => e.botId),
-        botIds
+        stages.flat().map(index => botIds[index])
       )
-      assert.equal(executions[1].parentExecutionId, executions[0].id)
+      assert.deepEqual(executions.slice(1).map(e => e.parentExecutionId), executions.slice(0,-1).map(e => e.id))
+      assert.deepEqual(before.messages.slice(1).map(m => (m.metadata as {workflowStep: number}).workflowStep), [1,1,2,2])
       assert.equal(
         (await db.select().from(chatTurns).where(eq(chatTurns.chatId, chatId)))
           .length,
@@ -372,11 +398,11 @@ test(
       assert.equal(
         (corrected.metadata as { supersedesExecutionId: string })
           .supersedesExecutionId,
-        executions[1].id
+        executions[2].id
       )
       assert.equal(
         (corrected.metadata as { parentExecutionId: string }).parentExecutionId,
-        executions[0].id
+        executions[1].id
       )
       assert.equal(
         (
@@ -389,11 +415,11 @@ test(
         receipt.turnId
       )
       assert.equal(await leaseChatTurn(nanoid()), undefined)
-      assert.equal(prompts.length, 4)
+      assert.equal(prompts.length, 6)
       const logNames = await readdir(path.join(taskDir, "logs"))
       const logs = await Promise.all(logNames.map(name => readFile(path.join(taskDir, "logs", name), "utf8")))
       assert.equal(logs.filter(log => log.includes("Status: failed")).length, 1)
-      assert.equal(logs.filter(log => log.includes("Status: completed")).length, 3)
+      assert.equal(logs.filter(log => log.includes("Status: completed")).length, 5)
       for (const message of after.messages.filter(m => m.role === "assistant")) {
         const {artifact} = message.metadata as { artifact: { path: string; sha256: string } }
         assert.equal(logs.filter(log => log.includes("Report: " + artifact.path) && log.includes(artifact.sha256)).length, 1)
@@ -409,7 +435,7 @@ test(
         )
       assert.deepEqual(
         correctionRequests.map((r) => [r.botId, r.connection]),
-        [[botIds[1], secondConnectionId.slice(-8)]]
+        [[botIds[2], secondConnectionId.slice(-8)]]
       )
     } finally {
       globalThis.fetch = originalFetch

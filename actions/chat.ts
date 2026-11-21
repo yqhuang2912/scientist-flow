@@ -11,6 +11,7 @@ import {
   taskTemplateVersions as versions,
 } from "@/db/schema"
 import { assertInstallationRequest } from "@/lib/installation-request.server"
+import { workflowBotIds } from "@/lib/workflow-draft"
 import { db } from "@/lib/db"
 type CreateTaskResult =
   | { success: true; chat: typeof chats.$inferSelect }
@@ -46,7 +47,7 @@ export async function createTask(input: unknown): Promise<CreateTaskResult> {
           success: false,
           error: "This published version is no longer available.",
         }
-      botIds = [...new Set(release.workflow.nodes.map((node) => node.botId))]
+      botIds = workflowBotIds(release.workflow)
     }
     const selectedBots = await db
       .select({ id: bots.id })

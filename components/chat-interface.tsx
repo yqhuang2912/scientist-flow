@@ -1,8 +1,22 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import { nanoid } from "nanoid"
 import { CircleAlertIcon } from "lucide-react"
+import { WorkflowCheckpointPanel } from "./workflow-checkpoint"
+import {
+  checkpointTranscript,
+  initialCheckpoint,
+  checkpointCommand,
+  type CheckpointCommand,
+  type WorkflowCheckpoint,
+} from "@/lib/workflow-checkpoint"
 import { ChatTranscript } from "./chat-transcript"
 import { ChatComposer } from "./chat-composer"
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert"
@@ -15,6 +29,7 @@ import { CHAT_UPLOAD_EVENT, uploadFiles } from "@/lib/workspace-upload-client"
 import {
   isActiveTurn,
   mergeTurnAck,
+  mergeCheckpoint,
   mergeTurnProgress,
   type ChatSnapshot,
   type ChatTurnAck,
@@ -28,6 +43,11 @@ import {
 import type { UploadedEntry } from "@/lib/workspace-validation"
 import type { ChatWithBot } from "@/queries/chats"
 
+const listenReservation = (notify: () => void) => {
+  window.addEventListener("workflow-reservation", notify)
+  return () => window.removeEventListener("workflow-reservation", notify)
+}
+
 export function ChatInterface({
   chat,
   initial,
@@ -36,10 +56,38 @@ export function ChatInterface({
   initial: ChatSnapshot
 }) {
   const [snapshot, setSnapshot] = useState(initial)
+  const transcript = useMemo(
+    () => checkpointTranscript(snapshot.messages),
+    [snapshot.messages]
+  )
   const [pendingBotId, setPendingBotId] = useState(chat.bots[0]?.id ?? "")
   const [networkError, setNetworkError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [workflowRetryAvailable, setWorkflowRetryAvailable] = useState(false)
+  const reservationKey = chat.template
+    ? "workflow-reservation/" + chat.id + "/" + chat.template.id
+    : null
+  const reservation = useSyncExternalStore(
+    listenReservation,
+    () => {
+      try {
+        return reservationKey && sessionStorage.getItem(reservationKey)
+      } catch {
+        return null
+      }
+    },
+    () => null
+  )
+  let initialCommand: CheckpointCommand | undefined
+  if (reservation) {
+    try {
+      initialCommand = checkpointCommand.safeParse(JSON.parse(reservation)).data
+    } catch {
+      /* Ignore invalid session data. */
+    }
+  }
+  const [changingCheckpoint, setChangingCheckpoint] = useState(false)
+  const [checkpointError, setCheckpointError] = useState("")
   const chatDropArea = useRef<HTMLDivElement>(null)
   const uploaded = useRef(new WeakMap<File, UploadedEntry>())
   const pending = useRef<{ input: string; id: string } | null>(null)
@@ -173,10 +221,60 @@ export function ChatInterface({
     }
   }
   const workflowId = chat.template && "workflow_" + chat.template.id
-  const knownWorkflow =
-    !!workflowId && snapshot.messages.some((m) => m.id === workflowId)
-  const retryWorkflow = workflowRetryAvailable || (!!snapshot.error?.includes("HTTP 429") &&
-    snapshot.messages.findLast((m) => m.role === "user")?.id === workflowId)
+  const workflowMessage = snapshot.messages.find((m) => m.id === workflowId)
+  const knownWorkflow = !!workflowMessage
+  const checkpoint = knownWorkflow
+    ? (workflowMessage.metadata as { checkpoint?: WorkflowCheckpoint })
+        ?.checkpoint
+    : initialCheckpoint(initialCommand)
+  const workflowUrl = "/api/chats/" + encodeURIComponent(chat.id) + "/workflow"
+  async function changeGate(command: CheckpointCommand) {
+    if (!knownWorkflow && reservationKey) {
+      try {
+        if (command.action === "continue")
+          sessionStorage.removeItem(reservationKey)
+        else sessionStorage.setItem(reservationKey, JSON.stringify(command))
+        window.dispatchEvent(new Event("workflow-reservation"))
+        setCheckpointError("")
+        return true
+      } catch {
+        setCheckpointError("Could not save this reservation in this tab.")
+        return false
+      }
+    }
+    setChangingCheckpoint(true)
+    setCheckpointError("")
+    try {
+      const response = await fetch(workflowUrl, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(command),
+      })
+      if (!response.ok) throw new Error(await response.text())
+      const saved: WorkflowCheckpoint = await response.json()
+      setSnapshot((current) => ({
+        ...current,
+        messages: current.messages.map((m) =>
+          m.id === workflowId ? mergeCheckpoint(m, saved) : m
+        ),
+      }))
+      setNetworkError(null)
+      return true
+    } catch (error) {
+      setCheckpointError(
+        error instanceof Error
+          ? error.message
+          : "Could not update the checkpoint."
+      )
+      return false
+    } finally {
+      setChangingCheckpoint(false)
+    }
+  }
+  const retryWorkflow =
+    workflowRetryAvailable ||
+    (!!snapshot.error?.includes("HTTP 429") &&
+      snapshot.messages.findLast((m) => m.role === "user")?.id === workflowId)
   async function openWorkflow() {
     if (submitting.current) return
     submitting.current = true
@@ -185,11 +283,26 @@ export function ChatInterface({
     setNetworkError(null)
     try {
       const response = await fetch(
-        "/api/chats/" + encodeURIComponent(chat.id) + "/workflow" + (retryWorkflow ? "?retry=rate-limit" : ""),
-        { method: "POST" }
+        workflowUrl + (retryWorkflow ? "?retry=rate-limit" : ""),
+        {
+          method: "POST",
+          ...(initialCommand &&
+            !knownWorkflow && {
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(initialCommand),
+            }),
+        }
       )
       if (!response.ok) throw new Error(await response.text())
-      const receipt: ChatTurnAck & { retryable?: boolean } = await response.json()
+      const receipt: ChatTurnAck & { retryable?: boolean } =
+        await response.json()
+      if (reservationKey) {
+        try {
+          sessionStorage.removeItem(reservationKey)
+        } catch {
+          /* The accepted turn owns the reservation. */
+        }
+      }
       setWorkflowRetryAvailable(!!receipt.retryable)
       setPendingBotId((receipt.userMessage.metadata as { botId: string }).botId)
       const progress = await fetch(
@@ -203,7 +316,10 @@ export function ChatInterface({
       const turn: ChatTurnProgress = await progress.json()
       setSnapshot((current) => {
         if (current.messages.some((m) => m.id === receipt.turnId))
-          return mergeTurnProgress({ ...current, activeId: receipt.turnId }, turn)
+          return mergeTurnProgress(
+            { ...current, activeId: receipt.turnId },
+            turn
+          )
         return mergeTurnAck(current, receipt, turn)
       })
       if (knownWorkflow)
@@ -246,30 +362,68 @@ export function ChatInterface({
       <ChatTranscript
         key={chat.id}
         directChatId={!isGroup ? chat.id : undefined}
-        messages={snapshot.messages}
+        messages={transcript}
         bots={chat.bots}
         isGroup={isGroup}
-        status={status}
+        status={
+          checkpoint?.phase === "waiting" && snapshot.activeId === workflowId
+            ? "ready"
+            : status
+        }
         pendingBotId={pendingBotId}
       />
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 pb-3 sm:px-6">
         {chat.template && (
-          <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm">
-            <span>
-              {chat.template.name} · v{chat.template.version}
-            </span>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={sending || !!snapshot.activeId}
-              onClick={openWorkflow}
-            >
-              {workflowId && snapshot.activeId === workflowId
-                ? "Workflow running"
-                  : retryWorkflow ? "Retry rate-limited step" : knownWorkflow
-                  ? "View workflow run"
-                  : "Start workflow"}
-            </Button>
+          <div className="grid gap-2 rounded-lg border px-3 py-2 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <span>
+                {chat.template.name} · v{chat.template.version}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={sending || !!snapshot.activeId}
+                onClick={openWorkflow}
+              >
+                {workflowId && snapshot.activeId === workflowId
+                  ? checkpoint?.phase === "waiting"
+                    ? "等待人工介入"
+                    : "Workflow running"
+                  : retryWorkflow
+                    ? "Retry rate-limited step"
+                    : knownWorkflow
+                      ? "View workflow run"
+                      : "Start workflow"}
+              </Button>
+            </div>
+            {checkpoint && (
+              <WorkflowCheckpointPanel
+                bots={chat.bots}
+                key={chat.id}
+                checkpoint={checkpoint}
+                disabled={
+                  sending ||
+                  changingCheckpoint ||
+                  (knownWorkflow && snapshot.activeId !== workflowId)
+                }
+                beforeStart={!knownWorkflow}
+                reviewed={snapshot.messages.some((message) => {
+                  const meta = message.metadata as
+                    | { workflowStep?: number; userMessageId?: string }
+                    | undefined
+                  return (
+                    meta?.workflowStep === 2 &&
+                    meta.userMessageId === workflowId
+                  )
+                })}
+                change={changeGate}
+              />
+            )}
+            {checkpointError && (
+              <p role="alert" className="text-sm text-destructive">
+                {checkpointError}
+              </p>
+            )}
           </div>
         )}
         {networkError && (

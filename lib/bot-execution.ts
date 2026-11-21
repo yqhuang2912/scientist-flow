@@ -4,6 +4,7 @@ import {
   type BotChatContext,
   type BotIdentity,
 } from "./chat-bot-context"
+import { checkpointTranscript } from "./workflow-checkpoint"
 import { cleanBotText } from "./chat-bot-text"
 import { getAssistantSegments } from "./chat-presentation"
 
@@ -41,7 +42,7 @@ export async function publicModelHistory(
   speakerId: string
 ) {
   const visible: UIMessage[] = []
-  for (const message of history) {
+  for (const message of checkpointTranscript(history)) {
     if (message.role === "user") {
       const parts: UIMessage["parts"] = []
       for (const part of message.parts) {

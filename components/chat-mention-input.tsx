@@ -1,6 +1,9 @@
 "use client"
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { PlusIcon } from "lucide-react"
+import { TaskBotIdentity } from "./task-bot-identity"
+import { compactItemStyles } from "./ui/compact-styles"
 import { ChatAvatar } from "./chat-avatar"
 import { FileTypeIcon } from "./file-type-icon"
 import { Command, CommandGroup, CommandItem, CommandList } from "./ui/command"
@@ -12,7 +15,12 @@ import { shouldSubmitChatMessage } from "@/lib/chat-composer"
 type Bot = { id: string; name: string; avatar: string; job?: string }
 type Choice = Pick<Mention, "kind" | "value" | "label">
 type Files = { query: string; chatId: string; paths: string[]; notice?: string }
-const keyOf = (c: Choice) => c.kind + ":" + c.value
+const createChoice = {
+  kind: "create" as const,
+  value: "new",
+  label: "Create bot",
+}
+const keyOf = (c: Choice | typeof createChoice) => c.kind + ":" + c.value
 
 export function ChatMentionInput({
   id,
@@ -25,6 +33,9 @@ export function ChatMentionInput({
   onBlur,
   error,
   canSend,
+  onCreateBot,
+  fieldLabel,
+  maxLength,
 }: {
   id: string
   chatId?: string
@@ -32,11 +43,15 @@ export function ChatMentionInput({
   value: string
   mentions: Mention[]
   change: (text: string, mentions: Mention[]) => void
-  inputRef: (node: HTMLTextAreaElement | null) => void
-  onBlur: () => void
-  error: boolean
-  canSend: boolean
+  inputRef?: (node: HTMLTextAreaElement | null) => void
+  onBlur?: () => void
+  error?: boolean
+  fieldLabel?: string
+  maxLength?: number
+  canSend?: boolean
+  onCreateBot?: (insert: (bot: Bot) => void) => void
 }) {
+  const multiline = !!(onCreateBot || fieldLabel)
   const textarea = useRef<HTMLTextAreaElement | null>(null)
   const menu = useRef<HTMLDivElement>(null)
   const [caret, setCaret] = useState<number | null>(null)
@@ -104,7 +119,11 @@ export function ChatMentionInput({
     value: p,
     label: p,
   }))
-  const choices: Choice[] = [...botChoices, ...fileChoices]
+  const choices = [
+    ...botChoices,
+    ...fileChoices,
+    ...(onCreateBot ? [createChoice] : []),
+  ]
   const active = choices.find((c) => keyOf(c) === highlight) ?? choices[0]
   const activeKey = active ? keyOf(active) : ""
   const notice =
@@ -129,7 +148,14 @@ export function ChatMentionInput({
     } else input?.removeAttribute("aria-activedescendant")
   }, [open, activeKey])
 
-  function choose(choice: Choice) {
+  function choose(choice: Choice | typeof createChoice) {
+    if (choice.kind === "create") {
+      onCreateBot?.((bot) =>
+        insert({ kind: "bot", value: bot.id, label: bot.name })
+      )
+    } else insert(choice)
+  }
+  function insert(choice: Choice) {
     if (!match || caret === null) return
     const label = "@" + choice.label
     const end = match.start + label.length
@@ -138,7 +164,16 @@ export function ChatMentionInput({
     const next = value.slice(0, match.start) + label + space + tail
     const nextCaret = end + (space.length || 1)
     const others = rebaseMentions(value, next, end + space.length, mentions)
-    change(next, [...others, { ...choice, start: match.start, end }])
+    change(next, [
+      ...others,
+      {
+        kind: choice.kind,
+        value: choice.value,
+        label: choice.label,
+        start: match.start,
+        end,
+      },
+    ])
     setCaret(nextCaret)
     setHighlight("")
     requestAnimationFrame(() => {
@@ -151,7 +186,11 @@ export function ChatMentionInput({
       {open && (
         <div
           ref={menu}
-          className="absolute inset-x-0 bottom-full z-10 mb-2 overflow-hidden rounded-2xl border bg-popover shadow-lg sm:right-auto sm:w-96"
+          className={
+            multiline
+              ? "order-last mt-1 overflow-hidden rounded-xl border bg-popover"
+              : "absolute inset-x-0 bottom-full z-10 mb-2 overflow-hidden rounded-2xl border bg-popover shadow-lg sm:right-auto sm:w-96"
+          }
           onMouseDown={(event) => event.preventDefault()}
         >
           <Command
@@ -171,16 +210,23 @@ export function ChatMentionInput({
                       key={c.value}
                       value={keyOf(c)}
                       onSelect={() => choose(c)}
+                      className={onCreateBot ? compactItemStyles : undefined}
                     >
-                      <ChatAvatar
-                        seed={c.bot.avatar}
-                        alt=""
-                        className={compactChatAvatarStyles}
-                      />
-                      <span className="truncate">{c.label}</span>
-                      <span className="truncate type-meta text-muted-foreground">
-                        {c.bot.job}
-                      </span>
+                      {onCreateBot ? (
+                        <TaskBotIdentity bot={c.bot} />
+                      ) : (
+                        <>
+                          <ChatAvatar
+                            seed={c.bot.avatar}
+                            alt=""
+                            className={compactChatAvatarStyles}
+                          />
+                          <span className="truncate">{c.label}</span>
+                          <span className="truncate type-meta text-muted-foreground">
+                            {c.bot.job}
+                          </span>
+                        </>
+                      )}
                     </CommandItem>
                   ))}
                 </CommandGroup>
@@ -207,6 +253,17 @@ export function ChatMentionInput({
                   ))}
                 </CommandGroup>
               )}
+              {onCreateBot && (
+                <CommandGroup>
+                  <CommandItem
+                    value={keyOf(createChoice)}
+                    className={compactItemStyles}
+                    onSelect={() => choose(createChoice)}
+                  >
+                    <PlusIcon /> Create bot
+                  </CommandItem>
+                </CommandGroup>
+              )}
             </CommandList>
             {notice && (
               <div
@@ -222,21 +279,34 @@ export function ChatMentionInput({
       <InputGroupTextarea
         id={id}
         name="text"
+        aria-label={fieldLabel}
+        autoFocus={!!fieldLabel}
+        maxLength={maxLength}
         size="composer"
         value={value}
         ref={(node) => {
           textarea.current = node
-          inputRef(node)
+          inputRef?.(node)
         }}
         aria-haspopup="listbox"
         aria-autocomplete="list"
         aria-invalid={error}
         aria-describedby={error ? id + "-error" : undefined}
-        placeholder="Message your bot… Type @ to mention"
-        className="max-h-48 min-h-13"
+        placeholder={
+          fieldLabel
+            ? "输入 @ 选择群内 Bot"
+            : onCreateBot
+              ? "Describe the task. Type @ to select or create a bot."
+              : "Message your bot… Type @ to mention"
+        }
+        className={
+          multiline
+            ? "min-h-28 resize-y rounded-xl border border-muted-foreground/50 bg-background px-3 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+            : "max-h-48 min-h-13"
+        }
         onBlur={() => {
           setCaret(null)
-          onBlur()
+          onBlur?.()
         }}
         onFocus={(e) => setCaret(e.currentTarget.selectionStart)}
         onSelect={(e) =>
@@ -292,6 +362,7 @@ export function ChatMentionInput({
             })
           )
             return
+          if (multiline && !open) return
           e.preventDefault()
           if (open) {
             if (active) choose(active)

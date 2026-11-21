@@ -1,4 +1,5 @@
 import type { UIMessage } from "ai"
+import type { WorkflowCheckpoint } from "./workflow-checkpoint"
 import { z } from "zod"
 import { storedAttachmentSchema } from "./chat-composer"
 import { workspaceFileTargetSchema } from "./workspace-validation"
@@ -44,6 +45,7 @@ export type ChatSnapshot = {
 }
 
 export type ChatTurnProgress = {
+  checkpoint?: WorkflowCheckpoint | null
   turnId: string
   replies: UIMessage[]
   state: ChatJobState
@@ -60,6 +62,20 @@ export type ChatTurnAck = {
 
 export function isActiveTurn(state: ChatJobState) {
   return state === "queued" || state === "running"
+}
+
+export function mergeCheckpoint(
+  message: UIMessage,
+  checkpoint?: WorkflowCheckpoint | null
+): UIMessage {
+  const meta = message.metadata as
+    { checkpoint?: WorkflowCheckpoint } | undefined
+  if (
+    !checkpoint ||
+    (meta?.checkpoint && meta.checkpoint.revision >= checkpoint.revision)
+  )
+    return message
+  return { ...message, metadata: { ...meta, checkpoint } }
 }
 
 export function mergeTurnProgress(
@@ -81,7 +97,8 @@ export function mergeTurnProgress(
   for (const message of turn.replies) replies.set(message.id, message)
   return {
     messages: [
-      ...current.messages.slice(0, start + 1),
+      ...current.messages.slice(0, start),
+      mergeCheckpoint(current.messages[start], turn.checkpoint),
       ...replies.values(),
       ...current.messages.slice(end),
     ],

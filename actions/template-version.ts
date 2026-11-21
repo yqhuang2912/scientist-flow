@@ -44,7 +44,12 @@ export async function publishTemplateVersion(
           and jsonb_array_length(${taskTemplates.workflowDraft}->'nodes') > 0
           and not exists (
             select 1 from jsonb_array_elements(${taskTemplates.workflowDraft}->'nodes') step
-            where not exists (select 1 from ${bots} where ${bots.id} = step->>'botId')
+            where case when step ? 'botId' then
+              not exists (select 1 from ${bots} where ${bots.id} = step->>'botId')
+            else coalesce(jsonb_array_length(step->'mentions'), 0) = 0 or exists (
+              select 1 from jsonb_array_elements(step->'mentions') mention
+              where not exists (select 1 from ${bots} where ${bots.id} = mention->>'value')
+            ) end
           )
         on conflict (template_id, draft_revision) do nothing
       `),
@@ -63,7 +68,7 @@ export async function publishTemplateVersion(
       : {
           success: false as const,
           error:
-            "Could not publish this revision. Reopen the latest draft and check its bots.",
+            "Could not publish this revision. Each node needs an available @bot. Check the latest draft and try again.",
         }
   } catch {
     return {

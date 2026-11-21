@@ -12,6 +12,7 @@ import {
   saveProgress,
   settleTurn,
   currentLease,
+  workerMayClaim,
   ChatLeaseLost,
 } from "./chat-jobs.server"
 import { installationOwner } from "./model-credentials.server"
@@ -56,7 +57,7 @@ async function execute(job: Job, lease: string) {
     if (workflow) {
       replies = [...job.replies]
       try {
-        await runWorkflow(
+        const outcome = await runWorkflow(
           job.chatId,
           job.id,
           workflow,
@@ -64,6 +65,7 @@ async function execute(job: Job, lease: string) {
           controller.signal,
           replies
         )
+        if (outcome === "waiting") return
       } catch (error) {
         if (!(controller.signal.reason instanceof ChatLeaseLost)) {
           const reason =
@@ -171,6 +173,7 @@ export function wakeChatWorker() {
           and(
             eq(chatTurns.owner, installationOwner()),
             notInArray(chatTurns.chatId, activeChats),
+            workerMayClaim,
             inArray(chatTurns.state, ["running", "queued"])
           )
         )

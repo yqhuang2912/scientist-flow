@@ -2,7 +2,6 @@
 
 import { useId, useState, useTransition } from "react"
 import {
-  compactChatAvatarStyles,
   compactItemStyles,
   compactItemStates,
 } from "@/components/ui/compact-styles"
@@ -13,8 +12,7 @@ import { Controller, useForm, useWatch } from "react-hook-form"
 import { ListTodoIcon, Trash2Icon } from "lucide-react"
 
 import { createTask, deleteTask, updateTask } from "@/actions/chat"
-import { ChatAvatar } from "@/components/chat-avatar"
-import { BotName } from "@/components/bot-name"
+import { TaskBotIdentity } from "./task-bot-identity"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -277,17 +275,7 @@ export function TaskDialog({
                               "flex h-7.5 cursor-pointer items-center focus-within:bg-highlight has-disabled:pointer-events-none has-disabled:opacity-50"
                             )}
                           >
-                            <ChatAvatar
-                              seed={bot.avatar}
-                              animated
-                              alt={`${bot.name} avatar`}
-                              className={compactChatAvatarStyles}
-                            />
-                            <BotName
-                              name={bot.name}
-                              job={bot.job}
-                              className="flex-1"
-                            />
+                            <TaskBotIdentity bot={bot} />
                             <Checkbox
                               className="after:inset-0"
                               disabled={isPending}

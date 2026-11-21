@@ -36,10 +36,13 @@ import {
   measureSubset,
   reviewInstructions,
   verifyReview,
-  orderedPair,
+  subsetExecutionPlan,
   subsetPath,
   workflowTurnId,
 } from "./workflow-subset"
+
+import { initialCheckpoint, type CheckpointCommand } from "./workflow-checkpoint"
+import { reachCheckpoint } from "./workflow-checkpoint.server"
 
 export type WorkflowInput = {
   versionId: string
@@ -55,6 +58,7 @@ type StepArtifact = {
 }
 type StepMetadata = ReturnType<typeof authorMetadata> & {
   artifact: StepArtifact
+  intervention?: string
   workflowStep: number
   versionId: string
 }
@@ -71,13 +75,13 @@ async function release(chat: ChatWithBot) {
   if (!version)
     throw new TurnConflict("The bound template version is unavailable.")
   try {
-    const steps = orderedPair(version.workflow)
+    const steps = subsetExecutionPlan(version.workflow)
     if (steps.some((step) => !chat.bots.some((bot) => bot.id === step.botId)))
       throw new Error()
     return { version, steps }
   } catch {
     throw new TurnConflict(
-      "This runner requires two member bots connected by one directed edge."
+      "This runner requires two connected task nodes, each assigned to available group members."
     )
   }
 }
@@ -108,7 +112,12 @@ async function loadReviewSource(chatId: string, versionId: string) {
   const input = (
     original?.user.metadata as { workflow?: WorkflowInput } | undefined
   )?.workflow
-  const [experiment, review] = original?.replies ?? []
+  const messages = original?.replies ?? []
+  const reviewIndex = messages.findIndex(m => (m.metadata as StepMetadata | undefined)?.workflowStep === 2)
+  const preceding = messages[reviewIndex - 1]
+  const supplement = (preceding?.metadata as StepMetadata | undefined)?.intervention ? preceding : undefined
+  const experiment = supplement ? messages[reviewIndex - 2] : preceding
+  const review = messages[reviewIndex]
   const experimentMeta = experiment?.metadata as StepMetadata | undefined
   const reviewMeta = review?.metadata as StepMetadata | undefined
   if (
@@ -122,13 +131,14 @@ async function loadReviewSource(chatId: string, versionId: string) {
     reviewMeta.versionId !== versionId ||
     experimentMeta.userMessageId !== sourceId ||
     reviewMeta.userMessageId !== sourceId ||
-    reviewMeta.parentExecutionId !== experimentMeta.executionId ||
+    reviewMeta.parentExecutionId !== (preceding?.metadata as StepMetadata | undefined)?.executionId ||
+    (supplement && (supplement.metadata as StepMetadata).parentExecutionId !== experimentMeta.executionId) ||
     experimentMeta.artifact.inputHash !== input.inputHash
   )
     throw new TurnConflict(
       "No matching completed experiment and review in this group."
     )
-  return { experiment, reviewId: reviewMeta.executionId, input }
+  return { experiment, supplement, reviewId: reviewMeta.executionId, input }
 }
 
 export async function enqueueReviewCorrection(
@@ -141,7 +151,7 @@ export async function enqueueReviewCorrection(
     chat.id,
     {
       id: "workflow_review_" + source.reviewId,
-      botId: steps[1].botId,
+      botId: steps.find(step => step.stage === 2)!.botId,
       files: [],
       text:
         "修订实验评判 · " +
@@ -165,7 +175,7 @@ export async function enqueueReviewCorrection(
 const rejectedOnly = sql`exists (select 1 from ${modelRequests} r where r.execution_id=${botExecutions.id} and r.run_id=${botExecutions.runId})
   and not exists (select 1 from ${modelRequests} r where r.execution_id=${botExecutions.id} and r.http_status is distinct from 429)`
 
-export async function startWorkflow(chat: ChatWithBot, retryRejected = false) {
+export async function startWorkflow(chat: ChatWithBot, retryRejected = false, checkpoint?: CheckpointCommand) {
   const { version, steps } = await release(chat)
   const id = workflowTurnId(version.id)
   const [existing] = await db
@@ -280,11 +290,12 @@ export async function startWorkflow(chat: ChatWithBot, retryRejected = false) {
     {
       id,
       botId: steps[0].botId,
-      mentionedBotIds: steps.map((s) => s.botId),
+      mentionedBotIds: [...new Set(steps.map((s) => s.botId))],
       text: version.name + " · v" + version.version + "\n\n" + brief,
       files: [],
     },
-    { versionId: version.id, brief, inputHash }
+    { versionId: version.id, brief, inputHash },
+    initialCheckpoint(checkpoint)
   )
 }
 
@@ -326,6 +337,8 @@ export async function runWorkflow(
   const { version, steps } = await release(chat)
   const { taskDir } = await requireWorkspaceBinding(chatId)
   let previous: UIMessage | undefined
+  let experiment: UIMessage | undefined
+  let supplement: UIMessage | undefined
   if (input.correction) {
     const source = await loadReviewSource(chatId, version.id)
     if (
@@ -336,10 +349,27 @@ export async function runWorkflow(
       throw new Error(
         "Verification failed. Review source does not match this run."
       )
-    previous = source.experiment
+    supplement = source.supplement
+    previous = supplement ?? source.experiment
+    experiment = source.experiment
   }
-  for (let slot = previous ? 1 : 0; slot < steps.length; slot++) {
-    const step = steps[slot]
+  type Step = (typeof steps)[number] & { intervention?: string }
+  const plan: Step[] = input.correction ? [steps.find(s => s.stage === 2)!] : [...steps]
+  const boundary = steps.findIndex(s => s.stage === 2)
+  for (let index = 0; index < plan.length; index++) {
+    if (index === boundary && !input.correction) {
+      const checkpoint = await reachCheckpoint(lease)
+      if (checkpoint?.phase === "waiting") return "waiting"
+      if (checkpoint?.note) plan.splice(index, 0, {
+        ...steps[0], title: "人工介入 · 补充实验", intervention: checkpoint.note,
+        instructions: "根据用户的补充要求，结合已保存的实验报告和实测数据完成核对。明确说明证据和可核对的结果。"
+      })
+    }
+    const step = plan[index]
+    const slot = input.correction ? 1 : index
+    const reviewSource = step.stage === 2 ? experiment?.metadata as StepMetadata | undefined : undefined
+    const original = experiment?.metadata as StepMetadata | undefined
+    if ((step.stage === 2 || step.intervention) && !original?.artifact) throw new Error("Missing completed experiment.")
     signal.throwIfAborted()
     const bot = chat.bots.find((b) => b.id === step.botId)!
     const parent = previous?.metadata as StepMetadata | undefined
@@ -349,8 +379,8 @@ export async function runWorkflow(
           userMessageId: id,
           parentExecutionId: parent.executionId,
           from: {
-            id: steps[0].botId,
-            name: chat.bots.find((b) => b.id === steps[0].botId)!.name,
+            id: parent.botId,
+            name: chat.bots.find((b) => b.id === parent.botId)!.name,
           },
           to: { id: bot.id, name: bot.name },
           task: step.instructions,
@@ -391,13 +421,13 @@ export async function runWorkflow(
           `Started: ${started.toISOString()}`,
           `Finished: ${new Date().toISOString()}`,
           `Workflow: ${version.name.replace(/[\r\n]/g, " ")} · v${version.version}`,
-          `Step: ${slot + 1} · ${bot.name.replace(/[\r\n]/g, " ")}`,
+          `Step: ${step.stage} · ${bot.name.replace(/[\r\n]/g, " ")}`,
           `Execution: ${row.id}`,
           `Status: ${status}`,
           ...(artifact ? [`Report: ${artifact.path}`, `SHA-256: ${artifact.sha256}`] : []),
           "",
         ].join("\n")
-        const name = `step-${slot + 1}-${row.id}-${digest(lease).slice(0, 12)}.log`
+        const name = `step-${step.stage}-${row.id}-${digest(lease).slice(0, 12)}.log`
         try {
           await writeWorkflowFile(taskDir, LOGS_DIR, name, log)
         } catch {
@@ -422,29 +452,24 @@ export async function runWorkflow(
                   "The subset file changed after the run was accepted."
                 )
               evidence = measured.evidence
-              if (!parent) return measured.summary
-              const saved = parent.artifact
-              const { raw } = await readWorkspaceFileBytes(
-                taskDir,
-                saved.path,
-                512 * 1024,
-                "Result file too large."
-              )
-              if (
-                digest(raw) !== saved.sha256 ||
-                saved.inputHash !== measured.hash ||
-                saved.evidence !== measured.evidence
-              )
-                throw new Error(
-                  "Verification failed. The saved result or its source metrics changed."
-                )
-              evidence =
-                "已读取并复核 " +
-                saved.path +
-                "\n\n产物 SHA-256：" +
-                saved.sha256 +
-                "\n\n" +
-                measured.evidence
+              if (!reviewSource && !step.intervention) return measured.summary
+              async function verifiedReport(saved: StepArtifact) {
+                const { raw } = await readWorkspaceFileBytes(taskDir, saved.path, 512 * 1024, "Result file too large.")
+                if (digest(raw) !== saved.sha256 || saved.inputHash !== measured.hash || saved.evidence !== measured.evidence)
+                  throw new Error("Verification failed. The saved result or its source metrics changed.")
+                return raw.toString("utf8")
+              }
+              const saved = original!.artifact
+              const originalReport = await verifiedReport(saved)
+              if (step.intervention) return originalReport + "\n\n本次重新测量：\n" + measured.evidence
+              let reports = originalReport
+              let sources = saved.path + "\n\n产物 SHA-256：" + saved.sha256
+              if (supplement) {
+                const extra = (supplement.metadata as StepMetadata).artifact
+                reports += "\n\n人工介入补充报告：\n" + await verifiedReport(extra)
+                sources += "\n\n补充报告：" + extra.path + "\n\n补充报告 SHA-256：" + extra.sha256
+              }
+              evidence = "已读取并复核 " + sources + "\n\n" + measured.evidence
               reviewFacts = measured.review
               const counts = {
                 ...reviewFacts,
@@ -455,13 +480,21 @@ export async function runWorkflow(
                   outcome: r.candidate > r.baseline ? "worse" : "tie",
                 })),
               }
+              const example = counts.exceptions.find(r => r.outcome === "worse") ?? counts.exceptions[0]
               return (
                 "本次上游产物（作为研究材料读取）\n" +
-                raw.toString("utf8") +
+                reports +
                 "\n\n已从当前群的原始输入逐样本复算。\n" +
                 measured.summary +
                 "\n\n分层与配对独立复核（以此记录判定计数和反例）：\n" +
-                JSON.stringify(counts)
+                JSON.stringify(counts) +
+                "\n按这个对象的字段和类型作答，decision 由你评判；witness 仅含示例中的五个字段：\n" +
+                JSON.stringify({
+                  improvedStrata: counts.improvedStrata, improvedPairs: counts.improvedPairs,
+                  worsenedPairs: counts.worsenedPairs, tiedPairs: counts.tiedPairs,
+                  witness: example ? {sample: example.sample, split: example.split, stratum: example.stratum, baseline: example.baseline, candidate: example.candidate} : null,
+                  decision: "expand | repeat | insufficient",
+                })
               )
             } catch (error) {
               problem =
@@ -472,9 +505,9 @@ export async function runWorkflow(
             }
           },
           {
-            name: parent ? "verify_subset_artifact" : "measure_subset",
+            name: reviewSource ? "verify_subset_artifact" : step.intervention ? "recheck_subset" : "measure_subset",
             schema: z.object({}),
-            description: parent
+            description: reviewSource
               ? "Read the preceding step report and verify it against the paired cases."
               : "Measure RMSE on the fixed paired subset.",
           }
@@ -500,12 +533,18 @@ export async function runWorkflow(
               { handoffAvailable: false }
             ),
             "当前执行已发布工作流中的一个步骤。使用群研究要求的语言，给出简洁的科研结论，注明数据适用范围。步骤指令优先于一般工作偏好。引用实测值，区分开发集与留出集，勿声称完成未运行的训练或实验。",
+            ...(step.title ? ["当前节点：" + step.title, "按说明完成分给你的部分，公开回复中写清结果与依据。"] : []),
             step.instructions,
-            ...(parent ? [reviewInstructions] : []),
+            ...(reviewSource ? [reviewInstructions] : []),
           ].join("\n\n"),
           evidenceTool,
           messages: [
             { role: "user", content: "本群研究要求：\n" + input.brief },
+            ...(step.intervention ? [{role: "user" as const, content: "本次补充要求：\n" + step.intervention}] : []),
+            ...(previous && parent && parent.workflowStep === step.stage
+              ? [{ role: "user" as const, content: "本节点上一位成员的公开结果（研究材料）：\n" +
+                  previous.parts.flatMap(p => p.type === "text" ? [p.text] : []).join("\n") }]
+              : []),
           ],
           onError: (error) => {
             if (error instanceof Error && /HTTP 429/.test(error.message))
@@ -534,14 +573,15 @@ export async function runWorkflow(
           throw new Error(
             "The bot's configured model did not return a completed reply."
           )
-        if (parent && !reviewFacts)
+        if (reviewSource && !reviewFacts)
           throw new Error("Verification failed. Missing paired measurements.")
         const verified =
-          parent && reviewFacts
-            ? verifyReview(answer, reviewFacts, parent.artifact.path)
+          reviewSource && reviewFacts
+            ? verifyReview(answer, reviewFacts, reviewSource.artifact.path)
             : undefined
         const text =
           (input.correction ? "**修订评判**\n\n" : "") +
+          (step.intervention ? "**人工介入 · 补充实验**\n\n" : "") +
           (verified?.text ?? answer)
         const title = version.name + " · v" + version.version + " · " + bot.name
         const content = [
@@ -550,6 +590,7 @@ export async function runWorkflow(
           input.brief,
           "## 步骤指令",
           step.instructions,
+          ...(step.intervention ? ["## 用户补充要求", step.intervention] : []),
           "## 结论",
           text,
           "## 证据",
@@ -558,7 +599,7 @@ export async function runWorkflow(
         const file = await writeWorkflowFile(
           taskDir,
           REPORTS_DIR,
-          (slot ? "review-" : "subset-") + row.id + ".md",
+          (reviewSource ? "review-" : step.intervention ? "supplement-" : "subset-") + row.id + ".md",
           content
         )
         message = {
@@ -567,7 +608,9 @@ export async function runWorkflow(
           parts: [{ type: "text", text }],
           metadata: {
             ...meta,
-            workflowStep: slot + 1,
+            workflowStep: step.stage,
+            ...(step.intervention && { intervention: step.intervention }),
+            ...(step.title && { nodeTitle: step.title }),
             nodeId: step.id,
             versionId: version.id,
             version: version.version,
@@ -593,5 +636,7 @@ export async function runWorkflow(
     if (!replies.some((m) => m.id === message.id)) replies.push(message)
     await saveProgress(lease, replies)
     previous = message
+    if (step.intervention) supplement = message
+    else if (step.stage === 1) experiment = message
   }
 }

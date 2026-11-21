@@ -1,13 +1,13 @@
 "use server"
 
-import { asc, desc, eq, sql } from "drizzle-orm"
+import { asc, desc, eq } from "drizzle-orm"
 import { z } from "zod"
 import {
   bots,
   taskTemplates,
   taskTemplateVersions as versions,
 } from "@/db/schema"
-import { emptyWorkflowDraft } from "@/lib/workflow-draft"
+import { emptyWorkflowDraft, workflowBotIds } from "@/lib/workflow-draft"
 import { assertInstallationRequest } from "@/lib/installation-request.server"
 import { db } from "@/lib/db"
 
@@ -59,13 +59,17 @@ export async function getPublishedTemplates() {
         id: versions.id,
         name: versions.name,
         version: versions.version,
-        botIds: sql<
-          string[]
-        >`jsonb_path_query_array(${versions.workflow}, '$.nodes[*].botId')`,
+        workflow: versions.workflow,
       })
       .from(versions)
       .orderBy(asc(versions.name), desc(versions.version))
-    return { success: true as const, data: rows }
+    return {
+      success: true as const,
+      data: rows.map(({ workflow, ...r }) => ({
+        ...r,
+        botIds: workflowBotIds(workflow),
+      })),
+    }
   } catch {
     return {
       success: false as const,

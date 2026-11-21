@@ -3,6 +3,7 @@
 import "@xyflow/react/dist/style.css"
 import {
   useEffect,
+  useId,
   useRef,
   useState,
   useSyncExternalStore,
@@ -30,8 +31,17 @@ import { nanoid } from "nanoid"
 import { PlusIcon, Trash2Icon, WorkflowIcon } from "lucide-react"
 import { saveWorkflowDraft } from "@/actions/workflow-draft"
 import { publishTemplateVersion } from "@/actions/template-version"
-import type { WorkflowDraft } from "@/lib/workflow-draft"
-import { ChatAvatar } from "@/components/chat-avatar"
+import { mentionTargets } from "@/lib/chat-mentions"
+import {
+  editableNode,
+  type WorkflowDraft,
+  type TaskNode,
+} from "@/lib/workflow-draft"
+import { TaskBotIdentity } from "./task-bot-identity"
+import { compactItemStyles } from "./ui/compact-styles"
+import { BotDialog } from "./bot-dialog"
+import { ChatMentionInput } from "./chat-mention-input"
+import { Input } from "./ui/input"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -40,14 +50,6 @@ import {
   CardDescription,
 } from "@/components/ui/card"
 import { Field, FieldLabel } from "@/components/ui/field"
-import { Textarea } from "@/components/ui/textarea"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { useRouter } from "next/navigation"
 import type { TaskTemplateSummary } from "@/db/schema"
@@ -59,10 +61,10 @@ import {
 } from "./settings-form-guard"
 
 type Bot = { id: string; name: string; job: string; avatar: string }
-type Step = Node<{ botId: string; bot?: Bot; instructions: string }, "step">
+type Step = Node<Pick<TaskNode, "title" | "instructions" | "mentions">, "step">
 
 function StepCard({ data, selected }: NodeProps<Step>) {
-  const name = data.bot?.name ?? "Unavailable bot"
+  const name = data.title || "Untitled node"
   return (
     <>
       <Handle
@@ -78,13 +80,12 @@ function StepCard({ data, selected }: NodeProps<Step>) {
           selected && "border-ring"
         )}
       >
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            {data.bot && <ChatAvatar seed={data.bot.avatar} alt="" />}
-            <span className="min-w-0 truncate">{name}</span>
+        <CardHeader className="grid-cols-1">
+          <CardTitle className="line-clamp-2 wrap-anywhere" title={name}>
+            {name}
           </CardTitle>
-          <CardDescription className="line-clamp-2 break-words whitespace-pre-wrap">
-            {data.instructions || data.bot?.job || "Add step instructions"}
+          <CardDescription className="line-clamp-2 wrap-anywhere whitespace-pre-wrap">
+            {data.instructions || "Add task instructions"}
           </CardDescription>
         </CardHeader>
       </Card>
@@ -113,8 +114,7 @@ function draftFrom(
   return {
     nodes: nodes.map(({ id, position, data }) => ({
       id,
-      botId: data.botId,
-      instructions: data.instructions,
+      ...data,
       position: { x: position.x, y: position.y },
     })),
     edges: edges.map(({ source, target }) => ({ source, target })),
@@ -158,13 +158,30 @@ export function WorkflowEditor({
     () => false
   )
   const [nodes, setNodes, onNodesChange] = useNodesState<Step>(
-    draft.nodes.map(({ id, botId, instructions, position }) => ({
-      id,
-      type: "step",
-      position,
-      data: { botId, instructions, bot: bots.find((bot) => bot.id === botId) },
-    }))
+    draft.nodes.map((node) => {
+      const { id, position, title, instructions, mentions } = editableNode(
+        node,
+        bots
+      )
+      return {
+        id,
+        type: "step",
+        position,
+        data: { title, instructions, mentions },
+      }
+    })
   )
+  const [createdBots, setCreatedBots] = useState<Bot[]>([])
+  const availableBots = [
+    ...bots,
+    ...createdBots.filter(
+      (b) => !bots.some((existing) => existing.id === b.id)
+    ),
+  ]
+  const [insertCreated, setInsertCreated] = useState<
+    ((bot: Bot) => void) | null
+  >(null)
+  const formId = useId()
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(
     draft.edges.map((edge) => ({
       ...edge,
@@ -222,7 +239,7 @@ export function WorkflowEditor({
     onDirtyChange?.(dirty)
   }, [dirty, onDirtyChange])
 
-  function addBot(bot: Bot) {
+  function addNode() {
     if (!stage.current || !flow.current) return
     const rect = stage.current.getBoundingClientRect()
     const columns = rect.width >= 580 ? 2 : 1
@@ -238,9 +255,19 @@ export function WorkflowEditor({
         type: "step",
         selected: true,
         position,
-        data: { botId: bot.id, bot, instructions: "" },
+        data: { title: "Untitled node", instructions: "", mentions: [] },
       },
     ])
+  }
+
+  function updateNode(nodeId: string, fields: Partial<Step["data"]>) {
+    setNodes((previous) =>
+      previous.map((node) =>
+        node.id === nodeId
+          ? { ...node, data: { ...node.data, ...fields } }
+          : node
+      )
+    )
   }
 
   function removeSelected() {
@@ -322,31 +349,9 @@ export function WorkflowEditor({
             {release && ` · Published v${release.version}`}
           </p>
         </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
-            <PlusIcon data-icon="inline-start" /> Add bot
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="max-h-72 overflow-y-auto">
-            <DropdownMenuGroup>
-              {bots.map((bot) => (
-                <DropdownMenuItem key={bot.id} onClick={() => addBot(bot)}>
-                  <ChatAvatar seed={bot.avatar} alt="" />{" "}
-                  <span>{bot.name}</span>
-                  {bot.job && (
-                    <span className="max-w-40 truncate text-muted-foreground">
-                      {bot.job}
-                    </span>
-                  )}
-                </DropdownMenuItem>
-              ))}
-              {!bots.length && (
-                <DropdownMenuItem disabled>
-                  Create a bot in Settings first.
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <Button variant="outline" size="sm" onClick={addNode}>
+          <PlusIcon data-icon="inline-start" /> Add node
+        </Button>
         <WorkflowTemplateMenu
           template={template}
           dirty={dirty}
@@ -367,8 +372,12 @@ export function WorkflowEditor({
       <div className="flex min-h-0 flex-1 flex-col @min-[660px]:flex-row">
         <div ref={stage} className="relative min-h-0 min-w-0 flex-1">
           <ReactFlow<Step, Edge>
+            proOptions={{ hideAttribution: true }}
             nodes={nodes}
-            edges={edges}
+            edges={nodes.length === 2 && edges.length === 1
+              ? edges.map(edge => ({ ...edge, label: "人工介入", labelStyle: { fill: "var(--muted-foreground)", fontSize: 11 },
+                labelBgStyle: { fill: "var(--background)" }, labelBgBorderRadius: 4 }))
+              : edges}
             nodeTypes={nodeTypes}
             onInit={(instance) => {
               flow.current = instance
@@ -399,51 +408,106 @@ export function WorkflowEditor({
           </ReactFlow>
           {!nodes.length && (
             <p className="pointer-events-none absolute inset-0 grid place-items-center px-8 text-center text-sm text-muted-foreground">
-              Add a bot to create the first step.
+              Add a node to describe the first task.
             </p>
           )}
         </div>
         {selected && (
           <aside
-            aria-label="Step details"
+            aria-label="Node details"
             className="flex max-h-[45%] flex-col gap-4 overflow-auto border-t bg-background p-4 @min-[660px]:max-h-none @min-[660px]:w-72 @min-[660px]:shrink-0 @min-[660px]:border-t-0 @min-[660px]:border-l"
           >
             <div className="flex items-center justify-between gap-2">
-              <h2 className="truncate type-section-title">
-                {selected.data.bot?.name ?? "Unavailable bot"}
-              </h2>
+              <h2 className="truncate type-section-title">Node details</h2>
               <Button
                 size="icon-sm"
                 variant="ghost"
-                aria-label="Remove step"
+                aria-label="Remove node"
                 onClick={removeSelected}
               >
                 <Trash2Icon />
               </Button>
             </div>
             <Field>
-              <FieldLabel htmlFor="step-instructions">
-                Step instructions
-              </FieldLabel>
-              <Textarea
-                id="step-instructions"
-                rows={5}
-                value={selected.data.instructions}
-                onChange={(event) => {
-                  const instructions = event.target.value
-                  setNodes((previous) =>
-                    previous.map((node) =>
-                      node.id === selected.id
-                        ? { ...node, data: { ...node.data, instructions } }
-                        : node
-                    )
-                  )
-                }}
+              <FieldLabel htmlFor={formId + "-title"}>Task name</FieldLabel>
+              <Input
+                id={formId + "-title"}
+                value={selected.data.title}
+                maxLength={160}
+                onChange={(e) =>
+                  updateNode(selected.id, { title: e.target.value })
+                }
               />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={formId + "-instructions"}>
+                Task instructions
+              </FieldLabel>
+              <div className="flex min-w-0 flex-col">
+                <ChatMentionInput
+                  key={selected.id}
+                  id={formId + "-instructions"}
+                  bots={availableBots}
+                  value={selected.data.instructions}
+                  mentions={selected.data.mentions}
+                  change={(instructions, mentions) =>
+                    updateNode(selected.id, {
+                      instructions,
+                      mentions: mentions.flatMap((m) =>
+                        m.kind === "bot" ? [{ ...m, kind: "bot" as const }] : []
+                      ),
+                    })
+                  }
+                  onCreateBot={(insert) => setInsertCreated(() => insert)}
+                />
+              </div>
+              <p className="type-meta text-muted-foreground">
+                {selected.data.mentions.length
+                  ? "Bots work in the order they are first mentioned."
+                  : "Select at least one @bot before publishing."}
+              </p>
+              {!!selected.data.mentions.length && (
+                <ol
+                  aria-label="Assigned bots in execution order"
+                  className="m-0 flex w-full list-none flex-col gap-0.5 p-0 text-left"
+                >
+                  {mentionTargets(selected.data.mentions).mentionedBotIds.map(
+                    (id) => {
+                      const bot = availableBots.find((b) => b.id === id)
+                      return (
+                        <li
+                          key={id}
+                          className={cn(
+                            compactItemStyles,
+                            "flex w-full items-center justify-start px-0"
+                          )}
+                        >
+                          {bot ? (
+                            <TaskBotIdentity bot={bot} />
+                          ) : (
+                            <span>Unavailable bot</span>
+                          )}
+                        </li>
+                      )
+                    }
+                  )}
+                </ol>
+              )}
             </Field>
           </aside>
         )}
       </div>
+      <BotDialog
+        showTrigger={false}
+        open={!!insertCreated}
+        onOpenChange={(open) => {
+          if (!open) setInsertCreated(null)
+        }}
+        onCreated={(bot) => {
+          setCreatedBots((previous) => [...previous, bot])
+          insertCreated?.(bot)
+        }}
+      />
       {discardDialog}
     </section>
   )

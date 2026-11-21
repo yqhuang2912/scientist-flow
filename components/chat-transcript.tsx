@@ -36,6 +36,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { Trace, TraceIcon, TraceLine, TraceTitle } from "@/components/ui/trace"
+import { mentionPattern } from "@/lib/chat-mentions"
 import { ChatMention, ChatMarkdown } from "@/components/chat-markdown"
 import { ChatMessageActions } from "@/components/chat-message-actions"
 import { BotName } from "@/components/bot-name"
@@ -63,11 +64,11 @@ import {
 function WorkflowEvidence({ message }: { message: UIMessage }) {
   const { chatId } = useParams<{ chatId: string }>()
   const { open } = useWorkspaceDocument()
-  const meta = message.metadata as { workflowStep?: number; version?: number; artifact?: { evidence: string; path: string; sha256: string } } | undefined
+  const meta = message.metadata as { workflowStep?: number; nodeTitle?: string; version?: number; artifact?: { evidence: string; path: string; sha256: string } } | undefined
   if (!meta?.workflowStep || !meta.artifact) return null
   const artifact = meta.artifact
   return <details className="rounded-md border px-3 py-2 text-sm">
-    <summary className="cursor-pointer">Step {meta.workflowStep} · v{meta.version} · {meta.workflowStep === 1 ? "Experiment evidence" : "Verification evidence"}</summary>
+    <summary className="cursor-pointer">Step {meta.workflowStep}{meta.nodeTitle && " · " + meta.nodeTitle} · v{meta.version} · {meta.workflowStep === 1 ? "Experiment evidence" : "Verification evidence"}</summary>
     <div className="mt-3 flex flex-col items-start gap-3">
       <ChatMarkdown>{artifact.evidence}</ChatMarkdown>
       <p className="break-all text-xs text-muted-foreground">Report SHA-256 · {artifact.sha256}</p>
@@ -227,22 +228,23 @@ const ChatTurn = memo(function ChatTurn({
   if (message.role === "system") return null
   if (message.role === "user") {
     const metadata = message.metadata as
-      | { mentionedBotIds?: string[]; workspaceFiles?: Record<string, unknown> }
+      | { checkpointNote?: boolean; mentionedBotIds?: string[]; workspaceFiles?: Record<string, unknown> }
       | undefined
     const mentionedIds = metadata?.mentionedBotIds
     const mentionedBotNames = bots
       .filter((bot) => mentionedIds?.includes(bot.id))
       .map((bot) => bot.name)
-    const addressedBot =
-      isGroup && !mentionedIds?.length
-        ? bots.find((bot) => bot.id === getMessageBotId(message))
-        : undefined
+    const recipient = isGroup ? bots.find(bot => bot.id === getMessageBotId(message)) : undefined
+    const inlineRecipient = metadata?.checkpointNote && recipient && message.parts.some(
+      p => p.type === "text" && mentionPattern([recipient.name]).test(p.text)
+    )
+    const addressedBot = !inlineRecipient && (metadata?.checkpointNote || !mentionedIds?.length) ? recipient : undefined
     const paths = metadata?.workspaceFiles
     const saved = message.parts.map(
       (_, index) => messageAttachmentSchema.safeParse(paths?.[index]).data
     )
     const mentionLabels = [
-      ...mentionedBotNames,
+      ...new Set([...mentionedBotNames, ...(inlineRecipient && recipient ? [recipient.name] : [])]),
       ...saved.flatMap((ref) =>
         ref && "origin" in ref && !ref.contextOnly ? [ref.relativePath] : []
       ),

@@ -5,7 +5,7 @@ import { z } from "zod"
 import { bots, taskTemplates } from "@/db/schema"
 import { db } from "@/lib/db"
 import { assertInstallationRequest } from "@/lib/installation-request.server"
-import { workflowDraftSchema } from "@/lib/workflow-draft"
+import { workflowBotIds, workflowDraftSchema } from "@/lib/workflow-draft"
 
 export async function saveWorkflowDraft(
   id: string,
@@ -25,7 +25,7 @@ export async function saveWorkflowDraft(
       error: "Invalid workflow draft. Check the nodes and connections.",
     }
   try {
-    const botIds = [...new Set(draft.data.nodes.map((node) => node.botId))]
+    const botIds = workflowBotIds(draft.data)
     if (botIds.length) {
       const found = await db
         .select({ id: bots.id })
@@ -35,7 +35,7 @@ export async function saveWorkflowDraft(
         return {
           success: false as const,
           error:
-            "A selected bot no longer exists. Remove its step before saving.",
+            "A selected bot no longer exists. Remove or replace its @mention before saving.",
         }
     }
     const [row] = await db
