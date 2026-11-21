@@ -1,7 +1,7 @@
 import "server-only"
 
 import { cache } from "react"
-import { format, isSameDay, isSameYear } from "date-fns"
+import { chatTimeLabels } from "@/lib/chat-recency"
 import { asc, desc, eq } from "drizzle-orm"
 
 import { bots, chatMembers, chats } from "@/db/schema"
@@ -74,15 +74,7 @@ export async function getUserChats(): Promise<SidebarChat[]> {
       name: row.chatName ?? memberBot?.name ?? "Untitled chat",
       lastMessagePreview: row.lastMessagePreview ?? "",
       lastMessageAt: row.lastMessageAt.toISOString(),
-      lastMessageAtLabel: format(
-        row.lastMessageAt,
-        isSameDay(row.lastMessageAt, now)
-          ? "HH:mm"
-          : isSameYear(row.lastMessageAt, now)
-            ? "MMM d"
-            : "yyyy-MM-dd"
-      ),
-      lastMessageAtTitle: format(row.lastMessageAt, "yyyy-MM-dd HH:mm xxx"),
+      ...chatTimeLabels(row.lastMessageAt, now),
       bots: memberBots,
       bot: memberBot,
     })

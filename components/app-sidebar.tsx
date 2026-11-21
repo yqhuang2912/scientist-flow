@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { PlusIcon, SearchIcon, SettingsIcon, DiamondIcon } from "lucide-react"
 import { usePathname, useRouter } from "next/navigation"
 
@@ -12,6 +12,7 @@ import { TaskDialog } from "@/components/task-dialog"
 import { SettingsDialog } from "@/components/settings-dialog"
 import type { BotSummary, SidebarChat } from "@/queries/bots"
 import { cn } from "@/lib/utils"
+import { CHAT_ACCEPTED_EVENT, chatTimeLabels } from "@/lib/chat-recency"
 import {
   Command,
   CommandDialog,
@@ -89,7 +90,7 @@ function BrandHeader() {
 }
 
 export function AppSidebar({
-  chats,
+  chats: initialChats,
   bots,
 }: {
   chats: SidebarChat[]
@@ -100,6 +101,33 @@ export function AppSidebar({
   const { setOpenMobile } = useSidebar()
   const [taskDialogOpen, setTaskDialogOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [accepted, setAccepted] = useState<Record<string, string>>({})
+  useEffect(() => {
+    function onAccepted(event: Event) {
+      const { chatId, acceptedAt } = (
+        event as CustomEvent<{ chatId: string; acceptedAt: string }>
+      ).detail
+      setAccepted((previous) =>
+        previous[chatId] >= acceptedAt
+          ? previous
+          : { ...previous, [chatId]: acceptedAt }
+      )
+    }
+    window.addEventListener(CHAT_ACCEPTED_EVENT, onAccepted)
+    return () => window.removeEventListener(CHAT_ACCEPTED_EVENT, onAccepted)
+  }, [])
+  const chats = useMemo(
+    () =>
+      initialChats
+        .map((chat) => {
+          const at = accepted[chat.id]
+          return at > chat.lastMessageAt
+            ? { ...chat, lastMessageAt: at, ...chatTimeLabels(new Date(at)) }
+            : chat
+        })
+        .sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt)),
+    [initialChats, accepted]
+  )
   const [settingsTab, setSettingsTab] = useState<
     "general" | "skills" | "tools" | "connections" | null
   >(null)

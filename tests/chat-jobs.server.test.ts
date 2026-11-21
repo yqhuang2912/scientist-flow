@@ -1,9 +1,10 @@
 import assert from "node:assert/strict"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { test } from "node:test"
 import { nanoid } from "nanoid"
 import { and, eq, sql } from "drizzle-orm"
 import { chatJobInput } from "../lib/chat-job"
+import { chatAttachmentParts } from "../lib/chat-composer"
 
 test("turn input accepts a user message or workspace attachment and rejects client history", () => {
   const input = { id: nanoid(), botId: nanoid(), text: "hello" }
@@ -31,6 +32,97 @@ test("turn input accepts a user message or workspace attachment and rejects clie
     }).success
   )
 })
+
+test(
+  "a completed submission replays its persisted attachments without re-reading the workspace or updating recency",
+  { skip: process.env.SCIENTISTFLOW_MODEL_DB_TEST !== "1" },
+  async () => {
+    const { db } = await import("../lib/db")
+    const { chats, chatTurns } = await import("../db/schema")
+    const { enqueueChatTurn, TurnConflict } =
+      await import("../lib/chat-jobs.server")
+    const previousOwner = process.env.SCIENTISTFLOW_INSTALLATION_ID
+    const owner = randomUUID(),
+      chatId = nanoid()
+    const accepted = new Date("2026-01-01T10:00:00.000Z")
+    const later = new Date("2026-01-02T10:00:00.000Z")
+    const upload = {
+      relativePath: "uploads/a.txt",
+      name: "a.txt",
+      mediaType: "text/plain",
+      size: 1,
+    }
+    const input = chatJobInput.parse({
+      id: nanoid(),
+      botId: nanoid(),
+      text: "",
+      files: [upload],
+      workspacePaths: ["docs/b.txt"],
+    })
+    const { parts, workspaceFiles } = chatAttachmentParts(
+      [
+        upload,
+        {
+          ...upload,
+          origin: "workspace" as const,
+          relativePath: "docs/b.txt",
+          name: "b.txt",
+        },
+      ].map((reference) => ({
+        reference,
+        part: {
+          type: "file",
+          mediaType: "text/plain",
+          filename: reference.name,
+          url: "data:text/plain;base64,YQ==",
+        },
+      })),
+      input.text
+    )
+    const userMessage = {
+      id: input.id,
+      role: "user" as const,
+      metadata: { botId: input.botId, workspaceFiles },
+      parts,
+    }
+    process.env.SCIENTISTFLOW_INSTALLATION_ID = owner
+    try {
+      await db.batch([
+        db.insert(chats).values({ id: chatId, lastMessageAt: later }),
+        db
+          .insert(chatTurns)
+          .values({
+            chatId,
+            id: input.id,
+            owner,
+            userMessage,
+            state: "completed",
+            createdAt: accepted,
+            inputHash: createHash("sha256")
+              .update(JSON.stringify(input))
+              .digest("hex"),
+          }),
+      ])
+      assert.deepEqual(await enqueueChatTurn(chatId, input), {
+        turnId: input.id,
+        userMessage,
+        state: "completed",
+        acceptedAt: accepted.toISOString(),
+      })
+      await assert.rejects(
+        enqueueChatTurn(chatId, { ...input, text: "Different input" }),
+        TurnConflict
+      )
+      const [chat] = await db.select().from(chats).where(eq(chats.id, chatId))
+      assert.equal(chat.lastMessageAt.toISOString(), later.toISOString())
+    } finally {
+      if (previousOwner === undefined)
+        delete process.env.SCIENTISTFLOW_INSTALLATION_ID
+      else process.env.SCIENTISTFLOW_INSTALLATION_ID = previousOwner
+      await db.delete(chats).where(eq(chats.id, chatId))
+    }
+  }
+)
 
 test(
   "expired leases are reclaimed; stale writers cannot overwrite progress or finalize a resumed turn",

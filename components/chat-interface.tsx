@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
 import { nanoid } from "nanoid"
 import { CircleAlertIcon } from "lucide-react"
 import { ChatTranscript } from "./chat-transcript"
@@ -13,7 +12,15 @@ import {
   type ChatComposerMessage,
 } from "@/lib/chat-composer"
 import { CHAT_UPLOAD_EVENT, uploadFiles } from "@/lib/workspace-upload-client"
-import type { ChatSnapshot, ChatTurnProgress } from "@/lib/chat-job"
+import {
+  isActiveTurn,
+  mergeTurnAck,
+  mergeTurnProgress,
+  type ChatSnapshot,
+  type ChatTurnAck,
+  type ChatTurnProgress,
+} from "@/lib/chat-job"
+import { CHAT_ACCEPTED_EVENT } from "@/lib/chat-recency"
 import type { UploadedEntry } from "@/lib/workspace-validation"
 import type { ChatWithBot } from "@/queries/chats"
 
@@ -26,21 +33,28 @@ export function ChatInterface({
 }) {
   const [snapshot, setSnapshot] = useState(initial)
   const [pendingBotId, setPendingBotId] = useState(chat.bots[0]?.id ?? "")
-  const [error, setError] = useState<string | null>(initial.error)
   const [sending, setSending] = useState(false)
   const uploaded = useRef(new WeakMap<File, UploadedEntry>())
   const pending = useRef<{ input: string; id: string } | null>(null)
   const version = useRef(0)
-  const router = useRouter()
+  const submitting = useRef(false)
   const url = "/api/chats/" + encodeURIComponent(chat.id) + "/messages"
 
   // Poll only while a turn runs. Focusing a second tab also refreshes its view.
   useEffect(() => {
+    if (sending) return
+    const epoch = version.current
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout>
     let reading = false
     async function refresh() {
-      if (reading) return
+      if (
+        reading ||
+        epoch !== version.current ||
+        submitting.current ||
+        (!snapshot.activeId && pending.current)
+      )
+        return
       reading = true
       const revision = version.current
       try {
@@ -56,23 +70,8 @@ export function ChatInterface({
           if (!response.ok) throw new Error("Could not refresh this reply.")
           const turn: ChatTurnProgress = await response.json()
           if (controller.signal.aborted || version.current !== revision) return
-          if (turn.state === "running" || turn.state === "queued") {
-            setSnapshot((current) => {
-              const index = current.messages.findIndex(
-                (m) => m.id === activeId && m.role === "user"
-              )
-              if (index < 0 || current.activeId !== activeId) return current
-              return {
-                ...current,
-                messages: [
-                  ...current.messages.slice(0, index + 1),
-                  ...turn.replies,
-                ],
-              }
-            })
-            setError(null)
-            return
-          }
+          setSnapshot((current) => mergeTurnProgress(current, turn))
+          return
         }
         const response = await fetch(url, {
           signal: controller.signal,
@@ -83,11 +82,13 @@ export function ChatInterface({
         const next: ChatSnapshot = await response.json()
         if (!controller.signal.aborted && revision === version.current) {
           setSnapshot(next)
-          setError(next.error)
         }
       } catch {
         if (!controller.signal.aborted && revision === version.current)
-          setError("Could not refresh this conversation. Reconnecting…")
+          setSnapshot((current) => ({
+            ...current,
+            error: "Could not refresh this conversation. Reconnecting…",
+          }))
       } finally {
         reading = false
         if (!controller.signal.aborted && snapshot.activeId) {
@@ -103,7 +104,7 @@ export function ChatInterface({
       clearTimeout(timer)
       window.removeEventListener("focus", refresh)
     }
-  }, [snapshot.activeId, url])
+  }, [snapshot.activeId, sending, url])
 
   async function submit({
     text,
@@ -111,7 +112,7 @@ export function ChatInterface({
     mentionedBotIds,
     workspacePaths,
   }: ChatComposerMessage) {
-    if (snapshot.activeId || sending)
+    if (snapshot.activeId || submitting.current)
       return { error: "A reply is already running." }
     if (files.length + workspacePaths.length > 32)
       return { error: "Select up to 32 attachments per message." }
@@ -119,6 +120,7 @@ export function ChatInterface({
     if (!botId) return { error: "No bot is available in this chat." }
     setPendingBotId(botId)
     ++version.current
+    submitting.current = true
     setSending(true)
     try {
       const entries: UploadedEntry[] = []
@@ -153,18 +155,39 @@ export function ChatInterface({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: pending.current.id, ...input }),
       })
-      if (!response.ok) return { error: await response.text() }
-      const next: ChatSnapshot = await response.json()
+      if (!response.ok) {
+        if (response.status >= 400 && response.status < 500)
+          pending.current = null
+        return { error: await response.text() }
+      }
+      const ack: ChatTurnAck = await response.json()
+      // A retry can acknowledge a turn that finished while disconnected.
+      let final: ChatTurnProgress | undefined
+      if (!isActiveTurn(ack.state)) {
+        const progress = await fetch(
+          url + "?id=" + encodeURIComponent(ack.turnId),
+          { cache: "no-store" }
+        )
+        if (!progress.ok)
+          throw new Error(
+            "Could not load the accepted reply. Retry to recover it."
+          )
+        final = await progress.json()
+      }
       ++version.current
-      setSnapshot(next)
-      setError(next.error)
+      setSnapshot((current) => mergeTurnAck(current, ack, final))
+      window.dispatchEvent(
+        new CustomEvent(CHAT_ACCEPTED_EVENT, {
+          detail: { chatId: chat.id, acceptedAt: ack.acceptedAt },
+        })
+      )
       pending.current = null
-      router.refresh()
     } catch (e) {
       return {
         error: e instanceof Error ? e.message : "Could not submit the message.",
       }
     } finally {
+      submitting.current = false
       setSending(false)
     }
   }
@@ -177,11 +200,11 @@ export function ChatInterface({
         { method: "DELETE" }
       )
       if (!response.ok) throw new Error("Could not stop the reply.")
-      const next: ChatSnapshot = await response.json()
-      ++version.current
-      setSnapshot(next)
     } catch {
-      setError("Could not stop the reply. Try again.")
+      setSnapshot((current) => ({
+        ...current,
+        error: "Could not stop the reply. Try again.",
+      }))
     }
   }
   const status = sending
@@ -205,16 +228,18 @@ export function ChatInterface({
         pendingBotId={pendingBotId}
       />
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 pb-3 sm:px-6">
-        {error && (
+        {snapshot.error && (
           <Alert variant="destructive">
             <CircleAlertIcon />
             <AlertTitle>Response interrupted</AlertTitle>
             <AlertDescription>
-              <p>{error}</p>
+              <p>{snapshot.error}</p>
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => setError(null)}
+                onClick={() =>
+                  setSnapshot((current) => ({ ...current, error: null }))
+                }
               >
                 Dismiss
               </Button>

@@ -44,7 +44,67 @@ export type ChatSnapshot = {
 }
 
 export type ChatTurnProgress = {
+  turnId: string
   replies: UIMessage[]
   state: ChatJobState
   error: string | null
+}
+
+export type ChatTurnAck = {
+  turnId: string
+  userMessage: UIMessage
+  state: ChatJobState
+  acceptedAt: string
+}
+
+export function isActiveTurn(state: ChatJobState) {
+  return state === "queued" || state === "running"
+}
+
+export function mergeTurnProgress(
+  current: ChatSnapshot,
+  turn: ChatTurnProgress
+): ChatSnapshot {
+  if (current.activeId !== turn.turnId) return current
+  const start = current.messages.findIndex(
+    (m) => m.role === "user" && m.id === turn.turnId
+  )
+  if (start < 0) return current
+  const following = current.messages.findIndex(
+    (m, i) => i > start && m.role === "user"
+  )
+  const end = following < 0 ? current.messages.length : following
+  const replies = new Map(
+    current.messages.slice(start + 1, end).map((m) => [m.id, m])
+  )
+  for (const message of turn.replies) replies.set(message.id, message)
+  return {
+    messages: [
+      ...current.messages.slice(0, start + 1),
+      ...replies.values(),
+      ...current.messages.slice(end),
+    ],
+    activeId: isActiveTurn(turn.state) ? turn.turnId : null,
+    error: turn.error,
+  }
+}
+
+export function mergeTurnAck(
+  current: ChatSnapshot,
+  ack: ChatTurnAck,
+  final?: ChatTurnProgress
+): ChatSnapshot {
+  const known = current.messages.some(
+    (m) => m.role === "user" && m.id === ack.turnId
+  )
+  // A known, inactive turn has already settled. A late acknowledgement cannot reopen it.
+  if (known && current.activeId !== ack.turnId) return current
+  const next = known
+    ? current
+    : {
+        messages: [...current.messages, ack.userMessage],
+        activeId: ack.turnId,
+        error: null,
+      }
+  return final ? mergeTurnProgress(next, final) : next
 }

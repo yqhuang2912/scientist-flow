@@ -14,7 +14,7 @@ import {
 } from "./chat-attachment-context.server"
 import { requireWorkspaceBinding } from "./workspace.server"
 import { chatMemberChoice, validateChoice } from "./model-connections.server"
-import type { ChatJobInput, ChatSnapshot } from "./chat-job"
+import type { ChatJobInput, ChatSnapshot, ChatTurnAck } from "./chat-job"
 import type { UIMessage } from "ai"
 
 const t = chatTurns
@@ -23,7 +23,12 @@ export class ChatLeaseLost extends Error {}
 
 export async function turnProgress(chatId: string, id: string) {
   const [row] = await db
-    .select({ replies: t.replies, state: t.state, error: t.error })
+    .select({
+      turnId: t.id,
+      replies: t.replies,
+      state: t.state,
+      error: t.error,
+    })
     .from(t)
     .where(
       and(eq(t.owner, installationOwner()), eq(t.chatId, chatId), eq(t.id, id))
@@ -52,20 +57,37 @@ export async function chatSnapshot(chatId: string): Promise<ChatSnapshot> {
   }
 }
 
-export async function enqueueChatTurn(chatId: string, input: ChatJobInput) {
+export async function enqueueChatTurn(
+  chatId: string,
+  input: ChatJobInput
+): Promise<ChatTurnAck> {
   const owner = installationOwner()
   const hash = createHash("sha256").update(JSON.stringify(input)).digest("hex")
   const key = and(eq(t.chatId, chatId), eq(t.id, input.id))
   async function alreadySubmitted() {
     const [row] = await db
-      .select({ owner: t.owner, hash: t.inputHash })
+      .select({
+        owner: t.owner,
+        hash: t.inputHash,
+        userMessage: t.userMessage,
+        state: t.state,
+        createdAt: t.createdAt,
+      })
       .from(t)
       .where(key)
     if (row && (row.owner !== owner || row.hash !== hash))
       throw new TurnConflict("This message ID has already been used.")
-    return !!row
+    return (
+      row && {
+        turnId: input.id,
+        userMessage: row.userMessage,
+        state: row.state,
+        acceptedAt: row.createdAt.toISOString(),
+      }
+    )
   }
-  if (await alreadySubmitted()) return
+  const previous = await alreadySubmitted()
+  if (previous) return previous
   await Promise.all(
     (input.mentionedBotIds ?? [input.botId]).map(async (id) =>
       validateChoice(await chatMemberChoice(chatId, id))
@@ -108,11 +130,19 @@ export async function enqueueChatTurn(chatId: string, input: ChatJobInput) {
   const inserted = await db
     .with(accepted)
     .update(chats)
-    .set({ lastMessageAt: new Date() })
+    .set({ lastMessageAt: sql`now()` })
     .where(and(eq(chats.id, chatId), sql`exists (select 1 from ${accepted})`))
-    .returning({ id: chats.id })
-  if (!inserted.length && !(await alreadySubmitted()))
-    throw new TurnConflict("Another reply is already running in this chat.")
+    .returning({ acceptedAt: chats.lastMessageAt })
+  if (inserted.length)
+    return {
+      turnId: input.id,
+      userMessage,
+      state: "queued",
+      acceptedAt: inserted[0].acceptedAt.toISOString(),
+    }
+  const replay = await alreadySubmitted()
+  if (replay) return replay
+  throw new TurnConflict("Another reply is already running in this chat.")
 }
 
 export async function cancelChatTurn(chatId: string, id: string) {

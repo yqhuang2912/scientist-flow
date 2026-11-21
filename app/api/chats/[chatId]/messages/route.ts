@@ -46,12 +46,14 @@ async function handle(request: Request, { params }: Context) {
         return new Response("This bot is not a member of this chat.", {
           status: 403,
         })
-      await enqueueChatTurn(chatId, input.data)
+      const ack = await enqueueChatTurn(chatId, input.data)
       wakeChatWorker()
+      return Response.json(ack, { headers: { "Cache-Control": "no-store" } })
     } else if (request.method === "DELETE") {
       if (!turnId) return new Response("Missing message ID.", { status: 400 })
       await cancelChatTurn(chatId, turnId)
       wakeChatWorker()
+      return new Response(null, { status: 204 })
     }
     return Response.json(await chatSnapshot(chatId), {
       headers: { "Cache-Control": "no-store" },
