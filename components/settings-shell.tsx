@@ -86,6 +86,7 @@ export function SettingsFormFooter({
   dirty,
   pending,
   ready = true,
+  submitLabel,
   onCancel,
 }: {
   children?: React.ReactNode
@@ -95,6 +96,7 @@ export function SettingsFormFooter({
   dirty: boolean
   pending: boolean
   ready?: boolean
+  submitLabel?: string
   onCancel: () => void
 }) {
   const unchanged = editing && !dirty
@@ -118,7 +120,7 @@ export function SettingsFormFooter({
         disabled={pending || !ready || unchanged}
       >
         {pending && <Spinner />}
-        {editing ? "Save changes" : "Create " + noun}
+        {submitLabel ?? (editing ? "Save changes" : "Create " + noun)}
       </Button>
     </DialogFooter>
   )

@@ -10,7 +10,7 @@ type Summary = {
   id: string
   name: string
   displayName?: string | null
-  description: string
+  description?: string
 }
 type Result<T> = { success: true; data: T } | { success: false; error: string }
 
@@ -126,6 +126,7 @@ export function SharedLibraryPanel<S extends Summary>({
   icon,
   getList,
   renderForm,
+  onOpen,
 }: {
   noun: string
   title: string
@@ -133,6 +134,7 @@ export function SharedLibraryPanel<S extends Summary>({
   icon: ReactNode
   getList: () => Promise<Result<S[]>>
   renderForm: (entry: S | null, close: () => void) => ReactNode
+  onOpen?: (entry: S) => void
 }) {
   const [search, setSearch] = useState("")
   const [editor, setEditor] = useState<{ entry: S | null } | null>(null)
@@ -159,7 +161,7 @@ export function SharedLibraryPanel<S extends Summary>({
         query={search.trim().toLowerCase()}
         noun={noun}
         icon={icon}
-        onSelect={(entry) => setEditor({ entry })}
+        onSelect={onOpen ?? ((entry) => setEditor({ entry }))}
       />
     </SettingsPane>
   )

@@ -25,6 +25,7 @@ export function SettingsDeleteAction<T extends { success: true }>({
   standalone = false,
   disabled = false,
   actionLabel = "Delete",
+  dialog,
 }: {
   noun: string
   title: string
@@ -34,8 +35,11 @@ export function SettingsDeleteAction<T extends { success: true }>({
   standalone?: boolean
   disabled?: boolean
   actionLabel?: string
+  dialog?: { open: boolean; onOpenChange: (open: boolean) => void }
 }) {
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = dialog?.open ?? internalOpen
+  const setOpen = dialog?.onOpenChange ?? setInternalOpen
   const [error, setError] = useState("")
   const [pending, startTransition] = useTransition()
 
@@ -64,20 +68,22 @@ export function SettingsDeleteAction<T extends { success: true }>({
         setOpen(next)
       }}
     >
-      <AlertDialogTrigger
-        render={
-          <Button
-            type="button"
-            variant={standalone ? "destructive" : "ghost"}
-            size="sm"
-            disabled={disabled || pending}
-            className={standalone ? "mr-auto" : "text-destructive"}
-          />
-        }
-      >
-        <Trash2Icon data-icon="inline-start" />
-        {standalone ? actionLabel + " " + noun : actionLabel}
-      </AlertDialogTrigger>
+      {!dialog && (
+        <AlertDialogTrigger
+          render={
+            <Button
+              type="button"
+              variant={standalone ? "destructive" : "ghost"}
+              size="sm"
+              disabled={disabled || pending}
+              className={standalone ? "mr-auto" : "text-destructive"}
+            />
+          }
+        >
+          <Trash2Icon data-icon="inline-start" />
+          {standalone ? actionLabel + " " + noun : actionLabel}
+        </AlertDialogTrigger>
+      )}
       <AlertDialogContent size="sm">
         <AlertDialogHeader>
           <AlertDialogTitle className="wrap-anywhere">{title}</AlertDialogTitle>

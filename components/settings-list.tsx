@@ -83,7 +83,7 @@ export function SettingsList({
   items: {
     id: string
     name: string
-    description: string
+    description?: string
     icon: ReactNode
     onSelect: () => void
   }[]
@@ -112,12 +112,14 @@ export function SettingsList({
             <span className="min-w-0 flex-1 truncate" title={item.name}>
               {item.name}
             </span>
-            <span
-              className="max-w-1/3 truncate text-xs font-normal text-muted-foreground sm:max-w-[45%]"
-              title={item.description}
-            >
-              {item.description}
-            </span>
+            {item.description && (
+              <span
+                className="max-w-1/3 truncate text-xs font-normal text-muted-foreground sm:max-w-[45%]"
+                title={item.description}
+              >
+                {item.description}
+              </span>
+            )}
           </Button>
         </li>
       ))}

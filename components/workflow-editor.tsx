@@ -7,6 +7,7 @@ import {
   useState,
   useSyncExternalStore,
   useTransition,
+  type Ref,
 } from "react"
 import {
   addEdge,
@@ -48,6 +49,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
+import { useRouter } from "next/navigation"
+import type { TaskTemplateSummary } from "@/db/schema"
+import type { TemplateChange } from "./templates-settings-panel"
+import { WorkflowTemplateMenu } from "./workflow-template-menu"
+import {
+  useSettingsFormGuard,
+  type SettingsLeaveGuard,
+} from "./settings-form-guard"
 
 type Bot = { id: string; name: string; job: string; avatar: string }
 type Step = Node<{ botId: string; bot?: Bot; instructions: string }, "step">
@@ -120,6 +129,9 @@ export function WorkflowEditor({
   draft,
   bots,
   latestRelease,
+  guard,
+  onDirtyChange,
+  onTemplateChange,
 }: {
   templateId: string
   name: string
@@ -127,7 +139,18 @@ export function WorkflowEditor({
   draft: WorkflowDraft
   bots: Bot[]
   latestRelease: { version: number; revision: number } | null
+  guard?: Ref<SettingsLeaveGuard>
+  onDirtyChange?: (dirty: boolean) => void
+  onTemplateChange?: TemplateChange
 }) {
+  const router = useRouter()
+  const [updated, setUpdated] = useState<TaskTemplateSummary | null>(null)
+  const template = updated ?? { id: templateId, name }
+  const changeTemplate: TemplateChange = (id, next) => {
+    if (onTemplateChange) onTemplateChange(id, next)
+    else if (next) setUpdated(next)
+    else router.replace("/")
+  }
   const { resolvedTheme } = useTheme()
   const hydrated = useSyncExternalStore(
     subscribeToHydration,
@@ -163,6 +186,14 @@ export function WorkflowEditor({
   const selected = nodes.find((node) => node.selected)
   const [release, setRelease] = useState(latestRelease)
   const [publishing, startPublish] = useTransition()
+  const { discardDialog } = useSettingsFormGuard(
+    guard ?? null,
+    dirty,
+    saving,
+    "workflow draft"
+  )
+  const [focused, setFocused] = useState(false)
+  const keysActive = !guard || focused
 
   function publish() {
     if (
@@ -188,14 +219,8 @@ export function WorkflowEditor({
   }
 
   useEffect(() => {
-    if (!dirty) return
-    const warn = (event: BeforeUnloadEvent) => {
-      event.preventDefault()
-      event.returnValue = ""
-    }
-    window.addEventListener("beforeunload", warn)
-    return () => window.removeEventListener("beforeunload", warn)
-  }, [dirty])
+    onDirtyChange?.(dirty)
+  }, [dirty, onDirtyChange])
 
   function addBot(bot: Bot) {
     if (!stage.current || !flow.current) return
@@ -251,22 +276,49 @@ export function WorkflowEditor({
   }
 
   return (
-    <main className="flex h-dvh min-w-0 flex-col bg-background text-foreground">
+    <section
+      className={cn(
+        "@container flex min-w-0 flex-col bg-background text-foreground",
+        guard ? "min-h-0 flex-1" : "h-dvh"
+      )}
+      tabIndex={-1}
+      onFocusCapture={(e) => setFocused(e.currentTarget.contains(e.target))}
+      onBlurCapture={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) setFocused(false)
+      }}
+      onKeyDown={(e) => {
+        if (
+          e.target instanceof HTMLElement &&
+          e.currentTarget.contains(e.target) &&
+          (e.ctrlKey || e.metaKey) &&
+          e.key.toLowerCase() === "s"
+        ) {
+          e.preventDefault()
+          save()
+        }
+      }}
+    >
       <header className="flex min-h-14 flex-wrap items-center gap-3 border-b px-4 py-2">
-        <WorkflowIcon
-          aria-hidden="true"
-          className="size-5 shrink-0 text-muted-foreground"
-        />
+        {!guard && (
+          <WorkflowIcon
+            aria-hidden="true"
+            className="size-5 shrink-0 text-muted-foreground"
+          />
+        )}
         <div className="min-w-0 flex-1">
-          <h1 className="truncate type-section-title">{name}</h1>
+          {!guard && (
+            <h1 className="truncate type-section-title">{template.name}</h1>
+          )}
           <p role="status" className="text-xs text-muted-foreground">
             {pending
               ? "Saving…"
-              : dirty
-                ? "Unsaved changes"
-                : saved.revision
-                  ? "Draft saved"
-                  : "Workflow draft"}
+              : publishing
+                ? "Publishing…"
+                : dirty
+                  ? "Unsaved changes"
+                  : saved.revision
+                    ? "Draft saved"
+                    : "Workflow draft"}
             {release && ` · Published v${release.version}`}
           </p>
         </div>
@@ -295,39 +347,24 @@ export function WorkflowEditor({
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={pending || publishing || !dirty}
-          onClick={save}
-        >
-          Save draft
-        </Button>
-        <Button
-          size="sm"
-          disabled={
-            dirty ||
-            pending ||
-            publishing ||
-            !nodes.length ||
-            release?.revision === saved.revision
+        <WorkflowTemplateMenu
+          template={template}
+          dirty={dirty}
+          disabled={pending || publishing}
+          onSave={save}
+          onPublish={publish}
+          canPublish={
+            !dirty && nodes.length > 0 && release?.revision !== saved.revision
           }
-          title={dirty ? "Save your changes before publishing." : undefined}
-          onClick={publish}
-        >
-          {publishing
-            ? "Publishing…"
-            : release?.revision === saved.revision
-              ? `Published v${release.version}`
-              : `Publish v${(release?.version ?? 0) + 1}`}
-        </Button>
+          onChange={changeTemplate}
+        />
       </header>
       {error && (
         <p role="alert" className="border-b px-4 py-2 text-sm text-destructive">
           {error}
         </p>
       )}
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+      <div className="flex min-h-0 flex-1 flex-col @min-[660px]:flex-row">
         <div ref={stage} className="relative min-h-0 min-w-0 flex-1">
           <ReactFlow<Step, Edge>
             nodes={nodes}
@@ -350,7 +387,11 @@ export function WorkflowEditor({
             colorMode={hydrated && resolvedTheme === "dark" ? "dark" : "light"}
             nodeDragThreshold={0}
             className="[--xy-handle-background-color:var(--foreground)] [--xy-handle-border-color:var(--background)]"
-            deleteKeyCode={["Backspace", "Delete"]}
+            deleteKeyCode={keysActive ? ["Backspace", "Delete"] : null}
+            panActivationKeyCode={keysActive ? undefined : null}
+            selectionKeyCode={keysActive ? undefined : null}
+            multiSelectionKeyCode={keysActive ? undefined : null}
+            zoomActivationKeyCode={keysActive ? undefined : null}
             zoomOnDoubleClick={false}
           >
             <Background gap={20} color="var(--border)" />
@@ -365,7 +406,7 @@ export function WorkflowEditor({
         {selected && (
           <aside
             aria-label="Step details"
-            className="flex max-h-[40dvh] flex-col gap-4 overflow-auto border-t bg-background p-4 md:max-h-none md:w-72 md:shrink-0 md:border-t-0 md:border-l"
+            className="flex max-h-[45%] flex-col gap-4 overflow-auto border-t bg-background p-4 @min-[660px]:max-h-none @min-[660px]:w-72 @min-[660px]:shrink-0 @min-[660px]:border-t-0 @min-[660px]:border-l"
           >
             <div className="flex items-center justify-between gap-2">
               <h2 className="truncate type-section-title">
@@ -403,6 +444,7 @@ export function WorkflowEditor({
           </aside>
         )}
       </div>
-    </main>
+      {discardDialog}
+    </section>
   )
 }

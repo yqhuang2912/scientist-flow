@@ -22,6 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import type { BotSummary } from "@/queries/bots"
+import type { TaskTemplateSummary } from "@/db/schema"
 
 type SettingsTab = "general" | "bots" | "skills" | "tools" | "templates" | "connections"
 
@@ -31,12 +32,14 @@ export function SettingsDialog({
   onOpenChange,
   initialTab = "general",
   onWorkspaceSaved,
+  onOpenWorkflow,
 }: {
   bots: BotSummary[]
   open: boolean
   onOpenChange: (open: boolean) => void
   initialTab?: SettingsTab
   onWorkspaceSaved?: () => void
+  onOpenWorkflow: (template: TaskTemplateSummary) => void
 }) {
   const [tab, setTab] = useState<SettingsTab>(initialTab)
   const leaveGuard = useRef<SettingsLeaveGuard>(null)
@@ -122,7 +125,9 @@ export function SettingsDialog({
           ) : tab === "tools" ? (
             open && <ToolsSettingsPanel guard={leaveGuard} />
           ) : tab === "templates" ? (
-            open && <TemplatesSettingsPanel guard={leaveGuard} />
+            open && (
+              <TemplatesSettingsPanel guard={leaveGuard} onOpenWorkflow={onOpenWorkflow} />
+            )
           ) : (
             open && (
               <BotsSettingsPanel

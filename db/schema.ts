@@ -129,14 +129,13 @@ export const taskTemplates = pgTable("task_templates", {
 
 export const taskTemplateFormSchema = createInsertSchema(taskTemplates, {
   name: z.string().trim().min(1, "Enter a template name."),
-  description: z.string().trim().optional().default(""),
 })
-  .pick({ name: true, description: true })
+  .pick({ name: true })
   .strict()
 
 export type TaskTemplateSummary = Pick<
   typeof taskTemplates.$inferSelect,
-  "id" | "name" | "description"
+  "id" | "name"
 >
 
 export const taskTemplateVersions = pgTable(

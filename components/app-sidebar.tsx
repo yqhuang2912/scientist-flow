@@ -1,6 +1,9 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import dynamic from "next/dynamic"
+import type { TaskTemplateSummary } from "@/db/schema"
+import type { SettingsLeaveGuard } from "@/components/settings-form-guard"
 import { PlusIcon, SearchIcon, SettingsIcon, DiamondIcon } from "lucide-react"
 import { usePathname, useRouter } from "next/navigation"
 
@@ -94,6 +97,10 @@ function BrandHeader() {
   )
 }
 
+const WorkflowWindow = dynamic(() =>
+  import("./workflow-window").then((module) => module.WorkflowWindow)
+)
+
 export function AppSidebar({
   chats: initialChats,
   bots,
@@ -106,6 +113,31 @@ export function AppSidebar({
   const { setOpenMobile } = useSidebar()
   const [taskDialogOpen, setTaskDialogOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [workflow, setWorkflow] = useState<{
+    template: TaskTemplateSummary
+    activation: number
+  } | null>(null)
+  const workflowGuard = useRef<SettingsLeaveGuard>(null)
+  function updateOpenTemplate(id: string, template: TaskTemplateSummary | null) {
+    setWorkflow((current) => {
+      if (current?.template.id !== id) return current
+      return template ? { ...current, template } : null
+    })
+  }
+  function leaveWorkflow(leave: () => void) {
+    if (workflowGuard.current) workflowGuard.current(leave)
+    else leave()
+  }
+  function openWorkflow(template: TaskTemplateSummary) {
+    setSettingsTab(null)
+    const activate = () =>
+      setWorkflow((previous) => ({
+        template,
+        activation: (previous?.activation ?? 0) + 1,
+      }))
+    if (workflow && workflow.template.id !== template.id) leaveWorkflow(activate)
+    else activate()
+  }
   const [accepted, setAccepted] = useState<Record<string, ChatAcceptedDetail>>(
     {}
   )
@@ -333,10 +365,22 @@ export function AppSidebar({
         bots={bots}
         open={settingsTab !== null}
         onOpenChange={(open) => setSettingsTab(open ? "general" : null)}
+        onOpenWorkflow={openWorkflow}
         onWorkspaceSaved={() =>
           window.dispatchEvent(new Event("scientistflow:workspace-root-changed"))
         }
       />
+
+      {workflow && (
+        <WorkflowWindow
+          key={workflow.template.id}
+          template={workflow.template}
+          activation={workflow.activation}
+          guard={workflowGuard}
+          onTemplateChange={updateOpenTemplate}
+          onClose={() => leaveWorkflow(() => setWorkflow(null))}
+        />
+      )}
 
       {/* Search command palette */}
       <CommandDialog

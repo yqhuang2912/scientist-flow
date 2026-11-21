@@ -3,13 +3,11 @@
 import { useId, useRef, useState, useTransition, type Ref } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { ExternalLinkIcon, WorkflowIcon } from "lucide-react"
-import { buttonVariants } from "@/components/ui/button"
+import { WorkflowIcon } from "lucide-react"
 import type { z } from "zod"
-import { deleteTaskTemplate, saveTaskTemplate } from "@/actions/task-template"
+import { saveTaskTemplate } from "@/actions/task-template"
 import { taskTemplateFormSchema, type TaskTemplateSummary } from "@/db/schema"
 import { getTaskTemplates } from "@/queries/task-templates"
-import { SettingsDeleteAction } from "@/components/settings-detail-actions"
 import {
   useSettingsFormGuard,
   type SettingsLeaveGuard,
@@ -25,16 +23,20 @@ import {
   FieldError,
   FieldGroup,
   FieldLabel,
-  FieldSet,
-  FieldLegend,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
+
+export type TemplateChange = (
+  id: string,
+  updated: TaskTemplateSummary | null
+) => void
 
 export function TemplatesSettingsPanel({
   guard,
+  onOpenWorkflow,
 }: {
   guard: Ref<SettingsLeaveGuard>
+  onOpenWorkflow: (template: TaskTemplateSummary) => void
 }) {
   return (
     <SharedLibraryPanel
@@ -43,6 +45,7 @@ export function TemplatesSettingsPanel({
       description="Manage reusable workflows for research tasks."
       icon={<WorkflowIcon />}
       getList={getTaskTemplates}
+      onOpen={onOpenWorkflow}
       renderForm={(template, close) => (
         <TemplateForm template={template} guard={guard} close={close} />
       )}
@@ -50,14 +53,16 @@ export function TemplatesSettingsPanel({
   )
 }
 
-function TemplateForm({
+export function TemplateForm({
   template,
   guard,
   close,
+  onRenamed,
 }: {
   template: TaskTemplateSummary | null
   guard: Ref<SettingsLeaveGuard>
   close: () => void
+  onRenamed?: (updated: TaskTemplateSummary) => void
 }) {
   const formId = useId()
   const form = useForm<
@@ -68,7 +73,6 @@ function TemplateForm({
     resolver: zodResolver(taskTemplateFormSchema),
     defaultValues: {
       name: template?.name ?? "",
-      description: template?.description ?? "",
     },
   })
   const { errors, isDirty } = form.formState
@@ -89,8 +93,10 @@ function TemplateForm({
     startTransition(async () => {
       try {
         const result = await saveTaskTemplate(template?.id ?? null, values)
-        if (result.success) close()
-        else setError(result.error)
+        if (result.success) {
+          onRenamed?.({ id: result.id, name: values.name })
+          close()
+        } else setError(result.error)
       } catch {
         setError("Could not reach the server. Please try again.")
       } finally {
@@ -101,9 +107,9 @@ function TemplateForm({
 
   return (
     <>
-      <h2 className="border-b px-4 py-3 type-section-title">
-        {template ? "Edit template" : "New template"}
-      </h2>
+      {!template && (
+        <h2 className="border-b px-4 py-3 type-section-title">New template</h2>
+      )}
       <SettingsFormBody
         id={formId}
         onSubmit={(event) => form.handleSubmit(save)(event)}
@@ -122,36 +128,6 @@ function TemplateForm({
               />
               <FieldError id={formId + "-name-error"} errors={[errors.name]} />
             </Field>
-            <Field data-invalid={!!errors.description}>
-              <FieldLabel htmlFor={formId + "-description"}>
-                Description (optional)
-              </FieldLabel>
-              <Textarea
-                id={formId + "-description"}
-                rows={2}
-                aria-invalid={!!errors.description}
-                {...form.register("description")}
-              />
-              <FieldError errors={[errors.description]} />
-            </Field>
-            {template && (
-              <FieldSet>
-                <FieldLegend variant="label">Workflow</FieldLegend>
-                <a
-                  href={`/templates/${template.id}/workflow`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={buttonVariants({
-                    variant: "outline",
-                    size: "sm",
-                    className: "w-fit",
-                  })}
-                >
-                  Edit workflow <ExternalLinkIcon data-icon="inline-end" />
-                  <span className="sr-only">(opens in a new tab)</span>
-                </a>
-              </FieldSet>
-            )}
           </FieldGroup>
         </fieldset>
         <SettingsFormError error={error} className="mt-3" />
@@ -160,21 +136,11 @@ function TemplateForm({
         formId={formId}
         noun="template"
         editing={!!template}
+        submitLabel={template ? "Rename" : undefined}
         dirty={isDirty}
         pending={pending}
         onCancel={() => requestLeave(close)}
-      >
-        {template && (
-          <SettingsDeleteAction
-            noun="template"
-            title="Delete template?"
-            description={`Permanently delete “${template.name}”?`}
-            remove={() => deleteTaskTemplate(template.id)}
-            onDeleted={close}
-            disabled={pending}
-          />
-        )}
-      </SettingsFormFooter>
+      />
       {discardDialog}
     </>
   )
