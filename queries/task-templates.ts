@@ -1,6 +1,6 @@
 "use server"
 
-import { asc, desc, eq } from "drizzle-orm"
+import { asc, desc, eq, sql } from "drizzle-orm"
 import { z } from "zod"
 import {
   bots,
@@ -9,16 +9,21 @@ import {
 } from "@/db/schema"
 import { emptyWorkflowDraft, workflowBotIds } from "@/lib/workflow-draft"
 import { assertInstallationRequest } from "@/lib/installation-request.server"
+import {
+  currentTemplateVersion,
+  versionStateFields,
+} from "@/lib/template-history.server"
 import { db } from "@/lib/db"
 
 export async function getWorkflowEditorData(templateId: string) {
   await assertInstallationRequest()
   if (!z.nanoid().safeParse(templateId).success) return null
-  const [[template], availableBots, [latestRelease]] = await Promise.all([
+  const [[template], availableBots] = await Promise.all([
     db
       .select({
         id: taskTemplates.id,
         name: taskTemplates.name,
+        ...versionStateFields,
         draft: taskTemplates.workflowDraft,
         revision: taskTemplates.draftRevision,
       })
@@ -33,12 +38,6 @@ export async function getWorkflowEditorData(templateId: string) {
       })
       .from(bots)
       .orderBy(asc(bots.name), asc(bots.id)),
-    db
-      .select({ version: versions.version, revision: versions.draftRevision })
-      .from(versions)
-      .where(eq(versions.templateId, templateId))
-      .orderBy(desc(versions.version))
-      .limit(1),
   ])
   if (!template) return null
   return {
@@ -47,7 +46,11 @@ export async function getWorkflowEditorData(templateId: string) {
     revision: template.revision,
     draft: template.draft ?? emptyWorkflowDraft,
     bots: availableBots,
-    latestRelease: latestRelease ?? null,
+    versionState: {
+      currentVersion: template.currentVersion,
+      draftPublished: template.draftPublished,
+      releases: template.releases,
+    },
   }
 }
 
@@ -58,11 +61,18 @@ export async function getPublishedTemplates() {
       .select({
         id: versions.id,
         name: versions.name,
+        current: sql<boolean>`${versions.version} = ${currentTemplateVersion}`,
         version: versions.version,
         workflow: versions.workflow,
       })
       .from(versions)
-      .orderBy(asc(versions.name), desc(versions.version))
+      .innerJoin(taskTemplates, eq(taskTemplates.id, versions.templateId))
+      .orderBy(
+        asc(taskTemplates.name),
+        asc(taskTemplates.id),
+        desc(sql`${versions.version} = ${currentTemplateVersion}`),
+        desc(versions.version)
+      )
     return {
       success: true as const,
       data: rows.map(({ workflow, ...r }) => ({

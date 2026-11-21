@@ -117,6 +117,7 @@ export const taskTemplates = pgTable("task_templates", {
     .$defaultFn(() => nanoid()),
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
+  currentVersion: integer("current_version"),
   workflowDraft: jsonb("workflow_draft").$type<WorkflowDraft>(),
   draftRevision: integer("draft_revision").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -149,6 +150,7 @@ export const taskTemplateVersions = pgTable(
       .references(() => taskTemplates.id, { onDelete: "cascade" }),
     version: integer("version").notNull(),
     draftRevision: integer("draft_revision").notNull(),
+    parentVersion: integer("parent_version"),
     name: text("name").notNull(),
     workflow: jsonb("workflow").$type<WorkflowDraft>().notNull(),
     publishedAt: timestamp("published_at", { withTimezone: true })

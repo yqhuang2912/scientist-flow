@@ -3,6 +3,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm"
 import { z } from "zod"
 import { bots, taskTemplates } from "@/db/schema"
+import { draftIsPublished } from "@/lib/template-history.server"
 import { db } from "@/lib/db"
 import { assertInstallationRequest } from "@/lib/installation-request.server"
 import { workflowBotIds, workflowDraftSchema } from "@/lib/workflow-draft"
@@ -48,9 +49,12 @@ export async function saveWorkflowDraft(
       .where(
         and(eq(taskTemplates.id, id), eq(taskTemplates.draftRevision, revision))
       )
-      .returning({ revision: taskTemplates.draftRevision })
+      .returning({
+        revision: taskTemplates.draftRevision,
+        draftPublished: draftIsPublished,
+      })
     return row
-      ? { success: true as const, revision: row.revision }
+      ? { success: true as const, ...row }
       : {
           success: false as const,
           error:

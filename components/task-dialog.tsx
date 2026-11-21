@@ -390,6 +390,7 @@ export function TaskDialog({
 }
 
 type VersionChoice = {
+  current: boolean
   id: string
   name: string
   version: number
@@ -424,7 +425,7 @@ function PublishedTemplatePicker({
         <NativeSelectOption value="">No template</NativeSelectOption>
         {versions.map((item) => (
           <NativeSelectOption key={item.id} value={item.id}>
-            {item.name} · v{item.version}
+            {item.name} · v{item.version}{item.current && " · Current"}
           </NativeSelectOption>
         ))}
       </NativeSelect>

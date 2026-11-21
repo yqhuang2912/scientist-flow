@@ -30,7 +30,7 @@ import { useTheme } from "next-themes"
 import { nanoid } from "nanoid"
 import { PlusIcon, Trash2Icon, WorkflowIcon } from "lucide-react"
 import { saveWorkflowDraft } from "@/actions/workflow-draft"
-import { publishTemplateVersion } from "@/actions/template-version"
+import { publishTemplateVersion, switchTemplateVersion } from "@/actions/template-version"
 import { mentionTargets } from "@/lib/chat-mentions"
 import {
   editableNode,
@@ -54,6 +54,8 @@ import { cn } from "@/lib/utils"
 import { useRouter } from "next/navigation"
 import type { TaskTemplateSummary } from "@/db/schema"
 import type { TemplateChange } from "./templates-settings-panel"
+import { WorkflowVersions } from "./workflow-versions"
+import type { TemplateVersionState } from "@/lib/workflow-version-tree"
 import { WorkflowTemplateMenu } from "./workflow-template-menu"
 import {
   useSettingsFormGuard,
@@ -65,11 +67,15 @@ type Step = Node<Pick<TaskNode, "title" | "instructions" | "mentions">, "step">
 
 function StepCard({ data, selected }: NodeProps<Step>) {
   const name = data.title || "Untitled node"
+  const handleColor = selected
+    ? "[--xy-handle-background-color:var(--color-blue-600)] dark:[--xy-handle-background-color:var(--color-blue-400)]"
+    : undefined
   return (
     <>
       <Handle
         type="target"
         position={Position.Left}
+        className={handleColor}
         style={handleSize}
         aria-label={`Input to ${name}`}
       />
@@ -77,7 +83,8 @@ function StepCard({ data, selected }: NodeProps<Step>) {
         size="sm"
         className={cn(
           "w-52 rounded-xl border shadow-sm",
-          selected && "border-ring"
+          selected &&
+            "border-blue-600 bg-blue-50 ring-2 ring-blue-600 dark:border-blue-400 dark:bg-[color-mix(in_oklab,var(--card),var(--color-blue-400)_12%)] dark:ring-blue-400"
         )}
       >
         <CardHeader className="grid-cols-1">
@@ -92,6 +99,7 @@ function StepCard({ data, selected }: NodeProps<Step>) {
       <Handle
         type="source"
         position={Position.Right}
+        className={handleColor}
         style={handleSize}
         aria-label={`Output from ${name}`}
       />
@@ -122,13 +130,35 @@ function draftFrom(
   }
 }
 
+function canvasNodes(draft: WorkflowDraft, bots: Bot[]): Step[] {
+  return draft.nodes.map((node) => {
+    const { id, position, title, instructions, mentions } = editableNode(
+      node,
+      bots
+    )
+    return {
+      id,
+      type: "step",
+      position,
+      data: { title, instructions, mentions },
+    }
+  })
+}
+
+function canvasEdges(draft: WorkflowDraft): Edge[] {
+  return draft.edges.map((edge) => ({
+    ...edge,
+    id: edge.source + ":" + edge.target,
+  }))
+}
+
 export function WorkflowEditor({
   templateId,
   name,
   revision,
   draft,
   bots,
-  latestRelease,
+  versionState,
   guard,
   onDirtyChange,
   onTemplateChange,
@@ -138,7 +168,7 @@ export function WorkflowEditor({
   revision: number
   draft: WorkflowDraft
   bots: Bot[]
-  latestRelease: { version: number; revision: number } | null
+  versionState: TemplateVersionState
   guard?: Ref<SettingsLeaveGuard>
   onDirtyChange?: (dirty: boolean) => void
   onTemplateChange?: TemplateChange
@@ -158,18 +188,7 @@ export function WorkflowEditor({
     () => false
   )
   const [nodes, setNodes, onNodesChange] = useNodesState<Step>(
-    draft.nodes.map((node) => {
-      const { id, position, title, instructions, mentions } = editableNode(
-        node,
-        bots
-      )
-      return {
-        id,
-        type: "step",
-        position,
-        data: { title, instructions, mentions },
-      }
-    })
+    canvasNodes(draft, bots)
   )
   const [createdBots, setCreatedBots] = useState<Bot[]>([])
   const availableBots = [
@@ -183,10 +202,7 @@ export function WorkflowEditor({
   >(null)
   const formId = useId()
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(
-    draft.edges.map((edge) => ({
-      ...edge,
-      id: edge.source + ":" + edge.target,
-    }))
+    canvasEdges(draft)
   )
   const [viewport, setViewport] = useState(draft.viewport)
   const flow = useRef<ReactFlowInstance<Step, Edge> | null>(null)
@@ -201,7 +217,8 @@ export function WorkflowEditor({
   const saving = useRef(false)
   const [error, setError] = useState("")
   const selected = nodes.find((node) => node.selected)
-  const [release, setRelease] = useState(latestRelease)
+  const [history, setHistory] = useState(versionState)
+  const [switching, startSwitch] = useTransition()
   const [publishing, startPublish] = useTransition()
   const { discardDialog } = useSettingsFormGuard(
     guard ?? null,
@@ -213,19 +230,14 @@ export function WorkflowEditor({
   const keysActive = !guard || focused
 
   function publish() {
-    if (
-      dirty ||
-      saving.current ||
-      !nodes.length ||
-      release?.revision === saved.revision
-    )
+    if (dirty || saving.current || !nodes.length || history.draftPublished)
       return
     saving.current = true
     setError("")
     startPublish(async () => {
       try {
         const result = await publishTemplateVersion(templateId, saved.revision)
-        if (result.success) setRelease(result.release)
+        if (result.success) setHistory(result.state)
         else setError(result.error)
       } catch {
         setError("Could not reach the server. Please try again.")
@@ -238,6 +250,41 @@ export function WorkflowEditor({
   useEffect(() => {
     onDirtyChange?.(dirty)
   }, [dirty, onDirtyChange])
+
+  function selectVersion(version: number) {
+    if (saving.current || version === history.currentVersion) return
+    saving.current = true
+    setError("")
+    startSwitch(async () => {
+      try {
+        const result = await switchTemplateVersion(
+          templateId,
+          version,
+          saved.revision
+        )
+        if (!result.success) {
+          setError(result.error)
+          return
+        }
+        const nextNodes = canvasNodes(result.draft, availableBots)
+        const nextEdges = canvasEdges(result.draft)
+        const nextViewport = result.draft.viewport
+        setNodes(nextNodes)
+        setEdges(nextEdges)
+        setViewport(nextViewport)
+        void flow.current?.setViewport(nextViewport)
+        setSaved({
+          revision: result.revision,
+          text: JSON.stringify(draftFrom(nextNodes, nextEdges, nextViewport)),
+        })
+        setHistory(result.state)
+      } catch {
+        setError("Could not switch versions. Please try again.")
+      } finally {
+        saving.current = false
+      }
+    })
+  }
 
   function addNode() {
     if (!stage.current || !flow.current) return
@@ -291,9 +338,13 @@ export function WorkflowEditor({
           saved.revision,
           current
         )
-        if (result.success)
+        if (result.success) {
+          setHistory((previous) => ({
+            ...previous,
+            draftPublished: result.draftPublished,
+          }))
           setSaved({ revision: result.revision, text: JSON.stringify(current) })
-        else setError(result.error)
+        } else setError(result.error)
       } catch {
         setError("Could not reach the server. Please try again.")
       } finally {
@@ -337,31 +388,43 @@ export function WorkflowEditor({
             <h1 className="truncate type-section-title">{template.name}</h1>
           )}
           <p role="status" className="text-xs text-muted-foreground">
-            {pending
-              ? "Saving…"
-              : publishing
-                ? "Publishing…"
-                : dirty
-                  ? "Unsaved changes"
-                  : saved.revision
-                    ? "Draft saved"
-                    : "Workflow draft"}
-            {release && ` · Published v${release.version}`}
+            {switching
+              ? "Switching version…"
+              : pending
+                ? "Saving…"
+                : publishing
+                  ? "Publishing…"
+                  : dirty
+                    ? "Unsaved changes"
+                    : saved.revision
+                      ? "Draft saved"
+                      : "Workflow draft"}
+            {history.currentVersion !== null &&
+              ` · Current v${history.currentVersion}`}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={addNode}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={switching}
+          onClick={addNode}
+        >
           <PlusIcon data-icon="inline-start" /> Add node
         </Button>
         <WorkflowTemplateMenu
           template={template}
           dirty={dirty}
-          disabled={pending || publishing}
+          disabled={pending || publishing || switching}
           onSave={save}
           onPublish={publish}
-          canPublish={
-            !dirty && nodes.length > 0 && release?.revision !== saved.revision
-          }
+          canPublish={!dirty && nodes.length > 0 && !history.draftPublished}
           onChange={changeTemplate}
+        />
+        <WorkflowVersions
+          state={history}
+          busy={pending || publishing || switching}
+          hasDraftChanges={dirty || !history.draftPublished}
+          onSwitch={selectVersion}
         />
       </header>
       {error && (
@@ -369,7 +432,10 @@ export function WorkflowEditor({
           {error}
         </p>
       )}
-      <div className="flex min-h-0 flex-1 flex-col @min-[660px]:flex-row">
+      <div
+        inert={switching}
+        className="flex min-h-0 flex-1 flex-col @min-[660px]:flex-row"
+      >
         <div ref={stage} className="relative min-h-0 min-w-0 flex-1">
           <ReactFlow<Step, Edge>
             proOptions={{ hideAttribution: true }}
