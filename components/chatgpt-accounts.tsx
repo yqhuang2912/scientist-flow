@@ -1,5 +1,12 @@
 "use client"
-import { useEffect, useId, useState, useTransition } from "react"
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useTransition,
+  type Ref,
+} from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { EllipsisIcon, PlusIcon, UserRoundIcon } from "lucide-react"
@@ -37,6 +44,10 @@ import {
   SettingsFormError,
 } from "./settings-shell"
 import { DialogFooter } from "./ui/dialog"
+import {
+  useSettingsFormGuard,
+  type SettingsLeaveGuard,
+} from "./settings-form-guard"
 
 type Edit = { row?: ConnectionSummary; rename?: boolean }
 export function ChatGPTAccounts({
@@ -194,10 +205,12 @@ export function ChatGPTAccounts({
 }
 export function ChatProfileEditor({
   edit,
+  guard,
   close,
   reload,
 }: {
   edit: Edit
+  guard: Ref<SettingsLeaveGuard>
   close: () => void
   reload: () => void
 }) {
@@ -214,6 +227,13 @@ export function ChatProfileEditor({
       resolver: zodResolver(profileNameSchema),
       defaultValues: { nickname: row?.nickname ?? "" },
     })
+  const busy = useRef(false)
+  const { requestLeave, discardDialog } = useSettingsFormGuard(
+    guard,
+    form.formState.isDirty && !login,
+    busy,
+    "account"
+  )
   useEffect(() => {
     if (!login) return
     let active = true,
@@ -244,45 +264,46 @@ export function ChatProfileEditor({
       clearTimeout(timer)
     }
   }, [login, close, reload])
+  function submit(values: { nickname: string }) {
+    if (busy.current || login) return
+    setError("")
+    const windowRef = edit.rename ? null : window.open("about:blank", "_blank")
+    if (windowRef) windowRef.opener = null
+    busy.current = true
+    start(async () => {
+      try {
+        const target = row ? { id: row.id, revision: row.revision } : undefined
+        if (edit.rename) {
+          const r = await renameProfile(values, target)
+          if (!r.success) {
+            setError(r.error)
+            return
+          }
+          reload()
+          close()
+          return
+        }
+        const r = await beginProfileLogin(values, target)
+        if (!r.success) {
+          windowRef?.close()
+          setError(r.error)
+          return
+        }
+        if (windowRef) windowRef.location.replace(r.data.startUrl)
+        setLogin({ ...r.data, opened: !!windowRef })
+      } catch {
+        windowRef?.close()
+        setError("Could not start the account operation.")
+      } finally {
+        busy.current = false
+      }
+    })
+  }
   return (
     <SettingsEditorPane label="ChatGPT account">
       <SettingsFormBody
         id={id}
-        onSubmit={form.handleSubmit((values) => {
-          setError("")
-          const windowRef = edit.rename
-            ? null
-            : window.open("about:blank", "_blank")
-          if (windowRef) windowRef.opener = null
-          start(async () => {
-            try {
-              const target = row
-                ? { id: row.id, revision: row.revision }
-                : undefined
-              if (edit.rename) {
-                const r = await renameProfile(values, target)
-                if (!r.success) {
-                  setError(r.error)
-                  return
-                }
-                reload()
-                close()
-                return
-              }
-              const r = await beginProfileLogin(values, target)
-              if (!r.success) {
-                windowRef?.close()
-                setError(r.error)
-                return
-              }
-              if (windowRef) windowRef.location.replace(r.data.startUrl)
-              setLogin({ ...r.data, opened: !!windowRef })
-            } catch {
-              windowRef?.close()
-              setError("Could not start the account operation.")
-            }
-          })
-        })}
+        onSubmit={(event) => void form.handleSubmit(submit)(event)}
       >
         <FieldGroup>
           <Field data-invalid={!!form.formState.errors.nickname}>
@@ -291,7 +312,7 @@ export function ChatProfileEditor({
               id={id + "-name"}
               {...form.register("nickname")}
               placeholder="e.g. Research account"
-              readOnly={!!row && !edit.rename}
+              readOnly={pending || !!login || (!!row && !edit.rename)}
               aria-invalid={!!form.formState.errors.nickname}
             />
             <FieldError errors={[form.formState.errors.nickname]} />
@@ -315,7 +336,12 @@ export function ChatProfileEditor({
         <SettingsFormError error={error} />
       </SettingsFormBody>
       <DialogFooter className="m-0 rounded-none">
-        <Button size="sm" variant="outline" disabled={pending} onClick={close}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={pending}
+          onClick={() => requestLeave(close)}
+        >
           {login ? "Back" : "Cancel"}
         </Button>
         <Button
@@ -329,6 +355,7 @@ export function ChatProfileEditor({
           {edit.rename ? "Save changes" : "Continue with ChatGPT"}
         </Button>
       </DialogFooter>
+      {discardDialog}
     </SettingsEditorPane>
   )
 }

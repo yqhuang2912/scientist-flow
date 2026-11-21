@@ -79,6 +79,7 @@ export function ModelConnectionsPanel({
     return (
       <ChatProfileEditor
         edit={profile}
+        guard={guard}
         close={closeProfile}
         reload={reloadRows}
       />
