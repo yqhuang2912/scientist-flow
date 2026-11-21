@@ -12,6 +12,8 @@ import {
   turnProgress,
   TurnConflict,
 } from "@/lib/chat-jobs.server"
+import { textEventResponse } from "@/lib/chat-live.server"
+import { isActiveTurn } from "@/lib/chat-job"
 import { wakeChatWorker } from "@/lib/chat-worker.server"
 
 export const runtime = "nodejs"
@@ -25,6 +27,10 @@ async function handle(request: Request, { params }: Context) {
     const turnId = new URL(request.url).searchParams.get("id")
     if (request.method === "GET" && turnId) {
       const progress = await turnProgress(chatId, turnId)
+      if (progress && request.headers.get("accept")?.includes("text/event-stream"))
+        return isActiveTurn(progress.state)
+          ? textEventResponse(chatId, turnId, request.signal)
+          : new Response(null, { status: 204 })
       return progress
         ? Response.json(progress, { headers: { "Cache-Control": "no-store" } })
         : new Response("Turn not found.", { status: 404 })

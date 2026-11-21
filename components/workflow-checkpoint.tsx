@@ -1,6 +1,7 @@
 "use client"
 
 import { useId, useState } from "react"
+import { cn } from "@/lib/utils"
 import { Button } from "./ui/button"
 import { ChatMentionInput } from "./chat-mention-input"
 import { mentionTargets, type Mention } from "@/lib/chat-mentions"
@@ -16,11 +17,13 @@ export function WorkflowCheckpointPanel({
   disabled,
   reviewed,
   beforeStart,
+  currentStage,
   change,
 }: {
   bots: ChatWithBot["bots"]
   checkpoint: WorkflowCheckpoint
   disabled: boolean
+  currentStage?: "experiment" | "checkpoint" | "review"
   beforeStart: boolean
   reviewed: boolean
   change: (command: CheckpointCommand) => Promise<boolean>
@@ -34,9 +37,15 @@ export function WorkflowCheckpointPanel({
   return (
     <section aria-label="人工介入" className="border-t pt-2 text-sm">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="mr-auto font-medium">
-          子集实验 → 人工介入 → 实验评判
-        </span>
+        <ol aria-label="工作流步骤" className="mr-auto flex items-center gap-1 font-medium">
+          {([["experiment", "子集实验"], ["checkpoint", "人工介入"], ["review", "实验评判"]] as const).map(([id, label], index) => (
+            <li key={id} aria-current={currentStage === id ? "step" : undefined}
+              className={cn("flex items-center gap-1", currentStage && currentStage !== id && "text-muted-foreground")}>
+              {index > 0 && <span aria-hidden className="font-normal text-muted-foreground">→</span>}
+              <span className={cn(currentStage === id && "rounded bg-accent px-1 text-accent-foreground")}>{label}</span>
+            </li>
+          ))}
+        </ol>
         {writable && phase === "open" && (
           <Button
             size="sm"

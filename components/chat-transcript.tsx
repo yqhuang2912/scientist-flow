@@ -418,6 +418,7 @@ export function ChatTranscript({
   isGroup,
   status,
   pendingBotId,
+  workingMessageId,
   onApproval,
 }: {
   directChatId?: string
@@ -426,6 +427,7 @@ export function ChatTranscript({
   isGroup: boolean
   status: ChatStatus
   pendingBotId?: string
+  workingMessageId?: string
   onApproval?: RespondToApproval
 }) {
   const [draft, setDraft] = useState<MemoryDraft | null>(null)
@@ -443,10 +445,11 @@ export function ChatTranscript({
   const last = messages.at(-1)
   const busy = status === "streaming" || status === "submitted"
   const pendingBot =
+    (workingMessageId ? bots.find((bot) => bot.id === pendingBotId) : undefined) ??
     bots.find((bot) => bot.id === (last && getMessageBotId(last))) ??
     bots.find((bot) => bot.id === pendingBotId)
   const waiting =
-    busy && (!last || last.role !== "assistant" || last.parts.length === 0)
+    busy && (!last || last.role !== "assistant" || last.parts.length === 0 || (!!workingMessageId && !messages.some(m => m.id === workingMessageId)))
   return (
     <MessageScrollerProvider autoScroll defaultScrollPosition="end">
       <MessageScroller className="flex-1">
@@ -498,7 +501,7 @@ export function ChatTranscript({
                       bots={bots}
                       isGroup={isGroup}
                       streaming={
-                        status === "streaming" && message.id === last?.id
+                        status === "streaming" && message.id === (workingMessageId ?? last?.id)
                       }
                       busy={busy}
                       onApproval={

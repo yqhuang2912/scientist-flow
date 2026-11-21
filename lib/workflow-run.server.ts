@@ -20,6 +20,7 @@ import {
   currentLease,
   enqueueChatTurn,
   saveProgress,
+  saveWorkingStep,
   TurnConflict,
 } from "./chat-jobs.server"
 import { installationOwner } from "./model-credentials.server"
@@ -42,6 +43,7 @@ import {
 } from "./workflow-subset"
 
 import { initialCheckpoint, type CheckpointCommand } from "./workflow-checkpoint"
+import { liveWriter } from "./chat-live.server"
 import { reachCheckpoint } from "./workflow-checkpoint.server"
 
 export type WorkflowInput = {
@@ -231,7 +233,11 @@ export async function startWorkflow(chat: ChatWithBot, retryRejected = false, ch
       }
       const [queued] = await db
         .update(chatTurns)
-        .set({ state: "queued", error: null })
+        .set({
+          state: "queued",
+          error: null,
+          userMessage: sql`jsonb_set(${chatTurns.userMessage}, '{metadata,restartedAt}', to_jsonb(now()))`,
+        })
         .where(
           and(
             eq(chatTurns.chatId, chat.id),
@@ -439,6 +445,11 @@ export async function runWorkflow(
           throw new Error(
             "This step was interrupted. Its model request will not be repeated automatically."
           )
+        const working = {
+          nodeId: step.id, title: step.title || (step.stage === 1 ? "子集实验" : "实验评判"),
+          stage: step.stage, supplement: !!step.intervention, botId: bot.id, messageId: row.messageId,
+        }
+        await saveWorkingStep(lease, working)
         let evidence = ""
         let reviewFacts: ReturnType<typeof measureSubset>["review"] | undefined
         let problem: Error | undefined
@@ -556,13 +567,23 @@ export async function runWorkflow(
           },
         })
         let result: UIMessage | undefined
-        for await (const part of readUIMessageStream({
-          stream,
-          onError: () => {
-            failure = true
-          },
-        }))
-          result = part
+        const writer = liveWriter(chatId, id)
+        let lastSave = 0
+        try {
+          for await (const part of readUIMessageStream({ stream, onError: () => { failure = true } })) {
+            result = part
+            // Review model output is a private structured proposal until verifyReview succeeds.
+            if (reviewSource || failure) continue
+            writer.publish(part)
+            const body = part.parts.find(p => p.type === "text")
+            if (body?.text && Date.now() - lastSave >= 750) {
+              await saveWorkingStep(lease, { ...working, draft: body.text })
+              lastSave = Date.now()
+            }
+          }
+        } finally {
+          writer.close()
+        }
         signal.throwIfAborted()
         const answer = result?.parts
           .flatMap((p) => (p.type === "text" ? [p.text] : []))
@@ -634,7 +655,7 @@ export async function runWorkflow(
     }
     if (!message) throw new Error("Missing completed step.")
     if (!replies.some((m) => m.id === message.id)) replies.push(message)
-    await saveProgress(lease, replies)
+    await saveProgress(lease, replies, true)
     previous = message
     if (step.intervention) supplement = message
     else if (step.stage === 1) experiment = message

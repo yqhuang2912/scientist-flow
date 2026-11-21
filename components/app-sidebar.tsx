@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import type { TaskTemplateSummary } from "@/db/schema"
 import type { SettingsLeaveGuard } from "@/components/settings-form-guard"
-import { PlusIcon, SearchIcon, SettingsIcon, DiamondIcon } from "lucide-react"
+import { useChatMarkers } from "./use-chat-markers"
+import type { ChatMarker } from "@/lib/chat-activity-status"
+import { LoaderCircleIcon, PauseIcon, PlusIcon, SearchIcon, SettingsIcon, DiamondIcon } from "lucide-react"
 import { usePathname, useRouter } from "next/navigation"
 
 import { BotName } from "@/components/bot-name"
@@ -58,6 +60,18 @@ function isMac() {
   return /mac/i.test(navigator.platform)
 }
 
+function ActivityMark({ state }: { state: ChatMarker }) {
+  const label = state === "running" ? "Running" : state === "waiting" ? "Waiting for your input" : "Unread reply"
+  return (
+    <span role="img" aria-label={label} title={label}
+      className="flex size-4 shrink-0 items-center justify-center group-data-[collapsible=icon]:absolute group-data-[collapsible=icon]:right-0 group-data-[collapsible=icon]:bottom-0 group-data-[collapsible=icon]:rounded-full group-data-[collapsible=icon]:bg-sidebar">
+      {state === "running" ? <LoaderCircleIcon aria-hidden className="size-3 motion-safe:animate-spin text-muted-foreground" />
+        : state === "waiting" ? <PauseIcon aria-hidden className="size-3 text-amber-600 dark:text-amber-400" />
+          : <span aria-hidden className="size-2 rounded-full bg-blue-500" />}
+    </span>
+  )
+}
+
 function BrandHeader() {
   const { state, isMobile } = useSidebar()
   const collapsed = !isMobile && state === "collapsed"
@@ -109,6 +123,7 @@ export function AppSidebar({
   bots: BotSummary[]
 }) {
   const pathname = usePathname()
+  const markers = useChatMarkers(pathname)
   const router = useRouter()
   const { setOpenMobile } = useSidebar()
   const [taskDialogOpen, setTaskDialogOpen] = useState(false)
@@ -288,7 +303,7 @@ export function AppSidebar({
                       render={<button type="button" />}
                       isActive={pathname === `/chats/${chat.id}`}
                       className={cn(
-                        "text-sidebar-foreground group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:p-0!",
+                        "relative text-sidebar-foreground group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:p-0!",
                         "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground"
                       )}
                       onClick={() => handleChatSelect(chat.id)}
@@ -313,14 +328,14 @@ export function AppSidebar({
                       <span className="min-w-0 flex-1 truncate text-[13px] leading-5 font-medium group-data-[collapsible=icon]:hidden">
                         {chat.name}
                       </span>
-                      <time
+                      {markers[chat.id] ? <ActivityMark state={markers[chat.id]} /> : <time
                         dateTime={chat.lastMessageAt}
                         title={chat.lastMessageAtTitle}
                         aria-label={chat.lastMessageAtTitle}
                         className="shrink-0 text-[11px] font-normal whitespace-nowrap text-muted-foreground tabular-nums group-data-[collapsible=icon]:hidden"
                       >
                         {chat.lastMessageAtLabel}
-                      </time>
+                      </time>}
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}

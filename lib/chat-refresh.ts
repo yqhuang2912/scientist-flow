@@ -1,3 +1,4 @@
+import { CHAT_REMOTE_TURN, type ChatActivityRow } from "./chat-activity-status"
 import {
   isActiveTurn,
   type ChatSnapshot,
@@ -12,6 +13,7 @@ type ChatRefreshOptions = {
   url: string
   activeId: string | null
   retryIdle: boolean
+  refreshOnActivity?: (row: ChatActivityRow) => boolean
   canRead: () => boolean
   onSnapshot: (snapshot: ChatSnapshot) => void
   onProgress: (turn: ChatTurnProgress) => void
@@ -23,6 +25,7 @@ export function watchChatRefresh({
   url,
   activeId,
   retryIdle,
+  refreshOnActivity,
   canRead,
   onSnapshot,
   onProgress,
@@ -83,11 +86,16 @@ export function watchChatRefresh({
     }
   }
 
+  function observed(event: Event) {
+    if (refreshOnActivity?.((event as CustomEvent<ChatActivityRow>).detail)) void refresh()
+  }
   if (activeId) void refresh()
   focusTarget.addEventListener("focus", refresh)
+  focusTarget.addEventListener(CHAT_REMOTE_TURN, observed)
   return () => {
     controller.abort()
     clearTimeout(timer)
     focusTarget.removeEventListener("focus", refresh)
+    focusTarget.removeEventListener(CHAT_REMOTE_TURN, observed)
   }
 }

@@ -9,6 +9,9 @@ import {
 } from "react"
 import { nanoid } from "nanoid"
 import { CircleAlertIcon } from "lucide-react"
+import { CHAT_ACTIVITY_CHANGED } from "@/lib/chat-activity-status"
+import { withLiveText, type WorkingStep } from "@/lib/chat-live"
+import { useLiveChatText } from "./use-live-chat-text"
 import { WorkflowCheckpointPanel } from "./workflow-checkpoint"
 import {
   checkpointTranscript,
@@ -56,10 +59,19 @@ export function ChatInterface({
   initial: ChatSnapshot
 }) {
   const [snapshot, setSnapshot] = useState(initial)
-  const transcript = useMemo(
-    () => checkpointTranscript(snapshot.messages),
-    [snapshot.messages]
-  )
+  const url = "/api/chats/" + encodeURIComponent(chat.id) + "/messages"
+  const active = snapshot.messages.find(m => m.id === snapshot.activeId && m.role === "user")
+  const activity = active?.metadata as { workingStep?: WorkingStep; workflow?: unknown; checkpoint?: WorkflowCheckpoint } | undefined
+  const waiting = activity?.checkpoint?.phase === "waiting"
+  useEffect(() => {
+    window.dispatchEvent(new Event(CHAT_ACTIVITY_CHANGED))
+  }, [chat.id, snapshot.activeId, waiting])
+  const working = activity?.workingStep
+  const live = useLiveChatText(url, waiting ? null : snapshot.activeId)
+  const transcript = useMemo(() => {
+    const durable = working?.draft ? [{ id: working.messageId, botId: working.botId, part: 0, text: working.draft }] : []
+    return checkpointTranscript(withLiveText(snapshot.messages, [...durable, ...live]))
+  }, [snapshot.messages, working, live])
   const [pendingBotId, setPendingBotId] = useState(chat.bots[0]?.id ?? "")
   const [networkError, setNetworkError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
@@ -93,12 +105,12 @@ export function ChatInterface({
   const pending = useRef<{ input: string; id: string } | null>(null)
   const version = useRef(0)
   const submitting = useRef(false)
-  const url = "/api/chats/" + encodeURIComponent(chat.id) + "/messages"
-
+  const lastKnownTurn = snapshot.messages.findLast(m => m.role === "user")?.id
   useEffect(() => {
     if (sending) return
     const epoch = version.current
     return watchChatRefresh({
+      refreshOnActivity: row => row.chatId === chat.id && !snapshot.activeId && (isActiveTurn(row.state) || row.turnId !== lastKnownTurn),
       focusTarget: window,
       url,
       activeId: snapshot.activeId,
@@ -112,7 +124,7 @@ export function ChatInterface({
         setSnapshot((current) => mergeTurnProgress(current, turn)),
       onNetworkError: setNetworkError,
     })
-  }, [chat.kind, snapshot.activeId, sending, url])
+  }, [chat.id, chat.kind, snapshot.activeId, sending, url, lastKnownTurn])
 
   async function submit({
     text,
@@ -370,7 +382,8 @@ export function ChatInterface({
             ? "ready"
             : status
         }
-        pendingBotId={pendingBotId}
+        pendingBotId={working?.botId ?? pendingBotId}
+        workingMessageId={waiting ? undefined : working?.messageId}
       />
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 pb-3 sm:px-6">
         {chat.template && (
@@ -387,8 +400,8 @@ export function ChatInterface({
               >
                 {workflowId && snapshot.activeId === workflowId
                   ? checkpoint?.phase === "waiting"
-                    ? "等待人工介入"
-                    : "Workflow running"
+                    ? "Paused"
+                    : "Running"
                   : retryWorkflow
                     ? "Retry rate-limited step"
                     : knownWorkflow
@@ -396,6 +409,13 @@ export function ChatInterface({
                       : "Start workflow"}
               </Button>
             </div>
+            {activity?.workflow != null && (
+              <p role="status" className="break-words text-sm font-medium" aria-live="polite">
+                {waiting ? "等待人工介入 · 子集实验已完成"
+                  : working ? `第 ${working.stage} / 2 步 · ${chat.bots.find(bot => bot.id === working.botId)?.name ?? "Bot"} · ${working.title}`
+                    : "正在准备下一步…"}
+              </p>
+            )}
             {checkpoint && (
               <WorkflowCheckpointPanel
                 bots={chat.bots}
@@ -407,6 +427,7 @@ export function ChatInterface({
                   (knownWorkflow && snapshot.activeId !== workflowId)
                 }
                 beforeStart={!knownWorkflow}
+                currentStage={waiting || working?.supplement ? "checkpoint" : working?.stage === 1 ? "experiment" : working?.stage === 2 ? "review" : undefined}
                 reviewed={snapshot.messages.some((message) => {
                   const meta = message.metadata as
                     | { workflowStep?: number; userMessageId?: string }

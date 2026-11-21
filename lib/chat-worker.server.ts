@@ -16,10 +16,12 @@ import {
   ChatLeaseLost,
 } from "./chat-jobs.server"
 import { installationOwner } from "./model-credentials.server"
+import { liveWriter } from "./chat-live.server"
 import { runWorkflow, type WorkflowInput } from "./workflow-run.server"
 
 type Job = typeof chatTurns.$inferSelect
 async function execute(job: Job, lease: string) {
+  const live = liveWriter(job.chatId, job.id)
   const controller = new AbortController()
   let checking = false
   const beat = setInterval(async () => {
@@ -101,6 +103,7 @@ async function execute(job: Job, lease: string) {
         let wroteBody = false
         for await (const message of readUIMessageStream({ stream })) {
           latest = message
+          live.publish(message)
           const pos = replies.findIndex((m) => m.id === message.id)
           if (pos < 0) replies.push(message)
           else replies[pos] = message
@@ -148,6 +151,7 @@ async function execute(job: Job, lease: string) {
     if (!(controller.signal.reason instanceof ChatLeaseLost))
       await settleTurn(lease, replies, "Could not complete this chat turn.")
   } finally {
+    live.close()
     clearInterval(beat)
   }
 }

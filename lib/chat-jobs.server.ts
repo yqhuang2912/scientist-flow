@@ -19,6 +19,7 @@ import type { ChatJobInput, ChatSnapshot, ChatTurnAck } from "./chat-job"
 import type { UIMessage } from "ai"
 import type { WorkflowInput } from "./workflow-run.server"
 
+import type { WorkingStep } from "./chat-live"
 import type { WorkflowCheckpoint } from "./workflow-checkpoint"
 
 const t = chatTurns
@@ -30,6 +31,7 @@ export async function turnProgress(chatId: string, id: string) {
   const [row] = await db
     .select({
       turnId: t.id,
+      workingStep: sql<WorkingStep | null>`${t.userMessage} #> '{metadata,workingStep}'`,
       checkpoint: sql<WorkflowCheckpoint | null>`${t.userMessage} #> '{metadata,checkpoint}'`,
       replies: t.replies,
       state: t.state,
@@ -226,10 +228,20 @@ export async function heartbeat(lease: string) {
   return row
 }
 
-export async function saveProgress(lease: string, replies: UIMessage[]) {
+export async function saveWorkingStep(lease: string, step: WorkingStep) {
+  const [row] = await db.update(t).set({
+    userMessage: sql`jsonb_set(${t.userMessage}, '{metadata,workingStep}', ${JSON.stringify(step)}::jsonb)`,
+  }).where(currentLease(lease)).returning({ id: t.id })
+  if (!row) throw new ChatLeaseLost("Lost chat turn lease")
+}
+
+export async function saveProgress(lease: string, replies: UIMessage[], stepFinished = false) {
   const [row] = await db
     .update(t)
-    .set({ replies })
+    .set({
+      replies,
+      ...(stepFinished && { userMessage: sql`${t.userMessage} #- '{metadata,workingStep}'` }),
+    })
     .where(currentLease(lease))
     .returning({ id: t.id })
   if (!row) throw new ChatLeaseLost("Lost chat turn lease")
@@ -245,6 +257,7 @@ export async function settleTurn(
     .set({
       lease: null,
       leaseUntil: null,
+      userMessage: sql`${t.userMessage} #- '{metadata,workingStep}'`,
       replies,
       error,
       state: sql`case when ${t.cancelRequested} then 'cancelled' when ${error !== null} then 'failed' else 'completed' end`,

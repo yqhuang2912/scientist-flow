@@ -1,4 +1,5 @@
 import type { UIMessage } from "ai"
+import type { WorkingStep } from "./chat-live"
 import type { WorkflowCheckpoint } from "./workflow-checkpoint"
 import { z } from "zod"
 import { storedAttachmentSchema } from "./chat-composer"
@@ -45,6 +46,7 @@ export type ChatSnapshot = {
 }
 
 export type ChatTurnProgress = {
+  workingStep?: WorkingStep | null
   checkpoint?: WorkflowCheckpoint | null
   turnId: string
   replies: UIMessage[]
@@ -95,10 +97,14 @@ export function mergeTurnProgress(
     current.messages.slice(start + 1, end).map((m) => [m.id, m])
   )
   for (const message of turn.replies) replies.set(message.id, message)
+  let user = mergeCheckpoint(current.messages[start], turn.checkpoint)
+  if (turn.workingStep !== undefined) {
+    user = { ...user, metadata: { ...(user.metadata as object), workingStep: turn.workingStep } }
+  }
   return {
     messages: [
       ...current.messages.slice(0, start),
-      mergeCheckpoint(current.messages[start], turn.checkpoint),
+      user,
       ...replies.values(),
       ...current.messages.slice(end),
     ],

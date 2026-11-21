@@ -181,7 +181,13 @@ test(
       const { startWorkflow, runWorkflow, enqueueReviewCorrection } =
         await import("../lib/workflow-run.server")
       const { getChat } = await import("../queries/chats")
-      const { chatSnapshot, leaseChatTurn, settleTurn } =
+      const { textEventResponse } = await import("../lib/chat-live.server")
+      const { applyTextFrame } = await import("../lib/chat-live")
+      const experimentGate = Promise.withResolvers<void>()
+      const reviewGate = Promise.withResolvers<void>()
+      const reviewStarted = Promise.withResolvers<void>()
+      const firstText = Promise.withResolvers<void>()
+      const { chatSnapshot, turnProgress, leaseChatTurn, settleTurn } =
         await import("../lib/chat-jobs.server")
       await db.batch([
         db.insert(modelConnections).values(
@@ -284,10 +290,19 @@ test(
             choices: [{ index: 0, delta, finish_reason }],
           }) +
           "\n\n"
+        const gate = prompts.length === 2 ? experimentGate : prompts.length === 4 ? reviewGate : undefined
+        if (prompts.length === 4) reviewStarted.resolve()
+        const cut = Math.min(8, answer.length)
+        const encoder = new TextEncoder()
         return new Response(
-          event({ role: "assistant", content: answer }, null) +
-            event({}, "stop") +
-            "data: [DONE]\n\n",
+          new ReadableStream({
+            async start(controller) {
+              controller.enqueue(encoder.encode(event({ role: "assistant", content: answer.slice(0, cut) }, null)))
+              if (gate) await gate.promise
+              controller.enqueue(encoder.encode(event({ content: answer.slice(cut) }, null) + event({}, "stop") + "data: [DONE]\n\n"))
+              controller.close()
+            },
+          }),
           { headers: { "Content-Type": "text/event-stream" } }
         )
       }
@@ -343,7 +358,47 @@ test(
         })
         .where(eq(bots.id, botIds[0]))
       await startWorkflow(chat, true)
-      await run(false)
+      const subscription = new AbortController()
+      const live = textEventResponse(chatId, first.turnId, subscription.signal)
+      const visible = new Map<string, import("../lib/chat-live").LiveText>()
+      const frames = (async () => {
+        const reader = live.body!.getReader()
+        for (;;) {
+          const { value, done } = await reader.read()
+          if (done) break
+          const data = new TextDecoder().decode(value)
+          if (!data.startsWith("data: ")) continue
+          const frame = JSON.parse(data.slice(6))
+          const text = applyTextFrame(visible.get(frame.id), frame)!
+          visible.set(frame.id, text)
+          if (text.text === "First pa") firstText.resolve()
+        }
+      })()
+      const running = run(false)
+      try {
+        await Promise.race([firstText.promise, running.then(() => { throw Error("Missing live prefix") })])
+        const active = await turnProgress(chatId, first.turnId)
+        assert.equal(active.workingStep?.stage, 1)
+        assert.equal(active.workingStep?.botId, botIds[0])
+        assert.equal(active.replies.length, 0)
+        experimentGate.resolve()
+        await Promise.race([reviewStarted.promise, running.then(() => { throw Error("Missing review") })])
+        const review = await turnProgress(chatId, first.turnId)
+        assert.equal(review.workingStep?.stage, 2)
+        assert.equal(review.workingStep?.botId, botIds[2])
+        assert.equal(review.workingStep?.draft, undefined)
+        assert.equal(review.replies.length, 2)
+        reviewGate.resolve()
+        await running
+      } finally {
+        experimentGate.resolve()
+        reviewGate.resolve()
+        subscription.abort()
+        await frames
+        await running
+      }
+      assert.deepEqual([...visible.values()].map(draft => draft.text), ["First participant " + chatId, "Mira report unique to " + chatId])
+      assert.equal((await turnProgress(chatId, first.turnId)).workingStep, null)
       const before = await chatSnapshot(chatId)
       assert.deepEqual(
         before.messages.map((m) => m.role),
