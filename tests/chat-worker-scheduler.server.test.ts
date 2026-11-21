@@ -88,3 +88,52 @@ test("a rejected execution releases its slot and an already queued chat is claim
   held.open()
   await nextTurn()
 })
+
+test("a wake during an empty queue check is retained, and cancellation frees a slot", async () => {
+  const slow = gate()
+  const checking = gate()
+  const checked = gate()
+  const cancel = new AbortController()
+  const queue = ["A"]
+  const events: string[] = []
+  const wake = createChatWorker({
+    claim: async () => {
+      const chatId = queue.shift()
+      if (chatId) return { chatId }
+    },
+    execute: async ({ chatId }) => {
+      events.push(chatId + " started")
+      if (chatId === "A") await slow.wait
+      if (chatId === "B") {
+        await new Promise<void>((resolve) =>
+          cancel.signal.addEventListener("abort", () => resolve(), {
+            once: true,
+          })
+        )
+        events.push("B cancelled")
+        return
+      }
+      events.push(chatId + " finished")
+    },
+    hasPending: async () => {
+      checking.open()
+      await checked.wait
+      return false
+    },
+  })
+  wake()
+  await checking.wait
+  queue.push("B", "C")
+  wake()
+  checked.open()
+  await nextTurn()
+  assert.deepEqual(events, ["A started", "B started"])
+  assert.deepEqual(queue, ["C"])
+
+  cancel.abort()
+  await nextTurn()
+  assert.deepEqual(events.slice(2), ["B cancelled", "C started", "C finished"])
+  slow.open()
+  await nextTurn()
+  assert.equal(events.at(-1), "A finished")
+})
