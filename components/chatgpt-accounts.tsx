@@ -12,6 +12,7 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { EllipsisIcon, PlusIcon, UserRoundIcon } from "lucide-react"
 import { profileNameSchema } from "@/db/schema"
 import { connectionStatus, type ConnectionSummary } from "@/lib/model-catalog"
+import { cn } from "@/lib/utils"
 import {
   beginProfileLogin,
   profileLoginProgress,
@@ -20,6 +21,7 @@ import {
   updateConnectionCatalog,
 } from "@/actions/model-connections"
 import { Button } from "./ui/button"
+import { compactItemStyles } from "./ui/compact-styles"
 import { Input } from "./ui/input"
 import { Field, FieldGroup, FieldLabel, FieldError } from "./ui/field"
 import {
@@ -103,32 +105,44 @@ export function ChatGPTAccounts({
         />
       )}
       {matches?.map((r) => (
-        <div
-          key={r.id}
-          className="flex min-w-0 items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-highlight"
-        >
-          <UserRoundIcon className="size-4 shrink-0" />
-          <div className="min-w-0 flex-1">
-            <div className="truncate type-control">
-              {r.nickname}{" "}
-              <span className="text-xs text-muted-foreground">
-                · {r.id.slice(-6)}
-              </span>
-            </div>
-            <p
-              className="truncate text-xs text-muted-foreground"
-              title={r.usedBy?.join(", ")}
-            >
-              {r.state === "ready" ? "Ready" : connectionStatus[r.state]}
-              {r.usedBy?.length ? " · " + r.usedBy.join(", ") : ""}
-            </p>
-            {!!r.needsModelChange?.length && (
-              <p className="text-xs text-destructive">
-                Choose a new model or effort for {r.needsModelChange.join(", ")}
-                .
-              </p>
+        <div key={r.id} className="flex min-w-0 items-center gap-1">
+          <Button
+            variant="ghost"
+            aria-label={"Edit nickname for " + r.nickname}
+            disabled={pending}
+            onClick={() => onEdit({ row: r, rename: true })}
+            className={cn(
+              compactItemStyles,
+              "h-auto min-w-0 flex-1 justify-start py-1.5 text-left"
             )}
-          </div>
+          >
+            <span
+              aria-hidden
+              className="flex w-7 shrink-0 items-center justify-center"
+            >
+              <UserRoundIcon />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate">
+                {r.nickname}{" "}
+                <span className="text-xs text-muted-foreground">
+                  · {r.id.slice(-6)}
+                </span>
+              </span>
+              <span
+                className="block truncate text-xs font-normal text-muted-foreground"
+                title={r.usedBy?.join(", ")}
+              >
+                {r.state === "ready" ? "Ready" : connectionStatus[r.state]}
+                {r.usedBy?.length ? " · " + r.usedBy.join(", ") : ""}
+              </span>
+              {!!r.needsModelChange?.length && (
+                <span className="block whitespace-normal break-words text-xs font-normal text-destructive">
+                  Choose a new model or effort for {r.needsModelChange.join(", ")}.
+                </span>
+              )}
+            </span>
+          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
