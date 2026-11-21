@@ -13,18 +13,18 @@ import {
 } from "../db/schema"
 import { httpToolTurn } from "../lib/bot-http-tools"
 import { toolEvidenceRef } from "../lib/tool-result-evidence"
-import {
-  readProjectDecisions,
-  recordToolProjectDecision,
-  withdrawProjectDecision,
-} from "../lib/project-decisions.server"
 import { getToolPresentation } from "../lib/chat-presentation"
 
 test(
-  "only a successful scoped observation can create a project record; concurrent writes and a lost receipt recover the original",
+  "verified tool calls survive a lost receipt and deduplicate by observation, including when independent measurements agree",
   { skip: process.env.SCIENTISTFLOW_MODEL_DB_TEST !== "1" },
-  async () => {
+  async (t) => {
     const { db } = await import("../lib/db")
+    const {
+      readProjectDecisions,
+      recordToolProjectDecision,
+      withdrawProjectDecision,
+    } = await import("../lib/project-decisions.server")
     const [chatId, otherChat, botId, executionId, messageId, toolId] =
       Array.from({ length: 6 }, () => nanoid())
     const scope = { chatId, botId, executionId, messageId }
@@ -73,31 +73,33 @@ test(
       let value = 0,
         sends = 0,
         status = 200
-      const turn = httpToolTurn(
-        [bound],
-        async () => bound,
-        async () => true,
-        async () => {
-          sends++
-          value = randomInt(20, 10000)
-          return {
-            status,
-            contentType: "application/json",
-            body: Readable.from([
-              JSON.stringify({
-                samples: [{ value, unit: "ms" }],
-                token: "private-test-token",
-              }),
-            ]),
-          }
-        },
-        () => scope
-      )
-      async function observe(callId: string) {
-        const tool = turn.tools.measure
+      const measurementTurn = (identity: typeof scope, sample: () => number) =>
+        httpToolTurn(
+          [bound],
+          async () => bound,
+          async () => true,
+          async () => {
+            sends++
+            value = sample()
+            return {
+              status,
+              contentType: "application/json",
+              body: Readable.from([
+                JSON.stringify({
+                  samples: [{ value, unit: "ms" }],
+                  token: "private-test-token",
+                }),
+              ]),
+            }
+          },
+          () => identity
+        )
+      const turn = measurementTurn(scope, () => randomInt(20, 10000))
+      async function observe(callId: string, meter = turn, identity = scope) {
+        const tool = meter.tools.measure
         const output = await tool.execute!(
           {},
-          { toolCallId: callId, messages: [], context: { botId, executionId } }
+          { toolCallId: callId, messages: [], context: identity }
         )
         const result = await tool.toModelOutput!({
           input: {},
@@ -177,10 +179,16 @@ test(
       ])
       assert.ok(one.success && two.success)
       assert.deepEqual(one, two)
-      const cold = await recordToolProjectDecision(scope, () => undefined, {
-        ...input,
-        decision: "Retry after losing the receipt",
-      })
+      const committed = await readProjectDecisions(chatId)
+      assert.deepEqual(
+        committed.map((r) => [r.id, r.toolEvidence?.toolCallId]),
+        [[one.id, "http-two"]]
+      )
+      const cold = await recordToolProjectDecision(
+        scope,
+        () => undefined,
+        input
+      )
       assert.deepEqual(cold, one)
       // A historical receipt for this exact tool already exists. Neither
       // another group nor a new execution can use it as a fresh observation.
@@ -224,6 +232,59 @@ test(
       )
       assert.equal(receipt.memory?.sourceMessageId, messageId)
       assert.deepEqual(receipt.memory?.evidence, rows[0].toolEvidence)
+
+      // A separate experiment can yield the same value and conclusion.
+      const repeat = { ...scope, executionId: nanoid(), messageId: nanoid() }
+      await db.insert(botExecutions).values({
+        ...repeat,
+        id: repeat.executionId,
+        slot: 1,
+        status: "running",
+        parentExecutionId: nanoid(),
+        runId: nanoid(),
+        userMessageId: nanoid(),
+      })
+      status = 200
+      const secondTurn = measurementTurn(repeat, () => sampled)
+      const secondSource = await observe(
+        "independent-measure",
+        secondTurn,
+        repeat
+      )
+      assert.ok(secondSource && secondSource !== source)
+      const repeatInput = {
+        ...input,
+        source: secondSource,
+        decision: one.decision,
+      }
+      // The real transaction commits before the application loses the acknowledgement.
+      const batch = db.batch.bind(db)
+      const lostReceipt = t.mock.method(
+        db,
+        "batch",
+        async (...args: Parameters<typeof db.batch>) => {
+          await batch(...args)
+          throw new Error("Dropped commit acknowledgement")
+        },
+        { times: 1 }
+      )
+      const second = await recordToolProjectDecision(
+        repeat,
+        secondTurn.observation,
+        repeatInput
+      )
+      assert.equal(lostReceipt.mock.callCount(), 1)
+      assert.ok(second.success)
+      assert.notEqual(second.id, one.id)
+      assert.deepEqual(second.toolEvidence.fields, one.toolEvidence.fields)
+      assert.equal(second.toolEvidence.executionId, repeat.executionId)
+      assert.equal(second.toolEvidence.toolCallId, "independent-measure")
+      assert.deepEqual(
+        await recordToolProjectDecision(repeat, () => undefined, repeatInput),
+        second
+      )
+      assert.equal((await readProjectDecisions(chatId)).length, 2)
+      assert.equal(sends, 4)
       assert.ok(await withdrawProjectDecision(chatId, one.id))
       assert.equal((await save()).success, false)
       assert.equal(
@@ -233,7 +294,7 @@ test(
             .from(projectDecisions)
             .where(eq(projectDecisions.chatId, chatId))
         ).length,
-        1
+        2
       )
     } finally {
       await db.batch([
