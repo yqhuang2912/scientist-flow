@@ -1,10 +1,10 @@
 import "server-only"
-import { randomUUID } from "node:crypto"
-import { and, eq, inArray, sql } from "drizzle-orm"
+import { and, eq, inArray, notInArray, sql } from "drizzle-orm"
 import { readUIMessageStream, type UIMessage } from "ai"
 import { botExecutions, chatTurns } from "../db/schema"
 import { db } from "./db"
 import { runBotTurn } from "./chat-turn.server"
+import { createChatWorker } from "./chat-worker-scheduler"
 import {
   chatSnapshot,
   heartbeat,
@@ -114,57 +114,28 @@ async function execute(job: Job, lease: string) {
   }
 }
 
-type WorkerState = {
-  running: boolean
-  wake: boolean
-  timer?: ReturnType<typeof setTimeout>
-}
 const globalWorker = globalThis as typeof globalThis & {
-  scientistFlowChatWorker?: WorkerState
+  scientistFlowWakeChatWorker?: () => void
 }
 export function wakeChatWorker() {
   if (!process.env.SCIENTISTFLOW_INSTALLATION_ID) return
-  const state = (globalWorker.scientistFlowChatWorker ??= {
-    running: false,
-    wake: false,
-  })
-  clearTimeout(state.timer)
-  state.wake = true
-  if (state.running) return
-  state.running = true
-  async function drain() {
-    let retry = false
-    try {
-      do {
-        state.wake = false
-        const lease = randomUUID()
-        const job = await leaseChatTurn(lease)
-        if (job) {
-          await execute(job, lease)
-          state.wake = true
-        } else {
-          const [pending] = await db
-            .select({ id: chatTurns.id })
-            .from(chatTurns)
-            .where(
-              and(
-                eq(chatTurns.owner, installationOwner()),
-                inArray(chatTurns.state, ["running", "queued"])
-              )
-            )
-            .limit(1)
-          retry = !!pending
-        }
-      } while (state.wake)
-    } catch {
-      retry = true
-    } finally {
-      state.running = false
-      if (retry) {
-        state.timer = setTimeout(wakeChatWorker, 10_000)
-        state.timer.unref()
-      }
-    }
-  }
-  void drain()
+  const wake = (globalWorker.scientistFlowWakeChatWorker ??= createChatWorker({
+    claim: leaseChatTurn,
+    execute,
+    hasPending: async (activeChats) => {
+      const [pending] = await db
+        .select({ id: chatTurns.id })
+        .from(chatTurns)
+        .where(
+          and(
+            eq(chatTurns.owner, installationOwner()),
+            notInArray(chatTurns.chatId, activeChats),
+            inArray(chatTurns.state, ["running", "queued"])
+          )
+        )
+        .limit(1)
+      return !!pending
+    },
+  }))
+  wake()
 }

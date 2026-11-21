@@ -1,6 +1,6 @@
 import "server-only"
 import { createHash } from "node:crypto"
-import { and, asc, eq, inArray, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, notInArray, sql } from "drizzle-orm"
 import { chatTurns, chats } from "../db/schema"
 import { db } from "./db"
 import {
@@ -132,7 +132,7 @@ export async function cancelChatTurn(chatId: string, id: string) {
     )
 }
 
-export async function leaseChatTurn(lease: string) {
+export async function leaseChatTurn(lease: string, activeChats: string[] = []) {
   const owner = installationOwner()
   const [job] = await db
     .update(t)
@@ -143,6 +143,7 @@ export async function leaseChatTurn(lease: string) {
     })
     .where(
       sql`(${t.chatId},${t.id}) = (select chat_id,id from ${t} where owner=${owner} and
+      ${notInArray(t.chatId, activeChats)} and
       (state='queued' or (state='running' and lease_until <= now()))
       order by created_at,id for update skip locked limit 1)`
     )

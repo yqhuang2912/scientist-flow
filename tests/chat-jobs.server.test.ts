@@ -86,6 +86,7 @@ test(
         .set({ leaseUntil: sql`now()-interval '1 second'` })
         .where(and(eq(chatTurns.chatId, chatId), eq(chatTurns.id, id)))
       const fresh = nanoid()
+      assert.equal(await leaseChatTurn(nanoid(), [chatId]), undefined)
       const job = await leaseChatTurn(fresh)
       assert.equal(job.id, id)
       await assert.rejects(saveProgress(oldLease, []))
