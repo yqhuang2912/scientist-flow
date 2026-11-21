@@ -21,6 +21,7 @@ export function SettingsListHeader({
   description,
   noun,
   search,
+  searchLabel = "Search " + title.toLowerCase(),
   onSearch,
   onCreate,
 }: {
@@ -28,10 +29,10 @@ export function SettingsListHeader({
   description: string
   noun?: string
   search: string
+  searchLabel?: string
   onSearch: (query: string) => void
   onCreate?: () => void
 }) {
-  const label = "Search " + title.toLowerCase()
   return (
     <>
       <div>
@@ -41,8 +42,8 @@ export function SettingsListHeader({
       <div className="flex items-center gap-2">
         <Input
           type="search"
-          aria-label={label}
-          placeholder={label + "…"}
+          aria-label={searchLabel}
+          placeholder={searchLabel + "…"}
           value={search}
           onChange={(event) => onSearch(event.target.value)}
         />
@@ -54,6 +55,23 @@ export function SettingsListHeader({
         )}
       </div>
     </>
+  )
+}
+
+export function SettingsListEmpty({
+  label,
+  icon,
+}: {
+  label: string
+  icon: ReactNode
+}) {
+  return (
+    <Empty>
+      <EmptyHeader>
+        <EmptyMedia variant="icon">{icon}</EmptyMedia>
+        <EmptyTitle>{label}</EmptyTitle>
+      </EmptyHeader>
+    </Empty>
   )
 }
 
@@ -72,15 +90,7 @@ export function SettingsList({
   emptyLabel: string
   icon: ReactNode
 }) {
-  if (!items.length)
-    return (
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">{icon}</EmptyMedia>
-          <EmptyTitle>{emptyLabel}</EmptyTitle>
-        </EmptyHeader>
-      </Empty>
-    )
+  if (!items.length) return <SettingsListEmpty icon={icon} label={emptyLabel} />
   return (
     <ul className={compactListStyles}>
       {items.map((item) => (

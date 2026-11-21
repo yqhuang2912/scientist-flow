@@ -57,19 +57,25 @@ export function ModelConnectionsPanel({
   } | null>(null)
   const closeProfile = useCallback(() => setProfile(null), [])
   const [version, reload] = useState(0)
-  const reloadRows = useCallback(() => reload((n) => n + 1), [])
+  const [loading, setLoading] = useState(true)
+  const reloadRows = useCallback(() => {
+    setLoading(true)
+    setError("")
+    reload((n) => n + 1)
+  }, [])
   useEffect(() => {
     let current = true
     getModelConnections()
       .then((r) => {
         if (!current) return
-        if (r.success) {
-          setRows(r.data)
-          setError("")
-        } else setError(r.error)
+        setLoading(false)
+        if (r.success) setRows(r.data)
+        else setError(r.error)
       })
       .catch(() => {
-        if (current) setError("Could not load connections.")
+        if (!current) return
+        setLoading(false)
+        setError("Could not load connections.")
       })
     return () => {
       current = false
@@ -93,45 +99,37 @@ export function ModelConnectionsPanel({
           row={row}
           guard={guard}
           close={() => setEditor(null)}
-          reload={() => reload((n) => n + 1)}
+          reload={reloadRows}
         />
       </SettingsEditorPane>
     )
-  const items = (rows ?? [])
-    .filter((r) => r.provider !== "chatgpt")
-    .filter((r) =>
-      [r.baseUrl, r.nickname].some((s) =>
-        s?.toLowerCase().includes(search.trim().toLowerCase())
-      )
-    )
+  const query = search.trim().toLowerCase()
+  const readyRows = loading || error ? null : rows
+  const gateways = readyRows?.filter((r) => r.provider !== "chatgpt")
   return (
     <SettingsPane className="gap-3" aria-label="Models">
       <SettingsListHeader
         title="Models"
         description="Manage ChatGPT accounts and gateways for your bots."
         search={search}
+        searchLabel="Search accounts and gateways"
         onSearch={setSearch}
       />
+      {loading && <p role="status">Loading connections…</p>}
       {error && (
         <p role="alert">
           {error}{" "}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => reload((n) => n + 1)}
-          >
+          <Button size="sm" variant="outline" onClick={reloadRows}>
             Retry
           </Button>
         </p>
       )}
-      {rows && (
-        <ChatGPTAccounts
-          rows={rows.filter((r) => r.provider === "chatgpt")}
-          search={search}
-          onEdit={setProfile}
-          reload={reloadRows}
-        />
-      )}
+      <ChatGPTAccounts
+        rows={readyRows?.filter((r) => r.provider === "chatgpt")}
+        query={query}
+        onEdit={setProfile}
+        reload={reloadRows}
+      />
       <section aria-label="Custom gateways" className="grid gap-1">
         <div className="flex items-center justify-between">
           <h3 className="type-control font-medium">Custom gateways</h3>
@@ -140,24 +138,30 @@ export function ModelConnectionsPanel({
             Add gateway
           </Button>
         </div>
-        {rows ? (
+        {readyRows && gateways && (
           <SettingsList
             icon={<CableIcon />}
-            emptyLabel={search ? "No matching gateways" : "No gateways yet"}
-            items={items.map((r) => ({
-              id: r.id,
-              name: connectionLabel(r, rows),
-              description:
-                (r.baseUrl === openRouterBaseUrl ? "OpenRouter · " : "") +
-                (r.state === "ready"
-                  ? r.catalog.length + " models"
-                  : connectionStatus[r.state]),
-              icon: <CableIcon />,
-              onSelect: () => setEditor(r.id),
-            }))}
+            emptyLabel={
+              gateways.length ? "No matching gateways" : "No gateways added yet"
+            }
+            items={gateways
+              .filter(
+                (r) =>
+                  r.nickname.toLowerCase().includes(query) ||
+                  r.baseUrl?.toLowerCase().includes(query)
+              )
+              .map((r) => ({
+                id: r.id,
+                name: connectionLabel(r, readyRows),
+                description:
+                  (r.baseUrl === openRouterBaseUrl ? "OpenRouter · " : "") +
+                  (r.state === "ready"
+                    ? r.catalog.length + " models"
+                    : connectionStatus[r.state]),
+                icon: <CableIcon />,
+                onSelect: () => setEditor(r.id),
+              }))}
           />
-        ) : (
-          !error && <p>Loading connections…</p>
         )}
       </section>
     </SettingsPane>

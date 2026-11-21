@@ -44,6 +44,7 @@ import {
   SettingsFormError,
 } from "./settings-shell"
 import { DialogFooter } from "./ui/dialog"
+import { SettingsListEmpty } from "./settings-list"
 import {
   useSettingsFormGuard,
   type SettingsLeaveGuard,
@@ -52,18 +53,19 @@ import {
 type Edit = { row?: ConnectionSummary; rename?: boolean }
 export function ChatGPTAccounts({
   rows,
-  search,
+  query,
   onEdit,
   reload,
 }: {
-  rows: ConnectionSummary[]
-  search: string
+  rows: ConnectionSummary[] | undefined
+  query: string
   onEdit: (edit: Edit) => void
   reload: () => void
 }) {
   const [disconnect, setDisconnect] = useState<ConnectionSummary | null>(null)
   const [error, setError] = useState(""),
     [pending, start] = useTransition()
+  const matches = rows?.filter((r) => r.nickname.toLowerCase().includes(query))
   function update(row: ConnectionSummary, remove: boolean) {
     setError("")
     start(async () => {
@@ -90,81 +92,87 @@ export function ChatGPTAccounts({
           Add account
         </Button>
       </div>
-      {rows
-        .filter((r) =>
-          r.nickname.toLowerCase().includes(search.trim().toLowerCase())
-        )
-        .map((r) => (
-          <div
-            key={r.id}
-            className="flex min-w-0 items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-highlight"
-          >
-            <UserRoundIcon className="size-4 shrink-0" />
-            <div className="min-w-0 flex-1">
-              <div className="truncate type-control">
-                {r.nickname}{" "}
-                <span className="text-xs text-muted-foreground">
-                  · {r.id.slice(-6)}
-                </span>
-              </div>
-              <p
-                className="truncate text-xs text-muted-foreground"
-                title={r.usedBy?.join(", ")}
-              >
-                {r.state === "ready" ? "Ready" : connectionStatus[r.state]}
-                {r.usedBy?.length ? " · " + r.usedBy.join(", ") : ""}
-              </p>
-              {!!r.needsModelChange?.length && (
-                <p className="text-xs text-destructive">
-                  Choose a new model or effort for{" "}
-                  {r.needsModelChange.join(", ")}.
-                </p>
-              )}
+      {matches?.length === 0 && (
+        <SettingsListEmpty
+          icon={<UserRoundIcon />}
+          label={
+            rows?.length
+              ? "No matching ChatGPT accounts"
+              : "No ChatGPT accounts added yet"
+          }
+        />
+      )}
+      {matches?.map((r) => (
+        <div
+          key={r.id}
+          className="flex min-w-0 items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-highlight"
+        >
+          <UserRoundIcon className="size-4 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <div className="truncate type-control">
+              {r.nickname}{" "}
+              <span className="text-xs text-muted-foreground">
+                · {r.id.slice(-6)}
+              </span>
             </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={"Actions for " + r.nickname}
-                    disabled={pending}
-                  />
-                }
-              >
-                <EllipsisIcon />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  onClick={() => onEdit({ row: r, rename: true })}
-                >
-                  Rename
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onEdit({ row: r })}>
-                  {r.state === "identity-only"
-                    ? "Enable plan usage"
-                    : "Reauthorize"}
-                </DropdownMenuItem>
-                {r.state !== "disconnected" && (
-                  <>
-                    {r.state !== "identity-only" && (
-                      <DropdownMenuItem onClick={() => update(r, false)}>
-                        Refresh models
-                      </DropdownMenuItem>
-                    )}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      variant="destructive"
-                      onClick={() => setDisconnect(r)}
-                    >
-                      Disconnect
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <p
+              className="truncate text-xs text-muted-foreground"
+              title={r.usedBy?.join(", ")}
+            >
+              {r.state === "ready" ? "Ready" : connectionStatus[r.state]}
+              {r.usedBy?.length ? " · " + r.usedBy.join(", ") : ""}
+            </p>
+            {!!r.needsModelChange?.length && (
+              <p className="text-xs text-destructive">
+                Choose a new model or effort for {r.needsModelChange.join(", ")}
+                .
+              </p>
+            )}
           </div>
-        ))}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={"Actions for " + r.nickname}
+                  disabled={pending}
+                />
+              }
+            >
+              <EllipsisIcon />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={() => onEdit({ row: r, rename: true })}
+              >
+                Rename
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onEdit({ row: r })}>
+                {r.state === "identity-only"
+                  ? "Enable plan usage"
+                  : "Reauthorize"}
+              </DropdownMenuItem>
+              {r.state !== "disconnected" && (
+                <>
+                  {r.state !== "identity-only" && (
+                    <DropdownMenuItem onClick={() => update(r, false)}>
+                      Refresh models
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={() => setDisconnect(r)}
+                  >
+                    Disconnect
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      ))}
       {error && (
         <p role="alert" className="text-xs text-destructive">
           {error}
