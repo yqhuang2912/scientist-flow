@@ -33,7 +33,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { Trace, TraceIcon, TraceLine, TraceTitle } from "@/components/ui/trace"
-import { ChatMarkdown } from "@/components/chat-markdown"
+import { ChatMention, ChatMarkdown } from "@/components/chat-markdown"
 import { ChatMessageActions } from "@/components/chat-message-actions"
 import { BotName } from "@/components/bot-name"
 import { ChatAvatar } from "@/components/chat-avatar"
@@ -188,16 +188,27 @@ const ChatTurn = memo(function ChatTurn({
 }) {
   if (message.role === "system") return null
   if (message.role === "user") {
-    const addressedBot = isGroup && !(message.metadata as { mentionedBotIds?: string[] } | undefined)?.mentionedBotIds?.length
-      ? bots.find((bot) => bot.id === getMessageBotId(message))
-      : undefined
-    const paths = (
-      message.metadata as
-        { workspaceFiles?: Record<string, unknown> } | undefined
-    )?.workspaceFiles
+    const metadata = message.metadata as
+      | { mentionedBotIds?: string[]; workspaceFiles?: Record<string, unknown> }
+      | undefined
+    const mentionedIds = metadata?.mentionedBotIds
+    const mentionedBotNames = bots
+      .filter((bot) => mentionedIds?.includes(bot.id))
+      .map((bot) => bot.name)
+    const addressedBot =
+      isGroup && !mentionedIds?.length
+        ? bots.find((bot) => bot.id === getMessageBotId(message))
+        : undefined
+    const paths = metadata?.workspaceFiles
     const saved = message.parts.map(
       (_, index) => messageAttachmentSchema.safeParse(paths?.[index]).data
     )
+    const mentionLabels = [
+      ...mentionedBotNames,
+      ...saved.flatMap((ref) =>
+        ref && "origin" in ref && !ref.contextOnly ? [ref.relativePath] : []
+      ),
+    ]
     const body = message.parts.flatMap((part, index) =>
       part.type === "text" && !saved[index] ? [{ part, index }] : []
     )
@@ -258,18 +269,13 @@ const ChatTurn = memo(function ChatTurn({
                     className="min-w-0 rounded-sm focus-visible:outline-ring"
                   >
                     {addressedBot && position === 0 && (
-                      <span
-                        className="mr-2.5 inline-flex max-w-32 items-baseline gap-0.5 text-muted-foreground"
-                        title={`@${addressedBot.name}`}
-                      >
-                        <span className="relative -top-px">@</span>
-                        <span className="min-w-0 truncate">
-                          {addressedBot.name}
-                        </span>
-                      </span>
+                      <ChatMention className="me-2.5">
+                        {addressedBot.name}
+                      </ChatMention>
                     )}
                     <ChatMarkdown
                       variant="user"
+                      mentionLabels={mentionLabels}
                       className={cn(
                         "min-w-0",
                         addressedBot &&

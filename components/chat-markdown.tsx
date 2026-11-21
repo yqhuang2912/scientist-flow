@@ -33,6 +33,7 @@ import {
 import { MarkdownCodeBlock } from "@/components/markdown-code-block"
 import { normalizeChatMath } from "@/lib/chat-math"
 import { remarkReasoningMath } from "@/lib/remark-reasoning-math"
+import { rehypeChatMentions } from "@/lib/rehype-chat-mentions"
 import { cn } from "@/lib/utils"
 import "@/components/chat-markdown.css"
 
@@ -136,10 +137,27 @@ function MarkdownImage(props: ComponentProps<"img"> & ExtraProps) {
   )
 }
 
+export function ChatMention({ children, className }: ComponentProps<"span">) {
+  return (
+    <span
+      data-chat-mention=""
+      className={cn(
+        "inline-flex max-w-full items-baseline gap-0.5 text-muted-foreground",
+        className
+      )}
+      title={typeof children === "string" ? `@${children}` : undefined}
+    >
+      <span className="relative -top-px">@</span>
+      <span className="min-w-0 wrap-anywhere">{children}</span>
+    </span>
+  )
+}
+
 const components = {
   code: MarkdownCode,
   img: MarkdownImage,
   "workspace-image": MarkdownImage,
+  "chat-mention": ChatMention,
 }
 const plugins = { cjk, code, math, mermaid }
 const reasoningPlugins = { cjk, math }
@@ -195,9 +213,11 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   className,
   children,
   variant = "assistant",
+  mentionLabels,
   ...props
 }: ComponentProps<typeof Streamdown> & {
   variant?: "assistant" | "user" | "reasoning"
+  mentionLabels?: string[]
 }) {
   const reasoning = variant === "reasoning"
   return (
@@ -214,7 +234,13 @@ export const ChatMarkdown = memo(function ChatMarkdown({
       )}
       plugins={reasoning ? reasoningPlugins : plugins}
       components={reasoning ? reasoningComponents : components}
-      rehypePlugins={reasoning ? undefined : chatRehypePlugins}
+      rehypePlugins={
+        reasoning
+          ? undefined
+          : variant === "user" && mentionLabels?.length
+            ? [...chatRehypePlugins, [rehypeChatMentions, { labels: mentionLabels }]]
+            : chatRehypePlugins
+      }
       remarkPlugins={reasoning ? reasoningRemarkPlugins : undefined}
       parseMarkdownIntoBlocksFn={reasoning ? wholeThought : undefined}
       skipHtml={reasoning}

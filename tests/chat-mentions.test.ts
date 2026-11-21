@@ -8,6 +8,57 @@ import {
 } from "../lib/chat-mentions"
 import { chatJobInput } from "../lib/chat-job"
 import { nanoid } from "nanoid"
+import { unified } from "unified"
+import remarkParse from "remark-parse"
+import remarkRehype from "remark-rehype"
+import { visit } from "unist-util-visit"
+import { rehypeChatMentions } from "../lib/rehype-chat-mentions"
+
+test("sent messages style bot names and referenced workspace paths inline", () => {
+  const mentionsIn = (text: string, names: string[]) => {
+    const markdown = unified()
+      .use(remarkParse)
+      .use(remarkRehype)
+      .use(rehypeChatMentions, { labels: names })
+    const tree = markdown.runSync(markdown.parse(text))
+    const labels: string[] = []
+    visit(tree, "element", (node) => {
+      if (
+        node.tagName === "chat-mention" &&
+        node.children[0]?.type === "text"
+      )
+        labels.push(node.children[0].value)
+    })
+    return labels
+  }
+  assert.deepEqual(mentionsIn("请@小林 核对数字。", ["小林"]), ["小林"])
+  const markdownFilename = "docs/[审稿](v2)_final_.md"
+  assert.deepEqual(
+    mentionsIn("核对 @" + markdownFilename + "。", [markdownFilename]),
+    [markdownFilename]
+  )
+  assert.deepEqual(
+    mentionsIn(
+      "@Iris 请比较 @Iris/审稿 意见 (2).docx 和 @README.md。\n\n@README.md.bak 与 `@README.md`",
+      ["Iris", "README.md", "Iris/审稿 意见 (2).docx"]
+    ),
+    ["Iris", "Iris/审稿 意见 (2).docx", "README.md"]
+  )
+  assert.deepEqual(
+    mentionsIn(
+      "请 **@Iris** 与 @Iris Chen 核对。\n\n再请@R&D (2) 回答 @Iris。",
+      ["Iris", "Iris Chen", "R&D (2)"]
+    ),
+    ["Iris", "Iris Chen", "R&D (2)", "Iris"]
+  )
+  assert.deepEqual(
+    mentionsIn(
+      "x@Iris.com @docs/@Iris.md @Iris/file @Iris.csv @Iris2 @Rowan `@Iris` [@Iris](https://example.org)\n\n```\n@Iris\n```",
+      ["Iris"]
+    ),
+    []
+  )
+})
 
 test("mention lookup follows the caret, supports Chinese and spaces, and skips email addresses", () => {
   assert.deepEqual(mentionQuery("请@Audit B later", 9, []), {
