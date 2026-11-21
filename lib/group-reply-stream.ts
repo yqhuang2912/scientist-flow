@@ -2,7 +2,6 @@ import type {
   LanguageModelV4FunctionTool,
   LanguageModelV4StreamPart,
 } from "@ai-sdk/provider"
-import { parsePartialJson } from "ai"
 import { z } from "zod"
 import { projectRecallTool } from "./project-decisions"
 
@@ -24,22 +23,123 @@ export const groupReplyInstructions = `For ordinary replies, including writing o
 
 const body = z.strictObject({ text: z.string() })
 
+// Only stream the single string in {"text":"…"}. The provider's assembled
+// tool-call remains authoritative and is validated even if no deltas arrived.
+const openingTokens = {
+  object: ["{", "keyStart"],
+  keyStart: ['"', "key"],
+  colon: [":", "valueStart"],
+  valueStart: ['"', "value"],
+} as const
+type ReplyPhase = keyof typeof openingTokens | "key" | "value" | "done"
+
+const shortEscapes: Readonly<Partial<Record<string, string>>> = {
+  '"': '"',
+  "\\": "\\",
+  "/": "/",
+  b: "\b",
+  f: "\f",
+  n: "\n",
+  r: "\r",
+  t: "\t",
+}
+
+class ReplyTextDecoder {
+  private phase: ReplyPhase = "object"
+  private key = ""
+  private escape = ""
+  private highSurrogate = ""
+
+  read(fragment: string) {
+    let decoded = ""
+    for (let offset = 0; offset < fragment.length;) {
+      if (this.phase === "done") break
+      if (this.phase === "value" && !this.escape) {
+        const start = offset
+        while (offset < fragment.length) {
+          const code = fragment.charCodeAt(offset)
+          if (code < 32 || code === 34 || code === 92) break
+          offset++
+        }
+        if (offset > start) {
+          decoded += fragment.slice(start, offset)
+          continue
+        }
+      }
+      let ch = fragment[offset++]
+      if (this.phase !== "key" && this.phase !== "value") {
+        if (/[ \t\r\n]/.test(ch)) continue
+        const [token, next]: readonly [string, ReplyPhase] =
+          openingTokens[this.phase]
+        this.phase = ch === token ? next : "done"
+        continue
+      }
+
+      if (this.escape || ch === "\\") {
+        this.escape += ch
+        if (
+          this.escape.length < 2 ||
+          (this.escape[1] === "u" && this.escape.length < 6)
+        )
+          continue
+        if (this.escape[1] === "u") {
+          const hex = this.escape.slice(2)
+          if (!/^[\da-f]{4}$/i.test(hex)) {
+            this.phase = "done"
+            break
+          }
+          ch = String.fromCharCode(parseInt(hex, 16))
+        } else {
+          const value = shortEscapes[this.escape[1]]
+          if (value === undefined) {
+            this.phase = "done"
+            break
+          }
+          ch = value
+        }
+        this.escape = ""
+      } else if (ch === '"') {
+        this.phase =
+          this.phase === "key" && this.key === "text" ? "colon" : "done"
+        continue
+      } else if (ch < " ") {
+        this.phase = "done"
+        break
+      }
+
+      if (this.phase === "key") {
+        this.key += ch
+        if (!"text".startsWith(this.key)) this.phase = "done"
+      } else {
+        decoded += ch
+      }
+    }
+
+    const text = this.highSurrogate + decoded
+    const last = text.charCodeAt(text.length - 1)
+    if (last >= 0xd800 && last <= 0xdbff) {
+      this.highSurrogate = text.slice(-1)
+      return text.slice(0, -1)
+    }
+    this.highSurrogate = ""
+    return text
+  }
+}
+
 export class GroupReplyStream {
   private id?: string
   private otherTool = false
   private readonly pendingCalls = new Set<string>()
-  private input = ""
-  private published = ""
+  private readonly decoder = new ReplyTextDecoder()
+  private readonly published: string[] = []
   private finalText?: string
 
   constructor(private readonly publish: (delta: string) => void) {}
 
-  private append(text: string) {
-    if (!text.startsWith(this.published))
-      throw new Error("The public reply changed previously emitted text.")
-    const delta = text.slice(this.published.length)
-    if (delta) this.publish(delta)
-    this.published = text
+  private emit(delta: string) {
+    if (!delta) return
+    this.publish(delta)
+    this.published.push(delta)
   }
 
   async consume(part: LanguageModelV4StreamPart) {
@@ -73,12 +173,7 @@ export class GroupReplyStream {
       return true
     }
     if (part.type === "tool-input-delta" && part.id === this.id) {
-      this.input += part.delta
-      const { value } = await parsePartialJson(this.input)
-      const partial = body.safeParse(value)
-      // The JSON parser may have decoded just the high half of a surrogate pair.
-      if (partial.success)
-        this.append(partial.data.text.replace(/[\uD800-\uDBFF]$/u, ""))
+      this.emit(this.decoder.read(part.delta))
       return true
     }
     return false
@@ -94,7 +189,10 @@ export class GroupReplyStream {
       (reason !== "stop" && reason !== "tool-calls")
     )
       throw new Error("The public reply did not finish.")
-    this.append(this.finalText)
+    const prefix = this.published.join("")
+    if (!this.finalText.startsWith(prefix))
+      throw new Error("The public reply changed previously emitted text.")
+    this.emit(this.finalText.slice(prefix.length))
     return this.finalText
   }
 }
