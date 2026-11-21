@@ -20,6 +20,7 @@ import {
   type ChatTurnAck,
   type ChatTurnProgress,
 } from "@/lib/chat-job"
+import { watchChatRefresh } from "@/lib/chat-refresh"
 import { CHAT_ACCEPTED_EVENT } from "@/lib/chat-recency"
 import type { UploadedEntry } from "@/lib/workspace-validation"
 import type { ChatWithBot } from "@/queries/chats"
@@ -33,6 +34,7 @@ export function ChatInterface({
 }) {
   const [snapshot, setSnapshot] = useState(initial)
   const [pendingBotId, setPendingBotId] = useState(chat.bots[0]?.id ?? "")
+  const [networkError, setNetworkError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const uploaded = useRef(new WeakMap<File, UploadedEntry>())
   const pending = useRef<{ input: string; id: string } | null>(null)
@@ -40,71 +42,24 @@ export function ChatInterface({
   const submitting = useRef(false)
   const url = "/api/chats/" + encodeURIComponent(chat.id) + "/messages"
 
-  // Poll only while a turn runs. Focusing a second tab also refreshes its view.
   useEffect(() => {
     if (sending) return
     const epoch = version.current
-    const controller = new AbortController()
-    let timer: ReturnType<typeof setTimeout>
-    let reading = false
-    async function refresh() {
-      if (
-        reading ||
-        epoch !== version.current ||
-        submitting.current ||
-        (!snapshot.activeId && pending.current)
-      )
-        return
-      reading = true
-      const revision = version.current
-      try {
-        const activeId = snapshot.activeId
-        if (activeId) {
-          const response = await fetch(
-            url + "?id=" + encodeURIComponent(activeId),
-            {
-              signal: controller.signal,
-              cache: "no-store",
-            }
-          )
-          if (!response.ok) throw new Error("Could not refresh this reply.")
-          const turn: ChatTurnProgress = await response.json()
-          if (controller.signal.aborted || version.current !== revision) return
-          setSnapshot((current) => mergeTurnProgress(current, turn))
-          return
-        }
-        const response = await fetch(url, {
-          signal: controller.signal,
-          cache: "no-store",
-        })
-        if (!response.ok)
-          throw new Error("Could not refresh this conversation.")
-        const next: ChatSnapshot = await response.json()
-        if (!controller.signal.aborted && revision === version.current) {
-          setSnapshot(next)
-        }
-      } catch {
-        if (!controller.signal.aborted && revision === version.current)
-          setSnapshot((current) => ({
-            ...current,
-            error: "Could not refresh this conversation. Reconnecting…",
-          }))
-      } finally {
-        reading = false
-        if (!controller.signal.aborted && snapshot.activeId) {
-          clearTimeout(timer)
-          timer = setTimeout(refresh, 1000)
-        }
-      }
-    }
-    if (snapshot.activeId) void refresh()
-    window.addEventListener("focus", refresh)
-    return () => {
-      controller.abort()
-      clearTimeout(timer)
-      window.removeEventListener("focus", refresh)
-    }
-  }, [snapshot.activeId, sending, url])
+    return watchChatRefresh({
+      focusTarget: window,
+      url,
+      activeId: snapshot.activeId,
+      retryIdle: chat.kind === "group",
+      canRead: () =>
+        epoch === version.current &&
+        !submitting.current &&
+        (!!snapshot.activeId || !pending.current),
+      onSnapshot: setSnapshot,
+      onProgress: (turn) =>
+        setSnapshot((current) => mergeTurnProgress(current, turn)),
+      onNetworkError: setNetworkError,
+    })
+  }, [chat.kind, snapshot.activeId, sending, url])
 
   async function submit({
     text,
@@ -121,6 +76,7 @@ export function ChatInterface({
     setPendingBotId(botId)
     ++version.current
     submitting.current = true
+    setNetworkError(null)
     setSending(true)
     try {
       const entries: UploadedEntry[] = []
@@ -228,6 +184,11 @@ export function ChatInterface({
         pendingBotId={pendingBotId}
       />
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 pb-3 sm:px-6">
+        {networkError && (
+          <p role="status" className="text-xs text-muted-foreground">
+            {networkError}
+          </p>
+        )}
         {snapshot.error && (
           <Alert variant="destructive">
             <CircleAlertIcon />
