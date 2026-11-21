@@ -36,6 +36,8 @@ import {
   GroupReplyStream,
 } from "./group-reply-stream"
 import {
+  type ProjectCitation,
+  projectCitationMarkdown,
   projectDecisionMediaType,
   projectDecisionTool,
   projectRecallInput,
@@ -317,7 +319,7 @@ export function deepAgentReply(options: {
   handoff?: (
     input: HandoffInput
   ) => Promise<{ success: boolean; message?: string }>
-  resolveCitation?: (recordId: string) => Promise<string | undefined>
+  resolveCitation?: (recordId: string) => Promise<ProjectCitation | undefined>
   onError: (error: unknown) => string
 }) {
   const cancel = new AbortController()
@@ -339,7 +341,7 @@ export function deepAgentReply(options: {
       try {
         const accept = options.handoff
         let handedOff = false
-        let citation: string | undefined
+        let citation: ProjectCitation | undefined
         let rejection: string | undefined
         const recipient = options.recipient
         const definitions: LanguageModelV4FunctionTool[] = []
@@ -484,7 +486,7 @@ export function deepAgentReply(options: {
         const resolveCitation = options.resolveCitation
         if (resolveCitation) {
           const description =
-            "Answer a recall question from one active decision in this project. This read-only action delivers the final answer with its verified source."
+            "Select one matching active decision in this project. The server publishes the stored decision and evidence with its source."
           definitions.push({
             type: "function",
             name: projectRecallTool,
@@ -493,15 +495,14 @@ export function deepAgentReply(options: {
           })
           tools.push(
             tool(
-              async ({ recordId, answer }) => {
+              async ({ recordId }) => {
                 signal.throwIfAborted()
-                citation =
-                  recordId && answer.trim()
-                    ? await resolveCitation(recordId)
-                    : undefined
+                citation = recordId
+                  ? await resolveCitation(recordId)
+                  : undefined
                 signal.throwIfAborted()
                 const reply = citation
-                  ? answer.trim()
+                  ? projectCitationMarkdown(citation)
                   : "No matching active decision was found in this project."
                 publishText(reply)
                 return reply
@@ -574,9 +575,9 @@ export function deepAgentReply(options: {
           started = false
           write({
             type: "source-document",
-            sourceId: citation,
+            sourceId: citation.id,
             mediaType: projectDecisionMediaType,
-            title: citation,
+            title: citation.id,
           })
         }
         if (rejection) throw new ModelConnectionError(rejection)

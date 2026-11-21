@@ -348,7 +348,7 @@ export async function runBotTurn({
                   ? async (id) => {
                       if (!decisions.some((row) => row.id === id)) return
                       const [active] = await readProjectDecisions(chatId, id)
-                      return active?.id
+                      return active
                     }
                   : undefined,
               recipient:
@@ -408,7 +408,7 @@ export async function runBotTurn({
               messages: publicInput,
               recipient: { botId: bot.id, tools, followup: modelForStep },
               resolveCitation: group
-                ? async (id) => (await readProjectDecisions(chatId, id))[0]?.id
+                ? async (id) => (await readProjectDecisions(chatId, id))[0]
                 : undefined,
               signal,
               metadata: meta,

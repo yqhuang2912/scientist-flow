@@ -726,7 +726,10 @@ test(
                   body.messages.filter((m) => m.role !== "system")
                 ).includes(stored.id)
               )
-              return { recordId: record.recordId, answer: record.decision }
+              return {
+                recordId: record.recordId,
+                answer: "Unverified assumption",
+              }
             }
             const followup: UIMessage = {
               ...user(),
@@ -749,7 +752,11 @@ test(
               observer
             )
             assert.deepEqual(observerReply.parts, [
-              { type: "text", text: stored.decision, state: "done" },
+              {
+                type: "text",
+                text: stored.decision + "\n\n> /value = " + observation,
+                state: "done",
+              },
               {
                 type: "source-document",
                 sourceId: stored.id,
@@ -1074,12 +1081,7 @@ test(
                     assert.equal(record.evidence.toolCallId, source.toolCallId)
                     return {
                       recordId: record.recordId,
-                      answer:
-                        record.decision +
-                        ": " +
-                        record.evidence.fields
-                          .map((f: { value: string }) => f.value)
-                          .join(" "),
+                      answer: "Unverified assumption",
                     }
                   }
                   const request = ask()
@@ -1090,7 +1092,11 @@ test(
                   assert.deepEqual(reply.parts, [
                     {
                       type: "text",
-                      text: local.decision + ": " + value + " ms",
+                      text:
+                        local.decision +
+                        "\n\n> /reading = " +
+                        value +
+                        " · /unit = ms",
                       state: "done",
                     },
                     {

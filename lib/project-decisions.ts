@@ -7,17 +7,13 @@ export const projectRecordId = z.string().regex(/^D-[a-f0-9]{16}$/)
 export const projectDecisionMediaType =
   "application/vnd.scientistflow.project-decision"
 export const projectRecallTool = "answer_from_project_memory"
-export const projectRecallInput = z.strictObject({
+// Only the selection is authoritative. Strip any model-authored answer sent
+// alongside the ID before the tool runs.
+export const projectRecallInput = z.object({
   recordId: projectRecordId
     .nullable()
     .describe(
       "The exact matching active record ID, or null when none matches."
-    ),
-  answer: z
-    .string()
-    .max(3000)
-    .describe(
-      "A short Markdown answer in the user's language giving the recorded conclusion and the observed fields, units or period. Use an empty string when there is no match."
     ),
 })
 export const decisionInput = z.strictObject({
@@ -105,6 +101,18 @@ export function toolEvidenceText(fields: ToolEvidence["fields"]) {
   return fields
     .map(({ path, value }) => path + " = " + String(value))
     .join(" · ")
+}
+export type ProjectCitation = Pick<
+  ProjectDecision,
+  "id" | "decision" | "toolEvidence" | "quote"
+>
+export function projectCitationMarkdown(record: ProjectCitation) {
+  const evidence = record.toolEvidence
+    ? toolEvidenceText(record.toolEvidence.fields)
+    : record.quote
+  return evidence
+    ? record.decision + "\n\n> " + evidence.replace(/\r\n?|\n/g, "\n> ")
+    : record.decision
 }
 export function toolCallAnchor(messageId: string, callId: string) {
   return (

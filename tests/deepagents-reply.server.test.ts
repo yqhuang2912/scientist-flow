@@ -13,12 +13,34 @@ test("ordinary group turns stream a committed reply and quarantine candidates un
   for (const scenario of [
     "ordinary",
     "local",
+    "quoted",
     "foreign",
+    "withdrawn",
     "mixed",
     "incomplete",
   ] as const) {
     await t.test(scenario, { timeout: 10_000 }, async () => {
       const record = "D-1234567890abcdef"
+      const stored = {
+        id: record,
+        decision: "本轮实验采用阈值 0.42",
+        toolEvidence: {
+          executionId: "execution",
+          toolCallId: "measurement",
+          toolId: "tool",
+          toolName: "read_threshold",
+          digest: "digest",
+          fields: [
+            { path: "/threshold", value: 0.42 },
+            { path: "/unit", value: "mV" },
+          ],
+        },
+        quote: "Original report\nwith a second line.",
+      }
+      const usesLookup = ["local", "quoted", "foreign", "withdrawn"].includes(
+        scenario
+      )
+      let active = true
       const verify = Promise.withResolvers<void>()
       const release = Promise.withResolvers<void>()
       const first = Promise.withResolvers<void>()
@@ -32,7 +54,11 @@ test("ordinary group turns stream a committed reply and quarantine candidates un
       let lookups = 0
       const model = new MockLanguageModelV4({
         doStream: async ({ tools }) => {
-          assert.ok(tools?.some((tool) => tool.name === projectRecallTool))
+          const recall = tools?.find((tool) => tool.name === projectRecallTool)
+          assert.ok(recall?.type === "function")
+          assert.deepEqual(Object.keys(recall.inputSchema.properties ?? {}), [
+            "recordId",
+          ])
           assert.ok(tools?.some((tool) => tool.name === groupReplyOutput.name))
           return {
             stream: new ReadableStream({ start: (c) => ready.resolve(c) }),
@@ -52,13 +78,17 @@ test("ordinary group turns stream a committed reply and quarantine candidates un
           lookups++
           verify.resolve()
           await release.promise
-          return id === record ? record : undefined
+          if (!active || id !== record) return
+          return scenario === "quoted"
+            ? { ...stored, toolEvidence: null }
+            : stored
         },
       }).getReader()
       const done = (async () => {
         for (;;) {
           const { value, done } = await stream.read()
           if (done) return
+          assert.doesNotMatch(JSON.stringify(value), /未核对的候选文字|0\.99/)
           if (value.type === "text-delta") {
             outputs.push(value.delta)
             first.resolve()
@@ -68,7 +98,11 @@ test("ordinary group turns stream a committed reply and quarantine candidates un
         }
       })()
       const c = await ready.promise
-      c.enqueue({ type: "text-delta", id: "candidate", delta: "阈值为 0.99" })
+      c.enqueue({
+        type: "text-delta",
+        id: "candidate",
+        delta: "未核对的候选文字",
+      })
       if (scenario === "ordinary" || scenario === "mixed") {
         c.enqueue({
           type: "tool-input-start",
@@ -105,7 +139,7 @@ test("ordinary group turns stream a committed reply and quarantine candidates un
           toolCallId: "lookup",
           input: JSON.stringify({
             recordId: scenario === "foreign" ? "D-0000000000000000" : record,
-            answer: "阈值为 0.42",
+            ...(scenario !== "quoted" && { answer: "本轮实验采用阈值 0.99" }),
           }),
         })
       c.enqueue({
@@ -120,31 +154,36 @@ test("ordinary group turns stream a committed reply and quarantine candidates un
         },
       })
       c.close()
-      if (scenario === "local" || scenario === "foreign") {
+      if (usesLookup) {
         await verify.promise
         assert.deepEqual(outputs, [])
         assert.deepEqual(citations, [])
+        if (scenario === "withdrawn") active = false
         release.resolve()
       }
       await done
       assert.equal(model.doStreamCalls.length, 1)
-      assert.deepEqual(citations, scenario === "local" ? [record] : [])
+      assert.deepEqual(
+        citations,
+        scenario === "local" || scenario === "quoted" ? [record] : []
+      )
       assert.deepEqual(
         errors,
         scenario === "mixed" || scenario === "incomplete" ? ["Rejected"] : []
       )
-      assert.equal(
-        lookups,
-        scenario === "local" || scenario === "foreign" ? 1 : 0
-      )
+      assert.equal(lookups, usesLookup ? 1 : 0)
+      if (usesLookup) assert.equal(outputs.length, 1)
       assert.equal(
         outputs.join(""),
         {
           ordinary: "第一段第二段",
-          local: "阈值为 0.42",
+          local: "本轮实验采用阈值 0.42\n\n> /threshold = 0.42 · /unit = mV",
+          quoted:
+            "本轮实验采用阈值 0.42\n\n> Original report\n> with a second line.",
           mixed: "第一段",
           incomplete: "",
           foreign: "No matching active decision was found in this project.",
+          withdrawn: "No matching active decision was found in this project.",
         }[scenario]
       )
     })
