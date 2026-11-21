@@ -25,7 +25,7 @@ export function ChatInterface({
   initial: ChatSnapshot
 }) {
   const [snapshot, setSnapshot] = useState(initial)
-  const [selectedBotId, setSelectedBotId] = useState(chat.bots[0]?.id ?? "")
+  const [pendingBotId, setPendingBotId] = useState(chat.bots[0]?.id ?? "")
   const [error, setError] = useState<string | null>(initial.error)
   const [sending, setSending] = useState(false)
   const uploaded = useRef(new WeakMap<File, UploadedEntry>())
@@ -105,9 +105,19 @@ export function ChatInterface({
     }
   }, [snapshot.activeId, url])
 
-  async function submit({ text, files }: ChatComposerMessage) {
+  async function submit({
+    text,
+    files,
+    mentionedBotIds,
+    workspacePaths,
+  }: ChatComposerMessage) {
     if (snapshot.activeId || sending)
       return { error: "A reply is already running." }
+    if (files.length + workspacePaths.length > 32)
+      return { error: "Select up to 32 attachments per message." }
+    const botId = mentionedBotIds[0] ?? chat.bots[0]?.id
+    if (!botId) return { error: "No bot is available in this chat." }
+    setPendingBotId(botId)
     ++version.current
     setSending(true)
     try {
@@ -124,7 +134,9 @@ export function ChatInterface({
         uploaded.current
       )
       const input = {
-        botId: selectedBotId,
+        botId,
+        ...(mentionedBotIds.length && { mentionedBotIds }),
+        ...(workspacePaths.length && { workspacePaths }),
         text,
         files: entries.map((e, i) => ({
           name: files[i].name,
@@ -190,7 +202,7 @@ export function ChatInterface({
         bots={chat.bots}
         isGroup={isGroup}
         status={status}
-        pendingBotId={selectedBotId}
+        pendingBotId={pendingBotId}
       />
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 pb-3 sm:px-6">
         {error && (
@@ -211,8 +223,7 @@ export function ChatInterface({
         )}
         <ChatComposer
           bots={chat.bots}
-          selectedBotId={selectedBotId}
-          onBotChange={setSelectedBotId}
+          chatId={chat.id}
           onSubmit={submit}
           status={status}
           onStop={stop}

@@ -335,13 +335,13 @@ export default function ChatUIFixture() {
         <div className="mx-auto w-full max-w-3xl px-4 pb-3 sm:px-6">
           <ChatComposer
             bots={bots}
-            selectedBotId={selectedBotId}
-            onBotChange={setSelectedBotId}
             status={status}
             onStop={() => void stop()}
-            onSubmit={async ({ text }) => {
+            onSubmit={async ({ text, mentionedBotIds }) => {
               if (!text.trim() || busy) return
-              await sendMessage({ text, metadata: { botId: selectedBotId } })
+              const botId = mentionedBotIds[0] ?? bots[0].id
+              setSelectedBotId(botId)
+              await sendMessage({ text, metadata: { botId, mentionedBotIds } })
             }}
           />
         </div>

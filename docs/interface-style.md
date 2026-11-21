@@ -116,8 +116,8 @@ Mermaid keeps its installed renderer and matches the code surface. Its 13 px
 labels follow live theme tokens, including in fullscreen.
 See [chat presentation](./chat-presentation.md) for the runtime boundary.
 
-The composer directly uses shadcn `InputGroup` with its muted variant, a
-multiline textarea, a `DropdownMenuRadioGroup` bot selector and circular
+The composer uses the shadcn `InputGroup` composer variant, a multiline
+textarea, a grouped `Command` menu for @mentions and a circular
 send/stop control. The textarea uses 13 px / 20 px typography with 12 px insets
 and grows to 192 px before scrolling. Only a disabled text control can dim the
 group. Preserve IME composition, newline entry, pending state and newer drafts.

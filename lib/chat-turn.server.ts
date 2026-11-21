@@ -104,16 +104,20 @@ export async function runBotTurn({
   if (!user) throw new Error("The task message is missing.")
   const group = context.kind === "group"
   const members = context.bots
-  const pilotRecipient = await groupPilotRecipient(
-    chatId,
-    context,
-    first.id,
-    history,
-    user
-  )
+  const mentionedIds = (
+    user.metadata as { mentionedBotIds?: string[] } | undefined
+  )?.mentionedBotIds
+  const multiple = !!mentionedIds && mentionedIds.length > 1
+  const pilotRecipient = multiple
+    ? undefined
+    : await groupPilotRecipient(chatId, context, first.id, history, user)
 
   const completed: UIMessage[] = []
-  const perform = async (bot: BotIdentity, incoming: Delegation | null) => {
+  const perform = async (
+    bot: BotIdentity,
+    incoming: Delegation | null,
+    slot: number
+  ) => {
     if (signal.reason instanceof ChatLeaseLost) throw signal.reason
     const claim = await claimExecution(
       chatId,
@@ -121,7 +125,8 @@ export async function runBotTurn({
       bot.id,
       runId,
       incoming,
-      lease
+      lease,
+      slot
     )
     const execution = claim.row
     if (!claim.claimed) {
@@ -147,7 +152,9 @@ export async function runBotTurn({
         ])
       const visibleHistory = incoming
         ? mergeExecutionMessages(history, completed)
-        : history
+        : multiple
+          ? history.slice(0, history.indexOf(user) + 1)
+          : history
       const evidence = group
         ? projectEvidence(chatId, visibleHistory, members)
         : null
@@ -175,7 +182,7 @@ export async function runBotTurn({
         readProjectDecisions(chatId)
       )
       const committed = new Set<string>()
-      const canDelegate = group && !incoming
+      const canDelegate = group && !incoming && !multiple
       const acceptHandoff = async ({ botName, reason }: HandoffInput) => {
         const matches = members.filter(
           (m) =>
@@ -485,12 +492,22 @@ export async function runBotTurn({
     return delegation
   }
   try {
-    const packet = await perform(first, null)
+    if (multiple) {
+      // Each explicit addressee answers the original message as an independent speaker.
+      const speakers = mentionedIds.map((id) => resolveReplyBot(context, id))
+      for (const [slot, speaker] of speakers.entries()) {
+        if (signal.aborted) break
+        await perform(speaker, null, slot)
+      }
+      return
+    }
+    const packet = await perform(first, null, 0)
     if (packet) {
       const target = members.find((member) => member.id === packet.to.id)
       await perform(
         target ?? { ...packet.to, job: "Former member", instructions: null },
-        packet
+        packet,
+        1
       )
     }
   } finally {

@@ -43,7 +43,7 @@ import {
   ChatFile,
   type RespondToApproval,
 } from "@/components/chat-activity"
-import { storedAttachmentSchema } from "@/lib/chat-composer"
+import { messageAttachmentSchema } from "@/lib/chat-composer"
 import { cleanBotText } from "@/lib/chat-bot-text"
 import { cn } from "@/lib/utils"
 import {
@@ -188,7 +188,7 @@ const ChatTurn = memo(function ChatTurn({
 }) {
   if (message.role === "system") return null
   if (message.role === "user") {
-    const addressedBot = isGroup
+    const addressedBot = isGroup && !(message.metadata as { mentionedBotIds?: string[] } | undefined)?.mentionedBotIds?.length
       ? bots.find((bot) => bot.id === getMessageBotId(message))
       : undefined
     const paths = (
@@ -196,7 +196,7 @@ const ChatTurn = memo(function ChatTurn({
         { workspaceFiles?: Record<string, unknown> } | undefined
     )?.workspaceFiles
     const saved = message.parts.map(
-      (_, index) => storedAttachmentSchema.safeParse(paths?.[index]).data
+      (_, index) => messageAttachmentSchema.safeParse(paths?.[index]).data
     )
     const body = message.parts.flatMap((part, index) =>
       part.type === "text" && !saved[index] ? [{ part, index }] : []
@@ -220,8 +220,9 @@ const ChatTurn = memo(function ChatTurn({
       return [
         <ChatFile
           key={index}
-          part={file}
+          part={ref && "origin" in ref ? { ...file, filename: ref.name } : file}
           referenceSize={ref?.size}
+          mentionedPath={ref && "origin" in ref ? ref.relativePath : undefined}
           savedPath={
             ref?.relativePath ??
             paths?.[index] ??

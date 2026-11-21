@@ -399,17 +399,19 @@ function SavedDocumentTrigger({
 export function ChatFile({
   part,
   savedPath,
+  mentionedPath,
   referenceSize,
 }: {
   part: FileUIPart
   savedPath?: unknown
+  mentionedPath?: string
   referenceSize?: number
 }) {
   const { chatId } = useParams<{ chatId: string }>()
-  const relative =
+  const relative = mentionedPath ?? (
     typeof savedPath === "string" && savedPath.startsWith("uploads/")
       ? savedPath
-      : undefined
+      : undefined)
   const kind = relative && workspaceOpenPolicy(relative).kind
   const diskImage =
     relative && kind === "internal-image"

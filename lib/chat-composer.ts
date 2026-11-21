@@ -1,5 +1,6 @@
 import { z } from "zod"
 import type { FileUIPart, TextUIPart, UIMessage } from "ai"
+import { workspaceOpenPolicy } from "./workspace-open-policy"
 import {
   uploadWorkspaceFileSchema,
   MAX_UPLOAD_BYTES,
@@ -24,7 +25,11 @@ export const chatComposerSchema = z
   )
 
 export type ChatComposerInput = z.input<typeof chatComposerSchema>
-export type ChatComposerMessage = z.output<typeof chatComposerSchema>
+export type ChatComposerDraft = z.output<typeof chatComposerSchema>
+export type ChatComposerMessage = ChatComposerDraft & {
+  mentionedBotIds: string[]
+  workspacePaths: string[]
+}
 
 export function shouldSubmitChatMessage({
   key,
@@ -81,8 +86,28 @@ export const storedAttachmentSchema = z.object({
   contextOnly: z.boolean().optional(),
 })
 export type StoredAttachment = z.infer<typeof storedAttachmentSchema>
+export function workspaceMentionMediaType(relativePath: string) {
+  const policy = workspaceOpenPolicy(relativePath)
+  if (policy.kind === "internal-text")
+    return attachmentMediaType({ name: relativePath, type: "" }) ?? "text/plain"
+  if (policy.kind === "blocked" || policy.kind === "unsupported")
+    return undefined
+  if (/\.(pdf|docx|xlsx|pptx|png|jpe?g|gif|webp|avif)$/i.test(relativePath))
+    return attachmentMediaType({ name: relativePath, type: "" })
+}
+export const messageAttachmentSchema = z.union([
+  storedAttachmentSchema.extend({
+    origin: z.literal("workspace"),
+    relativePath: workspaceFileTargetSchema.refine(
+      (p) => !!workspaceMentionMediaType(p)
+    ),
+    size: z.number().int().nonnegative().max(MAX_UPLOAD_BYTES),
+  }),
+  storedAttachmentSchema,
+])
+export type MessageAttachment = z.infer<typeof messageAttachmentSchema>
 export type PreparedAttachment = {
-  reference: StoredAttachment
+  reference: MessageAttachment
   part: TextUIPart | FileUIPart
 }
 
@@ -127,7 +152,7 @@ export function chatAttachmentParts(files: PreparedAttachment[], text: string) {
   const parts: (TextUIPart | FileUIPart)[] = text.trim()
     ? [{ type: "text", text }]
     : []
-  const workspaceFiles: Record<number, StoredAttachment> = {}
+  const workspaceFiles: Record<number, MessageAttachment> = {}
   for (const { reference, part } of files) {
     workspaceFiles[parts.length] = reference
     parts.push(part)

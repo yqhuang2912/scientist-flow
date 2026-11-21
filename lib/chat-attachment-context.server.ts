@@ -1,8 +1,16 @@
 import "server-only"
 import path from "node:path"
 import type { FileUIPart, TextUIPart } from "ai"
-import type { StoredAttachment, PreparedAttachment } from "./chat-composer"
-import { readWorkspaceFileBytes } from "./workspace-file.server"
+import {
+  workspaceMentionMediaType,
+  type MessageAttachment,
+  type PreparedAttachment,
+} from "./chat-composer"
+import {
+  readWorkspaceFileBytes,
+  resolveWorkspaceFile,
+} from "./workspace-file.server"
+import { ModelConnectionError } from "./model-credentials.server"
 import { MAX_UPLOAD_BYTES } from "./workspace-validation"
 import { officeAttachmentText } from "./office-attachment.server"
 
@@ -40,12 +48,13 @@ async function pdfText(bytes: Buffer) {
 
 async function readAttachment(
   taskDir: string,
-  ref: StoredAttachment,
+  ref: MessageAttachment,
   imageBudget: number,
   textBudget: number
 ): Promise<Part> {
   const ext = path.posix.extname(ref.relativePath).toLowerCase()
-  const title = JSON.stringify(ref.name)
+  const filename = "origin" in ref ? ref.relativePath : ref.name
+  const title = JSON.stringify(filename)
   const office = [".docx", ".pptx", ".xlsx"].includes(ext)
   const image = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif"].includes(
     ext
@@ -53,6 +62,7 @@ async function readAttachment(
   if (
     !office &&
     !image &&
+    !("origin" in ref && ref.origin === "workspace") &&
     ![".pdf", ".txt", ".md", ".markdown", ".json", ".csv"].includes(ext)
   )
     return notice(
@@ -91,7 +101,7 @@ async function readAttachment(
       return {
         type: "file",
         mediaType,
-        filename: ref.name,
+        filename,
         url: `data:${mediaType};base64,${raw.toString("base64")}`,
       }
     }
@@ -112,7 +122,7 @@ async function readAttachment(
         return {
           type: "file",
           mediaType: "image/jpeg",
-          filename: ref.name,
+          filename,
           url: "data:image/jpeg;base64," + data.toString("base64"),
         }
     }
@@ -128,11 +138,12 @@ async function readAttachment(
     if (text.includes("\0")) throw new Error("Invalid text")
   }
   if (!text.trim()) {
+    if (!ref.size) return notice("Attachment " + title + " is empty.")
     if (ext === ".pdf" && raw.length <= imageBudget)
       return {
         type: "file",
         mediaType: "application/pdf",
-        filename: ref.name,
+        filename,
         url: "data:application/pdf;base64," + raw.toString("base64"),
       }
     return notice(
@@ -155,7 +166,7 @@ async function readAttachment(
 // Prepare bounded model inputs on the machine that owns the task directory.
 export async function prepareSavedAttachments(
   taskDir: string,
-  refs: StoredAttachment[]
+  refs: MessageAttachment[]
 ): Promise<PreparedAttachment[]> {
   const result: PreparedAttachment[] = []
   const mediaCount = refs.filter((ref) =>
@@ -166,13 +177,22 @@ export async function prepareSavedAttachments(
   for (const ref of refs) {
     let part: Part
     try {
-      if (
+      if ("origin" in ref && ref.origin === "workspace") {
+        if (!workspaceMentionMediaType(ref.relativePath))
+          throw new Error("Invalid reference")
+      } else if (
         ref.relativePath.split("/").length !== 2 ||
         !ref.relativePath.startsWith("uploads/")
       )
         throw new Error("Invalid attachment")
       part = await readAttachment(taskDir, ref, imageBudget, textBudget)
     } catch (error) {
+      if ("origin" in ref && ref.origin === "workspace")
+        throw new ModelConnectionError(
+          "Could not read " +
+            ref.relativePath +
+            ". Check the file or remove its mention."
+        )
       const missing = (error as NodeJS.ErrnoException)?.code === "ENOENT"
       part = notice(
         "Could not read attachment " +
@@ -185,4 +205,29 @@ export async function prepareSavedAttachments(
     result.push({ reference: ref, part })
   }
   return result
+}
+
+export async function workspaceAttachmentReference(
+  taskDir: string,
+  relativePath: string
+): Promise<MessageAttachment> {
+  const mediaType = workspaceMentionMediaType(relativePath)
+  if (!mediaType)
+    throw new ModelConnectionError(
+      "This workspace file type or location cannot be attached."
+    )
+  const file = await resolveWorkspaceFile(taskDir, relativePath).catch(() => {
+    throw new ModelConnectionError(
+      "Workspace file unavailable: " + relativePath
+    )
+  })
+  if (file.stat.size > BigInt(MAX_UPLOAD_BYTES))
+    throw new ModelConnectionError("Workspace files must be 200 MB or smaller.")
+  return {
+    origin: "workspace",
+    relativePath: file.relativePath,
+    name: file.name,
+    size: Number(file.stat.size),
+    mediaType,
+  }
 }

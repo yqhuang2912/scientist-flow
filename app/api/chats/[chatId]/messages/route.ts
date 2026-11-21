@@ -37,7 +37,12 @@ async function handle(request: Request, { params }: Context) {
       )
       if (!input.success)
         return new Response("Invalid chat message.", { status: 400 })
-      if (!chat.bots.some((b) => b.id === input.data.botId))
+      const members = new Set(chat.bots.map((bot) => bot.id))
+      if (
+        !(input.data.mentionedBotIds ?? [input.data.botId]).every((id) =>
+          members.has(id)
+        )
+      )
         return new Response("This bot is not a member of this chat.", {
           status: 403,
         })

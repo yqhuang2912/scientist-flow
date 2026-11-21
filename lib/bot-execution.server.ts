@@ -23,9 +23,9 @@ export async function claimExecution(
   botId: string,
   runId: string,
   delegation: Delegation | null,
-  lease?: string
+  lease?: string,
+  slot = delegation ? 1 : 0
 ) {
-  const slot = delegation ? 1 : 0
   const executionId = nanoid()
   // Test the lease in the insert itself. A worker resuming after a pause
   // cannot create a new speaker slot once another worker owns the turn.
@@ -47,7 +47,8 @@ export async function claimExecution(
         eq(executions.slot, slot)
       )
     )
-  if (!existing) throw new Error("Execution claim unavailable.")
+  if (!existing || existing.botId !== botId)
+    throw new Error("Execution claim unavailable.")
   if (existing.id === executionId) return { row: existing, claimed: true }
   if (lease && existing.status === "running" && existing.runId !== runId) {
     const [resumed] = await db
@@ -97,6 +98,7 @@ export async function hydrateExecutions(chatId: string, history: UIMessage[]) {
     .where(
       and(eq(executions.chatId, chatId), inArray(executions.userMessageId, ids))
     )
+    .orderBy(executions.slot)
   return mergeExecutionMessages(
     history,
     rows.flatMap((r) => (r.message ? [r.message] : []))

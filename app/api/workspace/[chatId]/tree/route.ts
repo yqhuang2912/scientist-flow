@@ -1,5 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { listWorkspaceDir } from "@/lib/workspace.server"
+import {
+  listWorkspaceDir,
+  requireWorkspaceBinding,
+} from "@/lib/workspace.server"
+import { findWorkspaceMentions } from "@/lib/workspace-mentions.server"
 import { directoryError } from "@/lib/workspace-directory.server"
 
 export async function GET(
@@ -11,7 +15,15 @@ export async function GET(
   const relPath = searchParams.get("path") ?? ""
 
   try {
-    const result = await listWorkspaceDir(chatId, relPath)
+    const query = searchParams.get("mention")
+    const result =
+      query === null
+        ? await listWorkspaceDir(chatId, relPath)
+        : await findWorkspaceMentions(
+            (await requireWorkspaceBinding(chatId)).taskDir,
+            query,
+            request.signal
+          )
     return NextResponse.json(result, {
       headers: { "Cache-Control": "no-store" },
     })

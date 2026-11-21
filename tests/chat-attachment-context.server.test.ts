@@ -14,13 +14,54 @@ import path from "node:path"
 import os from "node:os"
 import { test } from "node:test"
 import sharp from "sharp"
-import { prepareSavedAttachments } from "../lib/chat-attachment-context.server"
+import {
+  prepareSavedAttachments,
+  workspaceAttachmentReference,
+} from "../lib/chat-attachment-context.server"
+import { findWorkspaceMentions } from "../lib/workspace-mentions.server"
 import {
   attachmentMediaType,
   chatAttachmentParts,
   storedAttachmentSchema,
 } from "../lib/chat-composer"
 import { publicModelHistory } from "../lib/bot-execution"
+
+test("workspace mentions search nested files and snapshot their contents inside the task", async (t) => {
+  const base = await mkdtemp(
+    path.join(await realpath(os.tmpdir()), "sf-mentions-")
+  )
+  t.after(() => rm(base, { recursive: true, force: true }))
+  const root = path.join(base, "task")
+  for (const dir of ["docs", "src", "data", "outputs/checkpoints"])
+    await mkdir(path.join(root, dir), { recursive: true })
+  for (const dir of ["docs", "src", "data", "outputs/checkpoints"])
+    await writeFile(path.join(root, dir, "模型.py"), "actual = 37")
+  await writeFile(path.join(base, "private.py"), "outside")
+  await symlink(
+    base,
+    path.join(root, "link"),
+    process.platform === "win32" ? "junction" : "dir"
+  )
+  assert.deepEqual((await findWorkspaceMentions(root, "模型")).paths, [
+    "docs/模型.py",
+    "src/模型.py",
+  ])
+  assert.deepEqual((await findWorkspaceMentions(root, "src/")).paths, [
+    "src/模型.py",
+  ])
+  const refs = [await workspaceAttachmentReference(root, "docs/模型.py")]
+  const [file] = await prepareSavedAttachments(root, refs)
+  assert.ok(file.part.type === "text" && file.part.text.includes("actual = 37"))
+  assert.match(file.part.text, /docs\/模型\.py/)
+  for (const p of [
+    "../private.py",
+    "link/private.py",
+    "data/模型.py",
+    "outputs/checkpoints/模型.py",
+    "missing.txt",
+  ])
+    await assert.rejects(() => workspaceAttachmentReference(root, p))
+})
 
 test("prepared messages contain actual slide, Word, spreadsheet and PDF text and model-ready image bytes", async (t) => {
   const taskDir = await mkdtemp(

@@ -8,6 +8,12 @@ export type WorkspaceOpenPolicy =
 
 // Ordered, shared by the tree entry point and every server-side read/open/save.
 export const BLOCKED_WORKSPACE_REGIONS = ["data", "outputs/checkpoints"]
+export function isBlockedWorkspaceRegion(relativePath: string) {
+  const lower = relativePath.toLowerCase()
+  return BLOCKED_WORKSPACE_REGIONS.some(
+    (region) => lower === region || lower.startsWith(region + "/")
+  )
+}
 export const BLOCKED_FILE_EXTENSIONS = [
   ".csv",
   ".tsv",
@@ -98,9 +104,7 @@ export function workspaceOpenPolicy(rawPath: string): WorkspaceOpenPolicy {
     return { kind: "blocked", reason: "Invalid workspace file path." }
   const relative = parsed.data.toLowerCase()
   if (
-    BLOCKED_WORKSPACE_REGIONS.some(
-      (region) => relative === region || relative.startsWith(`${region}/`)
-    ) ||
+    isBlockedWorkspaceRegion(relative) ||
     BLOCKED_FILE_EXTENSIONS.some((extension) => relative.endsWith(extension))
   ) {
     return {

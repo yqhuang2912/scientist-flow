@@ -22,8 +22,10 @@ No package upgrade or database change is required.
 - `components/chat-markdown.tsx` maps Streamdown code fences to Base `CodeBlock`,
   `CodeBlockLine` and copy controls, reusing the installed syntax highlighter.
   Stale highlighting callbacks cannot overwrite a newer code revision.
-- `components/chat-composer.tsx` composes `InputGroup`, a bot radio menu and
-  a send/stop button. RHF and the shared Zod schema validate without changing
+- `components/chat-composer.tsx` composes `InputGroup`, a send/stop button
+  and an inline @mention picker for chat members and workspace files. Multiple
+  addressed bots respond in mention order, each using its own Deep Agent.
+  RHF and the shared Zod schema validate without changing
   whitespace; composition and Shift+Enter never submit. Pending submissions
   cannot clear a newer draft, and a disabled control does not dim the group.
 - `components/chat-activity.tsx` renders reasoning, tools, sources, approvals

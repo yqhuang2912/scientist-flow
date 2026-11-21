@@ -179,6 +179,12 @@ test(
       const key = new Headers(init?.headers).get("authorization") ?? ""
       const body: RequestBody = JSON.parse(String(init?.body))
       sent.push({ key, body })
+      if (
+        JSON.stringify(body.messages.at(-1)).includes(
+          "explicit mention fixture"
+        )
+      )
+        return sse(body.model, { content: "Reply from " + body.model }, "stop")
       const call = (index: number, name: string, args: object) => ({
         index,
         id: "fixture-call-" + index + "-" + name,
@@ -427,7 +433,8 @@ test(
       let transcript: UIMessage[] = []
       await runBotTurn({
         chatId,
-        requestedBotId: a,
+        requestedBotId:
+          (input.metadata as { botId?: string } | undefined)?.botId ?? a,
         runId: nanoid(),
         signal: controller.signal,
         httpTransport: async (req: ToolRequest) => {
@@ -548,6 +555,45 @@ test(
         }),
         db.insert(botTools).values({ botId: b, toolId: httpId }),
       ])
+      await t.test(
+        "explicit mentions claim independent speakers in order and replay both replies",
+        async () => {
+          const input: UIMessage = {
+            ...user(),
+            metadata: { botId: b, mentionedBotIds: [b, a] },
+            parts: [
+              { type: "text", text: "@Rowan @Iris explicit mention fixture" },
+            ],
+          }
+          sent = []
+          const replies = (await run(input)).filter(
+            (m) => m.role === "assistant"
+          )
+          assert.deepEqual(
+            replies.map((m) => (m.metadata as { botId: string }).botId),
+            [b, a]
+          )
+          assert.deepEqual(
+            sent.map(({ body }) => body.model),
+            [otherModel, firstModel]
+          )
+          assert.ok(
+            sent.every(
+              ({ body }) =>
+                !body.tools?.some((tool) => tool.function.name === "handoff")
+            )
+          )
+          const replay = (await run(input)).filter(
+            (m) => m.role === "assistant"
+          )
+          assert.deepEqual(
+            replay.map((m) => m.id),
+            replies.map((m) => m.id)
+          )
+          assert.equal(sent.length, 2)
+          sent = []
+        }
+      )
       await t.test(
         "one direct bot uses the pilot, another uses its assigned tools, and replay reuses the claimed message",
         async () => {

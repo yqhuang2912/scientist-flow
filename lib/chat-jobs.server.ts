@@ -8,7 +8,10 @@ import {
   ModelConnectionError,
 } from "./model-credentials.server"
 import { chatAttachmentParts } from "./chat-composer"
-import { prepareSavedAttachments } from "./chat-attachment-context.server"
+import {
+  prepareSavedAttachments,
+  workspaceAttachmentReference,
+} from "./chat-attachment-context.server"
 import { requireWorkspaceBinding } from "./workspace.server"
 import { chatMemberChoice, validateChoice } from "./model-connections.server"
 import type { ChatJobInput, ChatSnapshot } from "./chat-job"
@@ -63,18 +66,30 @@ export async function enqueueChatTurn(chatId: string, input: ChatJobInput) {
     return !!row
   }
   if (await alreadySubmitted()) return
-  await validateChoice(await chatMemberChoice(chatId, input.botId))
-  const prepared = input.files.length
-    ? await prepareSavedAttachments(
-        (await requireWorkspaceBinding(chatId)).taskDir,
-        input.files
-      )
-    : []
+  await Promise.all(
+    (input.mentionedBotIds ?? [input.botId]).map(async (id) =>
+      validateChoice(await chatMemberChoice(chatId, id))
+    )
+  )
+  const paths = input.workspacePaths ?? []
+  const prepare = async () => {
+    if (!input.files.length && !paths.length) return []
+    const { taskDir } = await requireWorkspaceBinding(chatId)
+    const refs = await Promise.all(
+      paths.map((p) => workspaceAttachmentReference(taskDir, p))
+    )
+    return prepareSavedAttachments(taskDir, [...input.files, ...refs])
+  }
+  const prepared = await prepare()
   const { parts, workspaceFiles } = chatAttachmentParts(prepared, input.text)
   const userMessage: UIMessage = {
     id: input.id,
     role: "user",
-    metadata: { botId: input.botId, workspaceFiles },
+    metadata: {
+      botId: input.botId,
+      mentionedBotIds: input.mentionedBotIds,
+      workspaceFiles,
+    },
     parts,
   }
   if (Buffer.byteLength(JSON.stringify(userMessage)) > 480 * 1024)

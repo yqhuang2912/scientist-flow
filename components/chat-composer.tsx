@@ -1,21 +1,14 @@
 "use client"
 
 import { useEffect, useId, useRef, useState } from "react"
-import { useForm, useWatch } from "react-hook-form"
+import { useController, useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import type { ChatStatus } from "ai"
-import {
-  ArrowUpIcon,
-  ChevronDownIcon,
-  PlusIcon,
-  SquareIcon,
-  XIcon,
-} from "lucide-react"
+import { ArrowUpIcon, PlusIcon, SquareIcon, XIcon } from "lucide-react"
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
-  InputGroupTextarea,
 } from "@/components/ui/input-group"
 import {
   Attachment,
@@ -27,14 +20,6 @@ import {
   AttachmentTrigger,
 } from "@/components/ui/attachment"
 import { ImagePreview } from "@/components/image-preview"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import {
   Field,
   FieldError,
@@ -48,16 +33,16 @@ import {
 } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
-import { ChatAvatar } from "@/components/chat-avatar"
+import { ChatMentionInput } from "./chat-mention-input"
+import { mentionTargets, type Mention } from "@/lib/chat-mentions"
 import { FileTypeIcon } from "@/components/file-type-icon"
-import { compactChatAvatarStyles } from "@/components/ui/compact-styles"
 import {
   chatComposerSchema,
-  shouldSubmitChatMessage,
   attachmentRejection,
   attachmentMediaType,
   formatAttachmentSize,
   type ChatComposerInput,
+  type ChatComposerDraft,
   type ChatComposerMessage,
 } from "@/lib/chat-composer"
 
@@ -65,7 +50,12 @@ type ComposerBot = { id: string; name: string; avatar: string }
 
 function DraftImagePreview({ file }: { file: File }) {
   const [url, setUrl] = useState("")
-  useEffect(() => () => { if (url) URL.revokeObjectURL(url) }, [url])
+  useEffect(
+    () => () => {
+      if (url) URL.revokeObjectURL(url)
+    },
+    [url]
+  )
   return (
     <ImagePreview
       source={{ name: file.name, url }}
@@ -82,16 +72,14 @@ function DraftImagePreview({ file }: { file: File }) {
 
 export function ChatComposer({
   bots,
-  selectedBotId,
-  onBotChange,
+  chatId,
   onSubmit,
   status,
   onStop,
   textOnly = false,
 }: {
   bots: ComposerBot[]
-  selectedBotId: string
-  onBotChange: (id: string) => void
+  chatId?: string
   onSubmit: (
     message: ChatComposerMessage
   ) => void | Promise<void | { error: string }>
@@ -100,29 +88,31 @@ export function ChatComposer({
   textOnly?: boolean
 }) {
   const inputId = useId()
-  const composing = useRef(false)
+  const [mentions, setMentions] = useState<Mention[]>([])
   const submitting = useRef(false)
   const fileInput = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
-  const form = useForm<ChatComposerInput, unknown, ChatComposerMessage>({
+  const form = useForm<ChatComposerInput, unknown, ChatComposerDraft>({
     resolver: zodResolver(chatComposerSchema),
     defaultValues: { text: "", files: [] },
     reValidateMode: "onSubmit",
   })
-  const text = useWatch({ control: form.control, name: "text" })
+  const { field } = useController({ control: form.control, name: "text" })
+  const text = field.value
   const files = useWatch({ control: form.control, name: "files" }) ?? []
   const busy = status === "submitted" || status === "streaming"
   const pending = form.formState.isSubmitting
   const canSend =
     (text.trim().length > 0 || files.length > 0) && !busy && !pending
   const error = form.formState.errors.text ?? form.formState.errors.root
-  const selectedBot = bots.find((bot) => bot.id === selectedBotId)
   const label = busy ? "Stop response" : "Send message"
 
   function addFiles(incoming: FileList | File[] | null) {
     if (!incoming) return
     if (textOnly) {
-      form.setError("root", { message: "This chat supports text messages only." })
+      form.setError("root", {
+        message: "This chat supports text messages only.",
+      })
       return
     }
     form.clearErrors("root")
@@ -161,16 +151,21 @@ export function ChatComposer({
     )
   }
 
-  async function submit(message: ChatComposerMessage) {
+  async function submit(message: ChatComposerDraft) {
     if (busy || submitting.current) return
     submitting.current = true
     form.clearErrors()
     // Clear only the submitted revision, preserving input typed during a reply.
+    const submittedMentions = mentions
+    setMentions([])
     form.setValue("text", "")
     form.setValue("files", [])
     let problem: string | undefined
     try {
-      const result = await onSubmit(message)
+      const result = await onSubmit({
+        ...message,
+        ...mentionTargets(submittedMentions),
+      })
       problem = result?.error
     } catch {
       problem = "Could not send the message. Please try again."
@@ -178,7 +173,10 @@ export function ChatComposer({
       submitting.current = false
     }
     if (problem) {
-      if (!form.getValues("text")) form.setValue("text", message.text)
+      if (!form.getValues("text")) {
+        form.setValue("text", message.text)
+        setMentions(submittedMentions)
+      }
       form.setValue("files", [
         ...new Set([...message.files, ...(form.getValues("files") ?? [])]),
       ])
@@ -242,7 +240,9 @@ export function ChatComposer({
                       {formatAttachmentSize(file.size)}
                     </AttachmentDescription>
                   </AttachmentContent>
-                  {attachmentMediaType(file)?.startsWith("image/") && <DraftImagePreview file={file} />}
+                  {attachmentMediaType(file)?.startsWith("image/") && (
+                    <DraftImagePreview file={file} />
+                  )}
                   <AttachmentAction
                     className="relative z-20"
                     aria-label={`Remove ${file.name}`}
@@ -255,95 +255,40 @@ export function ChatComposer({
             </div>
           )}
           <InputGroup variant="composer">
-            <InputGroupTextarea
-              {...form.register("text")}
+            <ChatMentionInput
               id={inputId}
-              size="composer"
-              aria-invalid={!!error}
-              aria-describedby={error ? `${inputId}-error` : undefined}
-              placeholder="Message your bot..."
-              className="max-h-48 min-h-13"
-              onCompositionStart={() => {
-                composing.current = true
-              }}
-              onCompositionEnd={() => {
-                composing.current = false
-              }}
-              onKeyDown={(event) => {
-                if (
-                  !shouldSubmitChatMessage({
-                    key: event.key,
-                    shiftKey: event.shiftKey,
-                    isComposing:
-                      composing.current || event.nativeEvent.isComposing,
-                    keyCode: event.nativeEvent.keyCode,
-                  })
-                )
-                  return
-                event.preventDefault()
-                if (canSend) event.currentTarget.form?.requestSubmit()
+              chatId={textOnly ? undefined : chatId}
+              bots={bots}
+              value={text}
+              mentions={mentions}
+              error={!!error}
+              canSend={canSend}
+              inputRef={field.ref}
+              onBlur={field.onBlur}
+              change={(value, references) => {
+                field.onChange(value)
+                setMentions(references)
               }}
             />
             <InputGroupAddon align="block-end" className="justify-between">
               <div className="flex min-w-0 items-center gap-1">
-                {!textOnly && <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <InputGroupButton
-                        size="icon-sm"
-                        type="button"
-                        aria-label="Attach files"
-                        disabled={busy}
-                        onClick={() => fileInput.current?.click()}
-                      />
-                    }
-                  >
-                    <PlusIcon />
-                  </TooltipTrigger>
-                  <TooltipContent>Attach files</TooltipContent>
-                </Tooltip>}
-                {bots.length > 0 && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
+                {!textOnly && (
+                  <Tooltip>
+                    <TooltipTrigger
                       render={
                         <InputGroupButton
-                          size="sm"
-                          disabled={bots.length < 2}
-                          aria-label="Choose a bot"
-                          className="max-w-48"
+                          size="icon-sm"
+                          type="button"
+                          aria-label="Attach files"
+                          disabled={busy}
+                          onClick={() => fileInput.current?.click()}
                         />
                       }
                     >
-                      <span className="truncate">
-                        {selectedBot?.name ?? "Choose a bot"}
-                      </span>
-                      <ChevronDownIcon data-icon="inline-end" />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent side="top" align="start">
-                      <DropdownMenuGroup>
-                        <DropdownMenuRadioGroup
-                          value={selectedBotId}
-                          onValueChange={onBotChange}
-                        >
-                          {bots.map((bot) => (
-                            <DropdownMenuRadioItem
-                              key={bot.id}
-                              value={bot.id}
-                              closeOnClick
-                            >
-                              <ChatAvatar
-                                seed={bot.avatar}
-                                animated
-                                alt={`${bot.name} avatar`}
-                                className={compactChatAvatarStyles}
-                              />
-                              {bot.name}
-                            </DropdownMenuRadioItem>
-                          ))}
-                        </DropdownMenuRadioGroup>
-                      </DropdownMenuGroup>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                      <PlusIcon />
+                    </TooltipTrigger>
+                    <TooltipContent>Attach files</TooltipContent>
+                  </Tooltip>
                 )}
               </div>
               <Tooltip>
