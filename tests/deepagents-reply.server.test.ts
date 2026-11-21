@@ -6,6 +6,150 @@ import { z } from "zod"
 import { MockLanguageModelV4 } from "ai/test"
 import { deepAgentReply } from "../lib/deepagents-reply.server"
 import { gatewayStep } from "../lib/gateway-step.server"
+import { groupReplyOutput } from "../lib/group-reply-stream"
+import { projectRecallTool } from "../lib/project-decisions"
+
+test("ordinary group turns stream a committed reply and quarantine candidates until citation verification", async (t) => {
+  for (const scenario of [
+    "ordinary",
+    "local",
+    "foreign",
+    "mixed",
+    "incomplete",
+  ] as const) {
+    await t.test(scenario, { timeout: 10_000 }, async () => {
+      const record = "D-1234567890abcdef"
+      const verify = Promise.withResolvers<void>()
+      const release = Promise.withResolvers<void>()
+      const first = Promise.withResolvers<void>()
+      const ready =
+        Promise.withResolvers<
+          ReadableStreamDefaultController<LanguageModelV4StreamPart>
+        >()
+      const outputs: string[] = [],
+        citations: string[] = [],
+        errors: string[] = []
+      let lookups = 0
+      const model = new MockLanguageModelV4({
+        doStream: async ({ tools }) => {
+          assert.ok(tools?.some((tool) => tool.name === projectRecallTool))
+          assert.ok(tools?.some((tool) => tool.name === groupReplyOutput.name))
+          return {
+            stream: new ReadableStream({ start: (c) => ready.resolve(c) }),
+          }
+        },
+      })
+      const stream = deepAgentReply({
+        route: { model, providerOptions: {} },
+        general: true,
+        instructions: "Answer the group.",
+        messages: [{ role: "user", content: "Question" }],
+        messageId: "reply",
+        metadata: { executionId: "run" },
+        signal: new AbortController().signal,
+        onError: () => "Rejected",
+        resolveCitation: async (id) => {
+          lookups++
+          verify.resolve()
+          await release.promise
+          return id === record ? record : undefined
+        },
+      }).getReader()
+      const done = (async () => {
+        for (;;) {
+          const { value, done } = await stream.read()
+          if (done) return
+          if (value.type === "text-delta") {
+            outputs.push(value.delta)
+            first.resolve()
+          }
+          if (value.type === "source-document") citations.push(value.sourceId)
+          if (value.type === "error") errors.push(value.errorText)
+        }
+      })()
+      const c = await ready.promise
+      c.enqueue({ type: "text-delta", id: "candidate", delta: "阈值为 0.99" })
+      if (scenario === "ordinary" || scenario === "mixed") {
+        c.enqueue({
+          type: "tool-input-start",
+          id: "body",
+          toolName: groupReplyOutput.name,
+        })
+        c.enqueue({
+          type: "tool-input-delta",
+          id: "body",
+          delta: '{"text":"第一段',
+        })
+        await first.promise
+        assert.deepEqual(outputs, ["第一段"])
+        if (scenario === "ordinary") {
+          c.enqueue({ type: "tool-input-delta", id: "body", delta: '第二段"}' })
+          c.enqueue({
+            type: "tool-call",
+            toolName: groupReplyOutput.name,
+            toolCallId: "body",
+            input: '{"text":"第一段第二段"}',
+          })
+        }
+      }
+      if (scenario === "incomplete")
+        c.enqueue({
+          type: "tool-input-start",
+          id: "lookup",
+          toolName: projectRecallTool,
+        })
+      else if (scenario !== "ordinary")
+        c.enqueue({
+          type: "tool-call",
+          toolName: projectRecallTool,
+          toolCallId: "lookup",
+          input: JSON.stringify({
+            recordId: scenario === "foreign" ? "D-0000000000000000" : record,
+            answer: "阈值为 0.42",
+          }),
+        })
+      c.enqueue({
+        type: "finish",
+        finishReason:
+          scenario === "incomplete"
+            ? { unified: "stop", raw: "stop" }
+            : { unified: "tool-calls", raw: "tool_calls" },
+        usage: {
+          inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+          outputTokens: { total: 1, text: 1, reasoning: 0 },
+        },
+      })
+      c.close()
+      if (scenario === "local" || scenario === "foreign") {
+        await verify.promise
+        assert.deepEqual(outputs, [])
+        assert.deepEqual(citations, [])
+        release.resolve()
+      }
+      await done
+      assert.equal(model.doStreamCalls.length, 1)
+      assert.deepEqual(citations, scenario === "local" ? [record] : [])
+      assert.deepEqual(
+        errors,
+        scenario === "mixed" || scenario === "incomplete" ? ["Rejected"] : []
+      )
+      assert.equal(
+        lookups,
+        scenario === "local" || scenario === "foreign" ? 1 : 0
+      )
+      assert.equal(
+        outputs.join(""),
+        {
+          ordinary: "第一段第二段",
+          local: "阈值为 0.42",
+          mixed: "第一段",
+          incomplete: "",
+          foreign: "No matching active decision was found in this project.",
+        }[scenario]
+      )
+    })
+  }
+})
 
 test("only one complete, validated handoff reaches the dispatcher", async (t) => {
   const call = {

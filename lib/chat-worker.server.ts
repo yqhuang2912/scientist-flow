@@ -63,21 +63,29 @@ async function execute(job: Job, lease: string) {
       lease,
       signal: controller.signal,
       transcript: history.slice(0, index + 1),
-      publish: async (stream) => {
+      publish: async (stream, _parentExecutionId, flushFirstBody) => {
         let latest: UIMessage | undefined
         let lastWrite = 0
+        let wroteBody = false
         for await (const message of readUIMessageStream({ stream })) {
           latest = message
           const pos = replies.findIndex((m) => m.id === message.id)
           if (pos < 0) replies.push(message)
           else replies[pos] = message
-          if (Date.now() - lastWrite >= 750) {
+          // A start frame or tool event may have just used the throttle slot.
+          // Persist the first body delta even if the model then pauses.
+          const firstBody =
+            flushFirstBody &&
+            !wroteBody &&
+            message.parts.some((p) => p.type === "text" && p.text.length > 0)
+          if (firstBody || Date.now() - lastWrite >= 750) {
             try {
               await saveProgress(lease, replies)
             } catch (error) {
               controller.abort(new ChatLeaseLost())
               throw error
             }
+            if (firstBody) wroteBody = true
             lastWrite = Date.now()
           }
         }

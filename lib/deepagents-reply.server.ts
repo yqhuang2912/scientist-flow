@@ -31,6 +31,11 @@ import {
 import type { resolveBotModel } from "./bot-model.server"
 import { ModelConnectionError } from "./model-credentials.server"
 import {
+  groupReplyInstructions,
+  groupReplyOutput,
+  GroupReplyStream,
+} from "./group-reply-stream"
+import {
   projectDecisionMediaType,
   projectDecisionTool,
   projectRecallInput,
@@ -143,9 +148,16 @@ class PilotModel extends BaseChatModel {
       throw new Error("Unexpected pilot model step.")
     const route = step === 0 ? this.route : this.followup!(step)
     const tools = this.definitions.filter((t) => this.allowsTool(t.name))
+    const hasRecall = tools.some((t) => t.name === projectRecallTool)
+    const groupReply =
+      this.general && hasRecall ? new GroupReplyStream(this.onText) : undefined
     const { stream } = await route.model.doStream({
       prompt: messages.map(providerMessage),
-      tools: tools.length ? tools : undefined,
+      tools: groupReply
+        ? [...tools, groupReplyOutput]
+        : tools.length
+          ? tools
+          : undefined,
       providerOptions: route.providerOptions,
       abortSignal: signal,
     })
@@ -154,10 +166,9 @@ class PilotModel extends BaseChatModel {
     const calls = new Map<string, PilotCall>()
     // A recipient may return either an answer or a tool call. Only committed
     // answer text belongs in the public message before the tool result exists.
-    const canCite =
-      !this.followup && tools.some((t) => t.name === projectRecallTool)
+    const canCite = !this.general && !this.followup && hasRecall
     const bufferText = this.general
-      ? tools.some((t) => t.name === projectRecallTool)
+      ? hasRecall
       : tools.length > 0 && (!!this.followup || canCite)
     const reader = stream.getReader()
     try {
@@ -166,6 +177,7 @@ class PilotModel extends BaseChatModel {
         if (done) break
         signal.throwIfAborted()
         if (value.type === "error") throw value.error
+        if (groupReply && (await groupReply.consume(value))) continue
         if (value.type.startsWith("tool-") && !tools.length)
           throw new Error("Unexpected tool output.")
         // Both provider SDKs assemble argument deltas into this final event.
@@ -204,8 +216,21 @@ class PilotModel extends BaseChatModel {
       reader.releaseLock()
     }
     signal.throwIfAborted()
+    const publicReply = groupReply?.finish(finish)
+    if (publicReply !== undefined)
+      return {
+        generations: [
+          { text: publicReply, message: new AIMessage(publicReply) },
+        ],
+      }
     const call = calls.values().next().value
     if (call && (finish === "tool-calls" || finish === "stop")) {
+      if (
+        groupReply &&
+        calls.size > 1 &&
+        [...calls.values()].some((c) => c.name === projectRecallTool)
+      )
+        throw new Error("A project citation must be the only call in its step.")
       if (canCite && call.name === "handoff" && text) this.onText(text)
       this.call = call
       for (const id of calls.keys()) this.completedCallIds.add(id)
@@ -520,7 +545,11 @@ export function deepAgentReply(options: {
                 return handler({
                   ...request,
                   tools: tools.filter((tool) => allowsTool(tool.name)),
-                  systemMessage: new SystemMessage(instructions),
+                  systemMessage: new SystemMessage(
+                    options.general && resolveCitation
+                      ? instructions + "\n\n" + groupReplyInstructions
+                      : instructions
+                  ),
                 })
               },
             }),

@@ -82,7 +82,8 @@ type BotTurn = {
   transcript: UIMessage[]
   publish: (
     stream: ReadableStream<UIMessageChunk>,
-    parentExecutionId: string | null
+    parentExecutionId: string | null,
+    flushFirstBody?: boolean
   ) => Promise<UIMessage | undefined>
   saveReplies: (replies: UIMessage[]) => void
 }
@@ -426,7 +427,11 @@ export async function runBotTurn({
           },
         })
       )
-      final = await publish(stream, execution.parentExecutionId)
+      final = await publish(
+        stream,
+        execution.parentExecutionId,
+        group && !pilotRecipient
+      )
       if (intent && !failure && !signal.aborted) {
         // Parallel tools in the final step have now committed. Resolve evidence
         // references on the server before the recipient can claim its execution.
