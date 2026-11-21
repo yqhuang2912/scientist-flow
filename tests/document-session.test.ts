@@ -54,6 +54,16 @@ function fixture(overrides: Partial<DocumentIO> = {}) {
   })
   return { session, writes, reads }
 }
+test("a data JSON opens read-only and cannot dispatch a save", async () => {
+  const { session, writes } = fixture()
+  await session.open({ ...a, relativePath: "data/scan.JSON" })
+  session.edit("changed")
+  assert.equal(session.getSnapshot().document?.readOnly, true)
+  assert.equal(session.getSnapshot().document?.buffer, "base")
+  assert.equal(await session.save(), false)
+  assert.equal(writes.length, 0)
+})
+
 test("preview/source and same-file reopen keep one shared draft; undo restores clean state", async () => {
   const { session, reads } = fixture()
   await session.open(a)

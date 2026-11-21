@@ -15,6 +15,7 @@ import {
   ChatLeaseLost,
 } from "./chat-jobs.server"
 import { installationOwner } from "./model-credentials.server"
+import { runWorkflow, type WorkflowInput } from "./workflow-run.server"
 
 type Job = typeof chatTurns.$inferSelect
 async function execute(job: Job, lease: string) {
@@ -48,6 +49,35 @@ async function execute(job: Job, lease: string) {
           )
         )
       await settleTurn(lease, job.replies, null)
+      return
+    }
+    const workflow = (job.userMessage.metadata as { workflow?: WorkflowInput })
+      ?.workflow
+    if (workflow) {
+      replies = [...job.replies]
+      try {
+        await runWorkflow(
+          job.chatId,
+          job.id,
+          workflow,
+          lease,
+          controller.signal,
+          replies
+        )
+      } catch (error) {
+        if (!(controller.signal.reason instanceof ChatLeaseLost)) {
+          const reason =
+            error instanceof Error &&
+            /^(This step|The subset|Verification failed|The bot's configured|The preceding)/.test(
+              error.message
+            )
+              ? error.message
+              : "Could not complete the workflow. Check the subset, result files and bot connection."
+          await settleTurn(lease, replies, reason)
+        }
+        return
+      }
+      await settleTurn(lease, replies, null)
       return
     }
     const history = (await chatSnapshot(job.chatId)).messages
@@ -121,13 +151,18 @@ async function execute(job: Job, lease: string) {
 }
 
 const globalWorker = globalThis as typeof globalThis & {
-  scientistFlowWakeChatWorker?: () => void
+  scientistFlowChatWorker?: { wake: () => void; execute: typeof execute }
 }
 export function wakeChatWorker() {
   if (!process.env.SCIENTISTFLOW_INSTALLATION_ID) return
-  const wake = (globalWorker.scientistFlowWakeChatWorker ??= createChatWorker({
+  if (globalWorker.scientistFlowChatWorker) {
+    globalWorker.scientistFlowChatWorker.execute = execute
+    globalWorker.scientistFlowChatWorker.wake()
+    return
+  }
+  const wake = createChatWorker({
     claim: leaseChatTurn,
-    execute,
+    execute: (job, lease) => globalWorker.scientistFlowChatWorker!.execute(job, lease),
     hasPending: async (activeChats) => {
       const [pending] = await db
         .select({ id: chatTurns.id })
@@ -142,6 +177,7 @@ export function wakeChatWorker() {
         .limit(1)
       return !!pending
     },
-  }))
+  })
+  globalWorker.scientistFlowChatWorker = { wake, execute }
   wake()
 }

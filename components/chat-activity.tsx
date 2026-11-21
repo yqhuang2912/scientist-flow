@@ -6,6 +6,7 @@ import {
   ArrowRightLeftIcon,
   ArrowUpRightIcon,
   BrainIcon,
+  BookMarkedIcon,
   BookOpenIcon,
   CircleAlertIcon,
   GlobeIcon,
@@ -60,6 +61,7 @@ import { workspaceOpenPolicy } from "@/lib/workspace-open-policy"
 import { ImagePreview } from "@/components/image-preview"
 import { FileTypeIcon } from "@/components/file-type-icon"
 import { ChatMarkdown } from "@/components/chat-markdown"
+import type { GroupActivity } from "@/lib/group-chat-activity"
 import {
   formatToolValue,
   getToolPresentation,
@@ -236,6 +238,80 @@ function ToolStep({
   )
 }
 
+export function GroupToolActivity({
+  approval,
+  toolAnchor,
+  summary,
+  disabled,
+  onRespond,
+}: {
+  approval?: ChatToolPart
+  toolAnchor: string
+  summary: GroupActivity
+  disabled: boolean
+  onRespond?: RespondToApproval
+}) {
+  const chatId = useParams<{ chatId: string }>()?.chatId
+  const { kind, title, status, result, decisionId, sourceAnchor } = summary
+  const Icon =
+    status === "error"
+      ? CircleAlertIcon
+      : {
+          skill: BookOpenIcon,
+          handoff: ArrowRightLeftIcon,
+          tool: WrenchIcon,
+          decision: BookMarkedIcon,
+        }[kind]
+  return (
+    <div
+      id={toolAnchor}
+      tabIndex={-1}
+      data-group-activity={kind}
+      className="min-w-0 rounded-md focus-visible:outline-2 focus-visible:outline-ring"
+    >
+      {approval ? (
+        <ChatApproval
+          part={approval}
+          summary={title}
+          disabled={disabled}
+          onRespond={onRespond}
+        />
+      ) : (
+        <>
+          <TraceLine status={status}>
+            <TraceIcon>
+              <Icon />
+            </TraceIcon>
+            <TraceTitle className="wrap-anywhere whitespace-normal">
+              {title}
+            </TraceTitle>
+          </TraceLine>
+          {result && (
+            <p className="pb-1 pl-6 text-sm wrap-anywhere">{result}</p>
+          )}
+          {decisionId && chatId && (
+            <div className="flex flex-wrap items-center gap-x-3 pb-1 pl-6 text-xs">
+              <ProjectMemoryButton
+                chatId={chatId}
+                recordId={decisionId}
+                label="查看决定"
+              />
+              {sourceAnchor && (
+                <a
+                  className="underline underline-offset-2"
+                  href={"#" + encodeURIComponent(sourceAnchor)}
+                >
+                  核对本次调用
+                </a>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 export function ChatActivity({
   part,
   active,
@@ -287,7 +363,10 @@ export function ChatActivity({
     return (
       <TraceLine>
         <TraceIcon>
-          <FileTypeIcon filename={part.filename || part.title} mediaType={part.mediaType} />
+          <FileTypeIcon
+            filename={part.filename || part.title}
+            mediaType={part.mediaType}
+          />
         </TraceIcon>
         <TraceTitle title={part.filename || part.title}>
           {part.title}
@@ -301,16 +380,17 @@ export function ChatApproval({
   part,
   disabled,
   onRespond,
+  summary,
 }: {
   part: ChatToolPart
   disabled: boolean
   onRespond?: RespondToApproval
+  summary?: string
 }) {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
   const submitting = useRef(false)
   if (part.state !== "approval-requested") return null
-  const tool = getToolPresentation(part, false)
   const input = formatToolValue(part.input)
   const tooLarge = input.length > 32_768
   async function respond(approved: boolean) {
@@ -334,15 +414,21 @@ export function ChatApproval({
         <ShieldCheckIcon />
       </ItemMedia>
       <ItemContent>
-        <ItemTitle>{tool.title}</ItemTitle>
-        <ItemDescription>
-          {part.approval.requestReason ||
-            "Review the input before allowing this tool to run."}
-        </ItemDescription>
+        <ItemTitle>
+          {summary ?? getToolPresentation(part, false).title}
+        </ItemTitle>
+        {!summary && (
+          <ItemDescription>
+            {part.approval.requestReason ||
+              "Review the input before allowing this tool to run."}
+          </ItemDescription>
+        )}
       </ItemContent>
-      <div className="w-full">
-        <ToolValue label="Input" value={part.input} />
-      </div>
+      {!summary && (
+        <div className="w-full">
+          <ToolValue label="Input" value={part.input} />
+        </div>
+      )}
       {tooLarge && (
         <ItemDescription>
           Input is too large to review here. Approval is unavailable.

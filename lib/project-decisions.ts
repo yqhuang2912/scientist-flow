@@ -106,7 +106,25 @@ export type ProjectCitation = Pick<
   ProjectDecision,
   "id" | "decision" | "toolEvidence" | "quote"
 >
-export function projectCitationMarkdown(record: ProjectCitation) {
+const citationFieldLabels = new Map([
+  ["/threshold", "阈值"],
+  ["/unit", "单位"],
+  ["/period", "报告期"],
+])
+
+export function projectCitationMarkdown(
+  record: ProjectCitation,
+  groupMode: "ordinary" | "pilot"
+) {
+  if (groupMode === "ordinary" && record.toolEvidence) {
+    // The saved summary is free text and can contradict the observation.
+    return record.toolEvidence.fields
+      .map((field) => {
+        const label = citationFieldLabels.get(field.path)
+        return label ? label + "为 " + field.value : toolEvidenceText([field])
+      })
+      .join(" · ")
+  }
   const evidence = record.toolEvidence
     ? toolEvidenceText(record.toolEvidence.fields)
     : record.quote

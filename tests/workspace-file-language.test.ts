@@ -36,6 +36,7 @@ test("every text extension the open policy admits resolves to a grammar", () => 
     ".ini",
     ".cfg",
     ".conf",
+    ".config",
     ".sh",
     ".r",
     ".rs",

@@ -21,7 +21,10 @@ import {
   type ChatTurnProgress,
 } from "@/lib/chat-job"
 import { watchChatRefresh } from "@/lib/chat-refresh"
-import { CHAT_ACCEPTED_EVENT } from "@/lib/chat-recency"
+import {
+  CHAT_ACCEPTED_EVENT,
+  type ChatAcceptedDetail,
+} from "@/lib/chat-recency"
 import type { UploadedEntry } from "@/lib/workspace-validation"
 import type { ChatWithBot } from "@/queries/chats"
 
@@ -36,6 +39,7 @@ export function ChatInterface({
   const [pendingBotId, setPendingBotId] = useState(chat.bots[0]?.id ?? "")
   const [networkError, setNetworkError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
+  const [workflowRetryAvailable, setWorkflowRetryAvailable] = useState(false)
   const chatDropArea = useRef<HTMLDivElement>(null)
   const uploaded = useRef(new WeakMap<File, UploadedEntry>())
   const pending = useRef<{ input: string; id: string } | null>(null)
@@ -118,6 +122,15 @@ export function ChatInterface({
         return { error: await response.text() }
       }
       const ack: ChatTurnAck = await response.json()
+      window.dispatchEvent(
+        new CustomEvent<ChatAcceptedDetail>(CHAT_ACCEPTED_EVENT, {
+          detail: {
+            chatId: chat.id,
+            acceptedAt: ack.acceptedAt,
+            lastMessagePreview: ack.lastMessagePreview,
+          },
+        })
+      )
       // A retry can acknowledge a turn that finished while disconnected.
       let final: ChatTurnProgress | undefined
       if (!isActiveTurn(ack.state)) {
@@ -133,11 +146,6 @@ export function ChatInterface({
       }
       ++version.current
       setSnapshot((current) => mergeTurnAck(current, ack, final))
-      window.dispatchEvent(
-        new CustomEvent(CHAT_ACCEPTED_EVENT, {
-          detail: { chatId: chat.id, acceptedAt: ack.acceptedAt },
-        })
-      )
       pending.current = null
     } catch (e) {
       return {
@@ -164,6 +172,65 @@ export function ChatInterface({
       }))
     }
   }
+  const workflowId = chat.template && "workflow_" + chat.template.id
+  const knownWorkflow =
+    !!workflowId && snapshot.messages.some((m) => m.id === workflowId)
+  const retryWorkflow = workflowRetryAvailable || (!!snapshot.error?.includes("HTTP 429") &&
+    snapshot.messages.findLast((m) => m.role === "user")?.id === workflowId)
+  async function openWorkflow() {
+    if (submitting.current) return
+    submitting.current = true
+    ++version.current
+    setSending(true)
+    setNetworkError(null)
+    try {
+      const response = await fetch(
+        "/api/chats/" + encodeURIComponent(chat.id) + "/workflow" + (retryWorkflow ? "?retry=rate-limit" : ""),
+        { method: "POST" }
+      )
+      if (!response.ok) throw new Error(await response.text())
+      const receipt: ChatTurnAck & { retryable?: boolean } = await response.json()
+      setWorkflowRetryAvailable(!!receipt.retryable)
+      setPendingBotId((receipt.userMessage.metadata as { botId: string }).botId)
+      const progress = await fetch(
+        url + "?id=" + encodeURIComponent(receipt.turnId),
+        { cache: "no-store" }
+      )
+      if (!progress.ok)
+        throw new Error(
+          "Could not load the workflow run. Open it again to recover."
+        )
+      const turn: ChatTurnProgress = await progress.json()
+      setSnapshot((current) => {
+        if (current.messages.some((m) => m.id === receipt.turnId))
+          return mergeTurnProgress({ ...current, activeId: receipt.turnId }, turn)
+        return mergeTurnAck(current, receipt, turn)
+      })
+      if (knownWorkflow)
+        document
+          .querySelector('[data-evidence-message="' + receipt.turnId + '"]')
+          ?.scrollIntoView({ block: "start" })
+      else
+        window.dispatchEvent(
+          new CustomEvent<ChatAcceptedDetail>(CHAT_ACCEPTED_EVENT, {
+            detail: {
+              chatId: chat.id,
+              acceptedAt: receipt.acceptedAt,
+              lastMessagePreview: receipt.lastMessagePreview,
+            },
+          })
+        )
+    } catch (error) {
+      setNetworkError(
+        error instanceof Error
+          ? error.message
+          : "Could not open the workflow run."
+      )
+    } finally {
+      submitting.current = false
+      setSending(false)
+    }
+  }
   const status = sending
     ? "submitted"
     : snapshot.activeId
@@ -186,6 +253,25 @@ export function ChatInterface({
         pendingBotId={pendingBotId}
       />
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 pb-3 sm:px-6">
+        {chat.template && (
+          <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm">
+            <span>
+              {chat.template.name} · v{chat.template.version}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={sending || !!snapshot.activeId}
+              onClick={openWorkflow}
+            >
+              {workflowId && snapshot.activeId === workflowId
+                ? "Workflow running"
+                  : retryWorkflow ? "Retry rate-limited step" : knownWorkflow
+                  ? "View workflow run"
+                  : "Start workflow"}
+            </Button>
+          </div>
+        )}
         {networkError && (
           <p role="status" className="text-xs text-muted-foreground">
             {networkError}

@@ -2,6 +2,7 @@ import type { ElementContent, Root } from "hast"
 import type { Construct, State } from "micromark-util-types"
 import type { Processor } from "unified"
 import { SKIP, visit } from "unist-util-visit"
+import { mentionPattern } from "./chat-mentions"
 
 // A selected path such as docs/[report](final).md is literal text, even
 // though part of its name would normally be parsed as a Markdown link.
@@ -42,13 +43,7 @@ export function rehypeChatMentions(
   const data = this.data()
   data.micromarkExtensions ??= []
   data.micromarkExtensions.push({ text: { 64: ordered.map(literalMention) } })
-  const alternatives = ordered.map((name) =>
-    name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  )
-  const pattern = new RegExp(
-    String.raw`(?<![\w.+@/\\-])@(${alternatives.join("|")})(?![\p{L}\p{N}_/@\\-]|\.[\p{L}\p{N}])`,
-    "gu"
-  )
+  const pattern = mentionPattern(ordered)
 
   return (tree: Root) => {
     visit(tree, (node, index, parent) => {

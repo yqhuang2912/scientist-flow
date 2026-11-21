@@ -311,6 +311,8 @@ export function deepAgentReply(options: {
   messageId: string
   metadata: { executionId: string; engine?: "deepagents" }
   general?: boolean
+  // A pinned workflow can require a local measurement before generation.
+  evidenceTool?: { invoke: (input: Record<string, never>) => Promise<string> }
   recipient?: {
     botId: string
     tools: ToolSet
@@ -502,7 +504,10 @@ export function deepAgentReply(options: {
                   : undefined
                 signal.throwIfAborted()
                 const reply = citation
-                  ? projectCitationMarkdown(citation)
+                  ? projectCitationMarkdown(
+                      citation,
+                      options.general ? "ordinary" : "pilot"
+                    )
                   : "No matching active decision was found in this project."
                 publishText(reply)
                 return reply
@@ -528,6 +533,7 @@ export function deepAgentReply(options: {
           options.general
         )
         let step = 0
+        let observation: Promise<string> | undefined
         const agent = createDeepAgent({
           model,
           systemPrompt: options.instructions,
@@ -543,8 +549,17 @@ export function deepAgentReply(options: {
                 const instructions = options.stepInstructions
                   ? await options.stepInstructions(step++)
                   : options.instructions
+                const observationText = options.evidenceTool
+                  ? await (observation ??= options.evidenceTool.invoke({}))
+                  : undefined
                 return handler({
                   ...request,
+                  ...(observationText && {
+                    messages: [
+                      ...request.messages,
+                      new HumanMessage(observationText),
+                    ],
+                  }),
                   tools: tools.filter((tool) => allowsTool(tool.name)),
                   systemMessage: new SystemMessage(
                     options.general && resolveCitation

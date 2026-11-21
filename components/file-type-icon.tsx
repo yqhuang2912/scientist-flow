@@ -49,7 +49,7 @@ const formats: Format[] = [
   { icon: "yaml", name: /\.ya?ml$/, mime: /[+/](x-)?yaml$/ },
   { icon: "toml", name: /\.toml$/, mime: /[+/](x-)?toml$/ },
   { icon: "env", name: /^\.env(\..+)?$/ },
-  { icon: "config", name: /\.(ini|cfg|conf)$|^\.(gitignore|editorconfig)$/ },
+  { icon: "config", name: /\.(ini|cfg|conf|config)$|^\.(gitignore|editorconfig)$/ },
   { icon: "python", name: /\.(py|pyi)$/, mime: /python/ },
   { icon: "typescript-react", name: /\.tsx$/ },
   { icon: "typescript", name: /\.[cm]?ts$/, mime: /typescript/ },
@@ -136,6 +136,8 @@ export function FileTypeIcon({
 const folderIcons = new Map<string, keyof typeof folderGlyphs>([
   ["data", "folder-database"],
   ["docs", "folder-docs"],
+  ["configs", "folder-config"],
+  ["logs", "folder-log"],
   ["src", "folder-src"],
   ["outputs", "folder-dist"],
   ["uploads", "folder-upload"],

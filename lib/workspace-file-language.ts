@@ -33,6 +33,7 @@ const EXTENSION_LANGUAGES: Record<string, BundledLanguage> = {
   ini: "ini",
   cfg: "ini",
   conf: "ini",
+  config: "ini",
   sh: "shellscript",
   r: "r",
   rs: "rust",

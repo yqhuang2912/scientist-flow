@@ -9,7 +9,12 @@ import {
   renameWorkspaceEntry as renameEntryInWorkspace,
 } from "./workspace-file.server"
 import { ensureUploadsDirectory } from "./workspace-directory.server"
-import { UPLOADS_DIR, workspaceParentPath } from "./workspace-validation"
+import { UPLOADS_DIR } from "./workspace-validation"
+import {
+  ensureWorkspaceDirectory,
+  ensureWorkspaceLayout,
+  WORKSPACE_LAYOUT_VERSION,
+} from "./workspace-layout.server"
 import type {
   FileDeletionConfirmation,
   RenameWorkspaceEntryConfirmation,
@@ -44,6 +49,7 @@ export interface WorkspaceConfig {
 }
 
 export interface WorkspaceBinding {
+  layoutVersion?: number
   /** The resolved absolute path that was used when this chat was initialised. */
   taskDir: string
   /** ISO timestamp of when the workspace was first initialised. */
@@ -265,35 +271,27 @@ async function initialiseTaskDirectory(chatId: string) {
   if (existing) {
     // Re-verify the bound dir still exists and is a directory.
     await assertIsAccessibleDir(existing.taskDir)
+    if ((existing.layoutVersion ?? 1) < WORKSPACE_LAYOUT_VERSION) {
+      await ensureWorkspaceLayout(existing.taskDir, true)
+      await writeLocalFile({
+        ...file,
+        bindings: {
+          ...file.bindings,
+          [chatId]: { ...existing, layoutVersion: WORKSPACE_LAYOUT_VERSION },
+        },
+      })
+    }
     return { taskDir: existing.taskDir, created: false }
   }
 
   const taskDir = path.join(rootDir, chatId)
 
   // First uploads and explicit initialisation use the same checked parent paths.
-  for (const suffix of [
-    "",
-    "/src",
-    "/data",
-    "/docs",
-    "/outputs",
-    "/outputs/figures",
-    "/outputs/checkpoints",
-  ]) {
-    const relative = chatId + suffix
-    try {
-      await createDirectoryInWorkspace(
-        rootDir,
-        workspaceParentPath(relative),
-        path.posix.basename(relative)
-      )
-    } catch (error) {
-      if (!isNodeError(error) || error.code !== "EEXIST") throw error
-      await resolveWorkspaceDirectory(rootDir, relative)
-    }
-  }
+  await ensureWorkspaceDirectory(rootDir, chatId)
+  await ensureWorkspaceLayout(taskDir)
 
   const binding: WorkspaceBinding = {
+    layoutVersion: WORKSPACE_LAYOUT_VERSION,
     taskDir,
     initialisedAt: new Date().toISOString(),
   }

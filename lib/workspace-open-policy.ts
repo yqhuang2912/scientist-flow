@@ -2,6 +2,7 @@ import { workspaceFileTargetSchema } from "./workspace-validation"
 
 export type WorkspaceOpenPolicy =
   | { kind: "internal-text"; markdown: boolean }
+  | { kind: "data-json-preview" }
   | { kind: "internal-image" }
   | { kind: "external" }
   | { kind: "blocked" | "unsupported"; reason: string }
@@ -63,6 +64,7 @@ const TEXT_EXTENSIONS = [
   ".ini",
   ".cfg",
   ".conf",
+  ".config",
   ".sh",
   ".r",
   ".rs",
@@ -103,6 +105,8 @@ export function workspaceOpenPolicy(rawPath: string): WorkspaceOpenPolicy {
   if (!parsed.success)
     return { kind: "blocked", reason: "Invalid workspace file path." }
   const relative = parsed.data.toLowerCase()
+  if (relative.startsWith("data/") && relative.endsWith(".json"))
+    return { kind: "data-json-preview" }
   if (
     isBlockedWorkspaceRegion(relative) ||
     BLOCKED_FILE_EXTENSIONS.some((extension) => relative.endsWith(extension))

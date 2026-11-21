@@ -17,7 +17,12 @@ import { getToolPresentation } from "../lib/chat-presentation"
 
 test(
   "verified tool calls survive a lost receipt and deduplicate by observation, including when independent measurements agree",
-  { skip: process.env.SCIENTISTFLOW_MODEL_DB_TEST !== "1" },
+  {
+    skip:
+      process.env.SCIENTISTFLOW_MODEL_DB_TEST !== "1"
+        ? "未启用数据库集成测试"
+        : !process.env.DATABASE_URL?.trim() && "缺少 DATABASE_URL",
+  },
   async (t) => {
     const { db } = await import("../lib/db")
     const {

@@ -16,6 +16,8 @@ export type DocumentSession = DocumentTarget & {
   version: string
   bom: boolean
   newline: TextDocument["newline"]
+  truncated?: boolean
+  readOnly?: boolean
   loading: boolean
   saving: boolean
   error: string | null
@@ -83,6 +85,7 @@ export class DocumentSessionStore {
     if (
       this.state.intent ||
       this.state.deletion ||
+      this.state.document?.readOnly ||
       this.state.document?.loading
     )
       return
@@ -111,7 +114,8 @@ export class DocumentSessionStore {
     const request = ++this.sequence
     const old = this.state.document
     const policy = workspaceOpenPolicy(target.relativePath)
-    if (policy.kind !== "internal-text") return
+    if (policy.kind !== "internal-text" && policy.kind !== "data-json-preview")
+      return
     const document: DocumentSession =
       reloading && old
         ? { ...old, loading: true, error: null }
@@ -130,7 +134,11 @@ export class DocumentSessionStore {
             missing: false,
             // Only markdown has a second form to show, so it opens rendered.
             // Every other file opens on its editing surface.
-            mode: policy.markdown ? "preview" : "source",
+            mode:
+              policy.kind === "internal-text" && policy.markdown
+                ? "preview"
+                : "source",
+            readOnly: policy.kind === "data-json-preview",
             saved: false,
           }
     this.update({
@@ -177,6 +185,7 @@ export class DocumentSessionStore {
     const document = this.state.document
     if (
       !document ||
+      document.readOnly ||
       document.loading ||
       document.saving ||
       document.missing ||

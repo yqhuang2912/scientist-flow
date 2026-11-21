@@ -9,7 +9,7 @@ import {
 import { cn } from "@/lib/utils"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useRouter } from "next/navigation"
-import { Controller, useForm } from "react-hook-form"
+import { Controller, useForm, useWatch } from "react-hook-form"
 import { ListTodoIcon, Trash2Icon } from "lucide-react"
 
 import { createTask, deleteTask, updateTask } from "@/actions/chat"
@@ -47,6 +47,13 @@ import {
   FieldSet,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { getPublishedTemplates } from "@/queries/task-templates"
+import {
+  LibraryReadStatus,
+  useLibraryRead,
+} from "@/components/shared-library-panel"
 import { Spinner } from "@/components/ui/spinner"
 import { SettingsFormError } from "@/components/settings-shell"
 import { taskFormSchema, type TaskFormValues } from "@/db/schema"
@@ -55,7 +62,10 @@ import type { ChatWithBot } from "@/queries/chats"
 
 interface TaskDialogProps {
   bots: BotSummary[]
-  chat?: Pick<ChatWithBot, "id" | "name" | "bots">
+  chat?: Pick<
+    ChatWithBot,
+    "id" | "name" | "bots" | "template" | "researchBrief"
+  >
   open: boolean
   onOpenChange: (open: boolean) => void
 }
@@ -80,10 +90,16 @@ export function TaskDialog({
   const defaultValues: TaskFormValues = {
     name: chat?.name ?? "",
     botIds: chat?.bots.map((bot) => bot.id) ?? [],
+    templateVersionId: chat?.template?.id,
+    researchBrief: chat?.researchBrief ?? "",
   }
   const form = useForm<TaskFormValues>({
     resolver: zodResolver(taskFormSchema),
     defaultValues,
+  })
+  const templateVersionId = useWatch({
+    control: form.control,
+    name: "templateVersionId",
   })
 
   function handleOpenChange(nextOpen: boolean) {
@@ -116,6 +132,7 @@ export function TaskDialog({
 
         handleOpenChange(false)
         if (!isEditing) {
+          form.reset(defaultValues)
           router.push(`/chats/${result.chat.id}`)
         }
         router.refresh()
@@ -191,72 +208,114 @@ export function TaskDialog({
               />
             </Field>
 
-            <Controller
-              control={form.control}
-              name="botIds"
-              render={({ field, fieldState }) => (
-                <FieldSet
-                  className="min-w-0 gap-1.5"
+            {open && !isEditing && (
+              <Controller
+                control={form.control}
+                name="templateVersionId"
+                render={({ field }) => (
+                  <PublishedTemplatePicker
+                    value={field.value}
+                    disabled={isPending}
+                    onChange={field.onChange}
+                    bots={bots}
+                  />
+                )}
+              />
+            )}
+            {isEditing && chat?.template && (
+              <FieldSet className="gap-1">
+                <FieldLegend variant="label">Template version</FieldLegend>
+                <p className="text-sm">
+                  {chat.template.name} · v{chat.template.version}
+                </p>
+                <FieldDescription>
+                  {chat.bots.map((bot) => bot.name).join(", ")}
+                </FieldDescription>
+              </FieldSet>
+            )}
+            {templateVersionId && (
+              <Field data-invalid={!!form.formState.errors.researchBrief}>
+                <FieldLabel htmlFor={formId + "-brief"}>
+                  Research brief
+                </FieldLabel>
+                <Textarea
+                  id={formId + "-brief"}
                   disabled={isPending}
-                  data-invalid={!!fieldState.error}
-                >
-                  <FieldLegend variant="label">Bots</FieldLegend>
-                  <FieldDescription id={botsHintId}>
-                    {bots.length
-                      ? "Select at least one bot."
-                      : "Add a bot in Settings to create a task."}
-                  </FieldDescription>
-                  <div className="flex max-h-56 flex-col gap-0.5 overflow-y-auto">
-                    {bots.map((bot) => {
-                      const checked = field.value.includes(bot.id)
-                      return (
-                        <label
-                          key={bot.id}
-                          data-active={checked || undefined}
-                          className={cn(
-                            compactItemStyles,
-                            compactItemStates,
-                            "flex h-7.5 cursor-pointer items-center focus-within:bg-highlight has-disabled:pointer-events-none has-disabled:opacity-50"
-                          )}
-                        >
-                          <ChatAvatar
-                            seed={bot.avatar}
-                            animated
-                            alt={`${bot.name} avatar`}
-                            className={compactChatAvatarStyles}
-                          />
-                          <BotName
-                            name={bot.name}
-                            job={bot.job}
-                            className="flex-1"
-                          />
-                          <Checkbox
-                            className="after:inset-0"
-                            disabled={isPending}
-                            aria-invalid={!!fieldState.error}
-                            aria-describedby={
-                              fieldState.error
-                                ? `${botsHintId} ${botsErrorId}`
-                                : botsHintId
-                            }
-                            onBlur={field.onBlur}
-                            checked={checked}
-                            onCheckedChange={(value) => {
-                              const nextValue =
-                                value === true
-                                  ? [...field.value, bot.id]
-                                  : field.value.filter((id) => id !== bot.id)
-                              field.onChange(nextValue)
-                            }}
-                          />
-                        </label>
-                      )
-                    })}
-                  </div>
-                  <FieldError id={botsErrorId} errors={[fieldState.error]} />
-                </FieldSet>
-              )}
-            />
+                  rows={3}
+                  aria-invalid={!!form.formState.errors.researchBrief}
+                  {...form.register("researchBrief")}
+                />
+                <FieldError errors={[form.formState.errors.researchBrief]} />
+              </Field>
+            )}
+            {!templateVersionId && (
+              <Controller
+                control={form.control}
+                name="botIds"
+                render={({ field, fieldState }) => (
+                  <FieldSet
+                    className="min-w-0 gap-1.5"
+                    disabled={isPending}
+                    data-invalid={!!fieldState.error}
+                  >
+                    <FieldLegend variant="label">Bots</FieldLegend>
+                    <FieldDescription id={botsHintId}>
+                      {bots.length
+                        ? "Select at least one bot."
+                        : "Add a bot in Settings to create a task."}
+                    </FieldDescription>
+                    <div className="flex max-h-56 flex-col gap-0.5 overflow-y-auto">
+                      {bots.map((bot) => {
+                        const checked = field.value.includes(bot.id)
+                        return (
+                          <label
+                            key={bot.id}
+                            data-active={checked || undefined}
+                            className={cn(
+                              compactItemStyles,
+                              compactItemStates,
+                              "flex h-7.5 cursor-pointer items-center focus-within:bg-highlight has-disabled:pointer-events-none has-disabled:opacity-50"
+                            )}
+                          >
+                            <ChatAvatar
+                              seed={bot.avatar}
+                              animated
+                              alt={`${bot.name} avatar`}
+                              className={compactChatAvatarStyles}
+                            />
+                            <BotName
+                              name={bot.name}
+                              job={bot.job}
+                              className="flex-1"
+                            />
+                            <Checkbox
+                              className="after:inset-0"
+                              disabled={isPending}
+                              aria-invalid={!!fieldState.error}
+                              aria-describedby={
+                                fieldState.error
+                                  ? `${botsHintId} ${botsErrorId}`
+                                  : botsHintId
+                              }
+                              onBlur={field.onBlur}
+                              checked={checked}
+                              onCheckedChange={(value) => {
+                                const nextValue =
+                                  value === true
+                                    ? [...field.value, bot.id]
+                                    : field.value.filter((id) => id !== bot.id)
+                                field.onChange(nextValue)
+                              }}
+                            />
+                          </label>
+                        )
+                      })}
+                    </div>
+                    <FieldError id={botsErrorId} errors={[fieldState.error]} />
+                  </FieldSet>
+                )}
+              />
+            )}
           </FieldGroup>
 
           <SettingsFormError error={serverError ?? ""} />
@@ -339,5 +398,62 @@ export function TaskDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+type VersionChoice = {
+  id: string
+  name: string
+  version: number
+  botIds: string[]
+}
+
+function PublishedTemplatePicker({
+  value,
+  onChange,
+  disabled,
+  bots,
+}: {
+  value?: string
+  onChange: (id: string | undefined) => void
+  disabled: boolean
+  bots: BotSummary[]
+}) {
+  const id = useId()
+  const [versions, setVersions] = useState<VersionChoice[]>([])
+  const read = useLibraryRead(getPublishedTemplates, setVersions)
+  const selected = versions.find((version) => version.id === value)
+  return (
+    <Field className="gap-1.5">
+      <FieldLabel htmlFor={id}>Template version</FieldLabel>
+      <NativeSelect
+        id={id}
+        disabled={disabled || !read.ready}
+        className="w-full"
+        value={value ?? ""}
+        onChange={(event) => onChange(event.target.value || undefined)}
+      >
+        <NativeSelectOption value="">No template</NativeSelectOption>
+        {versions.map((item) => (
+          <NativeSelectOption key={item.id} value={item.id}>
+            {item.name} · v{item.version}
+          </NativeSelectOption>
+        ))}
+      </NativeSelect>
+      {!read.ready && (
+        <LibraryReadStatus label="Loading published templates…" {...read} />
+      )}
+      {selected && (
+        <FieldDescription>
+          Bots:{" "}
+          {[...new Set(selected.botIds)]
+            .map(
+              (id) =>
+                bots.find((bot) => bot.id === id)?.name ?? "Unavailable bot"
+            )
+            .join(", ")}
+        </FieldDescription>
+      )}
+    </Field>
   )
 }

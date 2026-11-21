@@ -2,7 +2,12 @@ import "server-only"
 
 import { asc, eq } from "drizzle-orm"
 
-import { bots, chatMembers, chats } from "@/db/schema"
+import {
+  bots,
+  chatMembers,
+  chats,
+  taskTemplateVersions as versions,
+} from "@/db/schema"
 import { db } from "@/lib/db"
 import type { ModelChoice } from "@/lib/model-catalog"
 
@@ -13,6 +18,8 @@ export interface ChatWithBot {
   lastMessagePreview: string | null
   lastMessageAt: Date
   createdAt: Date
+  template?: { id: string; name: string; version: number } | null
+  researchBrief?: string | null
   bots: {
     id: string
     name: string
@@ -38,6 +45,12 @@ export async function getChat(chatId: string): Promise<ChatWithBot | null> {
       kind: chats.kind,
       nativeOwner: chats.nativeOwner,
       name: chats.name,
+      template: {
+        id: versions.id,
+        name: versions.name,
+        version: versions.version,
+      },
+      researchBrief: chats.researchBrief,
       lastMessagePreview: chats.lastMessagePreview,
       lastMessageAt: chats.lastMessageAt,
       createdAt: chats.createdAt,
@@ -49,6 +62,7 @@ export async function getChat(chatId: string): Promise<ChatWithBot | null> {
       modelChoice: bots.modelChoice,
     })
     .from(chats)
+    .leftJoin(versions, eq(versions.id, chats.templateVersionId))
     .leftJoin(chatMembers, eq(chatMembers.chatId, chats.id))
     .leftJoin(bots, eq(chatMembers.botId, bots.id))
     .where(eq(chats.id, chatId))
@@ -86,6 +100,8 @@ export async function getChat(chatId: string): Promise<ChatWithBot | null> {
     id: row.id,
     kind: row.kind,
     name: row.name,
+    template: row.template,
+    researchBrief: row.researchBrief,
     lastMessagePreview: row.lastMessagePreview,
     lastMessageAt: row.lastMessageAt,
     createdAt: row.createdAt,

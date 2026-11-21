@@ -1,6 +1,5 @@
 "use client"
 import {
-  useEffect,
   useCallback,
   useId,
   useRef,
@@ -26,6 +25,7 @@ import {
 } from "@/actions/model-connections"
 import { ChatGPTAccounts, ChatProfileEditor } from "./chatgpt-accounts"
 import { SettingsList, SettingsListHeader } from "./settings-list"
+import { LibraryReadStatus, useLibraryRead } from "./shared-library-panel"
 import {
   SettingsPane,
   SettingsEditorPane,
@@ -47,8 +47,8 @@ export function ModelConnectionsPanel({
 }: {
   guard: Ref<SettingsLeaveGuard>
 }) {
-  const [rows, setRows] = useState<ConnectionSummary[] | null>(null)
-  const [error, setError] = useState("")
+  const [rows, setRows] = useState<ConnectionSummary[]>([])
+  const read = useLibraryRead(getModelConnections, setRows)
   const [search, setSearch] = useState("")
   const [editor, setEditor] = useState<string | null>(null)
   const [profile, setProfile] = useState<{
@@ -56,41 +56,16 @@ export function ModelConnectionsPanel({
     rename?: boolean
   } | null>(null)
   const closeProfile = useCallback(() => setProfile(null), [])
-  const [version, reload] = useState(0)
-  const [loading, setLoading] = useState(true)
-  const reloadRows = useCallback(() => {
-    setLoading(true)
-    setError("")
-    reload((n) => n + 1)
-  }, [])
-  useEffect(() => {
-    let current = true
-    getModelConnections()
-      .then((r) => {
-        if (!current) return
-        setLoading(false)
-        if (r.success) setRows(r.data)
-        else setError(r.error)
-      })
-      .catch(() => {
-        if (!current) return
-        setLoading(false)
-        setError("Could not load connections.")
-      })
-    return () => {
-      current = false
-    }
-  }, [version])
   if (profile)
     return (
       <ChatProfileEditor
         edit={profile}
         guard={guard}
         close={closeProfile}
-        reload={reloadRows}
+        reload={read.retry}
       />
     )
-  const row = rows?.find((r) => r.id === editor)
+  const row = rows.find((r) => r.id === editor)
   if (editor === "new" || row)
     return (
       <SettingsEditorPane label="Custom gateway">
@@ -99,12 +74,12 @@ export function ModelConnectionsPanel({
           row={row}
           guard={guard}
           close={() => setEditor(null)}
-          reload={reloadRows}
+          reload={read.retry}
         />
       </SettingsEditorPane>
     )
   const query = search.trim().toLowerCase()
-  const readyRows = loading || error ? null : rows
+  const readyRows = read.ready ? rows : undefined
   const gateways = readyRows?.filter((r) => r.provider !== "chatgpt")
   return (
     <SettingsPane className="gap-3" aria-label="Models">
@@ -115,20 +90,12 @@ export function ModelConnectionsPanel({
         searchLabel="Search accounts and gateways"
         onSearch={setSearch}
       />
-      {loading && <p role="status">Loading connections…</p>}
-      {error && (
-        <p role="alert">
-          {error}{" "}
-          <Button size="sm" variant="outline" onClick={reloadRows}>
-            Retry
-          </Button>
-        </p>
-      )}
+      {!read.ready && <LibraryReadStatus label="Loading…" {...read} />}
       <ChatGPTAccounts
         rows={readyRows?.filter((r) => r.provider === "chatgpt")}
         query={query}
         onEdit={setProfile}
-        reload={reloadRows}
+        reload={read.retry}
       />
       <section aria-label="Custom gateways" className="grid gap-1">
         <div className="flex items-center justify-between">

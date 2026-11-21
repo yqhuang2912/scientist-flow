@@ -17,6 +17,7 @@ import {
   deleteWorkspaceFile,
 } from "@/lib/workspace.server"
 import { getChat } from "@/queries/chats"
+import { WORKSPACE_LAYOUT_VERSION } from "@/lib/workspace-layout.server"
 import {
   directoryError,
   resolveWorkspaceDirectory,
@@ -149,6 +150,8 @@ export async function getWorkspaceStatusAction(
     if (!binding) return { state: "not-initialised", rootDir: cfg.rootDir }
 
     await resolveWorkspaceDirectory(binding.taskDir, "")
+    if ((binding.layoutVersion ?? 1) < WORKSPACE_LAYOUT_VERSION)
+      await initialiseWorkspace(chatId)
 
     return { state: "ready", taskDir: binding.taskDir, rootDir: cfg.rootDir }
   } catch (err) {

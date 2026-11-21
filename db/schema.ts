@@ -25,6 +25,7 @@ import {
 } from "../lib/model-catalog"
 
 import type { ChatJobState } from "../lib/chat-job"
+import type { WorkflowDraft } from "../lib/workflow-draft"
 import type { UIMessage } from "ai"
 import type { ToolEvidence } from "../lib/project-decisions"
 import type { ExecutionStatus, Delegation } from "../lib/bot-execution"
@@ -109,6 +110,60 @@ export type ToolSummary = Omit<
   ToolDefinition,
   "config" | "inputSchema" | "createdAt"
 >
+
+export const taskTemplates = pgTable("task_templates", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => nanoid()),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  workflowDraft: jsonb("workflow_draft").$type<WorkflowDraft>(),
+  draftRevision: integer("draft_revision").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+})
+
+export const taskTemplateFormSchema = createInsertSchema(taskTemplates, {
+  name: z.string().trim().min(1, "Enter a template name."),
+  description: z.string().trim().optional().default(""),
+})
+  .pick({ name: true, description: true })
+  .strict()
+
+export type TaskTemplateSummary = Pick<
+  typeof taskTemplates.$inferSelect,
+  "id" | "name" | "description"
+>
+
+export const taskTemplateVersions = pgTable(
+  "task_template_versions",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => nanoid()),
+    templateId: text("template_id")
+      .notNull()
+      .references(() => taskTemplates.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    draftRevision: integer("draft_revision").notNull(),
+    name: text("name").notNull(),
+    workflow: jsonb("workflow").$type<WorkflowDraft>().notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("template_version_number").on(table.templateId, table.version),
+    uniqueIndex("template_published_revision").on(
+      table.templateId,
+      table.draftRevision
+    ),
+  ]
+)
 
 export const skills = pgTable("skills", {
   id: text("id")
@@ -242,6 +297,11 @@ export const chats = pgTable("chats", {
   kind: chatKind("kind").notNull().default("direct"),
   // Assigned only when provisioning the installation's new, empty pilot chat.
   nativeOwner: text("native_owner").unique(),
+  templateVersionId: text("template_version_id").references(
+    () => taskTemplateVersions.id,
+    { onDelete: "restrict" }
+  ),
+  researchBrief: text("research_brief"),
   name: text("name"),
   lastMessagePreview: text("last_message_preview"),
   lastMessageAt: timestamp("last_message_at", { withTimezone: true })
@@ -477,9 +537,29 @@ export const insertTaskSchema = createInsertSchema(chats, {
   name: z.string().trim().min(1, "Name is required"),
 })
 
-export const taskFormSchema = insertTaskSchema.pick({ name: true }).extend({
-  botIds: z.array(z.string().min(1)).min(1, "Select at least one bot"),
-})
+export const taskFormSchema = insertTaskSchema
+  .pick({ name: true })
+  .extend({
+    botIds: z.array(z.string().min(1)),
+    templateVersionId: z.nanoid().optional(),
+    researchBrief: z.string().trim().optional(),
+  })
+  .superRefine((task, ctx) => {
+    if (task.templateVersionId) {
+      if (!task.researchBrief)
+        ctx.addIssue({
+          code: "custom",
+          path: ["researchBrief"],
+          message: "Enter the research brief for this task.",
+        })
+    } else if (!task.botIds.length) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["botIds"],
+        message: "Select at least one bot.",
+      })
+    }
+  })
 
 export type BotFormValues = z.infer<typeof botFormSchema>
 export type TaskFormValues = z.infer<typeof taskFormSchema>

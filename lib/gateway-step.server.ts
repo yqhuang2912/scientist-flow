@@ -75,6 +75,15 @@ export function gatewayStep(route: Route, transport: typeof fetch = fetch) {
     }
     attempt = await route.record({ ...fields, httpStatus: res.status })
     if (!res.ok) {
+      if (res.status === 429) {
+        const body = await res.json().catch(() => null)
+        const reset = Number(res.headers.get("x-ratelimit-reset") || body?.error?.metadata?.headers?.["X-RateLimit-Reset"])
+        const daily = /per.day|daily/i.test(String(body?.error?.message))
+        const resetMs = reset < 1e12 ? reset * 1000 : reset
+        const hint = resetMs > Date.now() && resetMs < Date.now() + 7 * 86_400_000
+          ? " Available after " + new Date(resetMs).toISOString() + "." : ""
+        throw new ModelConnectionError((daily ? "Daily model quota exhausted" : "Model temporarily rate-limited") + " (HTTP 429)." + hint)
+      }
       await res.body?.cancel()
       throw new ModelConnectionError(
         res.status === 401 || res.status === 403

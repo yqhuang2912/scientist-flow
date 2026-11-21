@@ -2,6 +2,9 @@
 import { toolCallAnchor } from "@/lib/project-decisions"
 
 import { memo, useState } from "react"
+import { useParams } from "next/navigation"
+import { useWorkspaceDocument } from "./workspace-document-provider"
+import { Button } from "./ui/button"
 import {
   SaveMemoryDialog,
   type MemoryDraft,
@@ -39,6 +42,7 @@ import { BotName } from "@/components/bot-name"
 import { ChatAvatar } from "@/components/chat-avatar"
 import {
   ChatActivity,
+  GroupToolActivity,
   ChatApproval,
   ChatFile,
   type RespondToApproval,
@@ -46,6 +50,7 @@ import {
 import { messageAttachmentSchema } from "@/lib/chat-composer"
 import { cleanBotText } from "@/lib/chat-bot-text"
 import { cn } from "@/lib/utils"
+import { groupActivities } from "@/lib/group-chat-activity"
 import {
   getAssistantSegments,
   getHandoff,
@@ -54,6 +59,22 @@ import {
   type ChatSpeaker,
   type IndexedChatPart,
 } from "@/lib/chat-presentation"
+
+function WorkflowEvidence({ message }: { message: UIMessage }) {
+  const { chatId } = useParams<{ chatId: string }>()
+  const { open } = useWorkspaceDocument()
+  const meta = message.metadata as { workflowStep?: number; version?: number; artifact?: { evidence: string; path: string; sha256: string } } | undefined
+  if (!meta?.workflowStep || !meta.artifact) return null
+  const artifact = meta.artifact
+  return <details className="rounded-md border px-3 py-2 text-sm">
+    <summary className="cursor-pointer">Step {meta.workflowStep} · v{meta.version} · {meta.workflowStep === 1 ? "Experiment evidence" : "Verification evidence"}</summary>
+    <div className="mt-3 flex flex-col items-start gap-3">
+      <ChatMarkdown>{artifact.evidence}</ChatMarkdown>
+      <p className="break-all text-xs text-muted-foreground">Report SHA-256 · {artifact.sha256}</p>
+      <Button variant="outline" size="sm" onClick={() => void open({ chatId, relativePath: artifact.path })}>Open {artifact.path}</Button>
+    </div>
+  </details>
+}
 
 function SpeakerAvatar({
   bot,
@@ -99,21 +120,26 @@ function Responding() {
 }
 
 function AssistantParts({
-  messageId,
+  message,
+  speaker,
   parts,
   bots,
   streaming,
   busy,
   onApproval,
 }: {
-  messageId: string
+  message: UIMessage
+  speaker?: { name: string; id: string | null }
   parts: IndexedChatPart[]
   bots: ChatSpeaker[]
   streaming: boolean
   busy: boolean
   onApproval?: RespondToApproval
 }) {
-  const blocks = groupChatParts(parts)
+  const blocks = groupChatParts(parts, !!speaker)
+  const activities =
+    speaker &&
+    groupActivities(message, parts, speaker.name, speaker.id, streaming)
   return (
     // Match the visible avatar/copy glyphs, which sit inside their hit boxes.
     <div className="flex min-w-0 flex-wrap items-start gap-x-1.5 gap-y-3 pl-1 [&>:not([data-slot=attachment])]:basis-full">
@@ -124,11 +150,23 @@ function AssistantParts({
               {block.parts.map(({ part, index }) =>
                 isToolUIPart(part) ? (
                   <div key={part.toolCallId}>
-                    <ChatActivity
-                      part={part}
-                      active={streaming}
-                      toolAnchor={toolCallAnchor(messageId, part.toolCallId)}
-                    />
+                    {activities ? (
+                      <GroupToolActivity
+                        summary={activities.get(part.toolCallId)!}
+                        toolAnchor={toolCallAnchor(message.id, part.toolCallId)}
+                        approval={
+                          part.state === "approval-requested" ? part : undefined
+                        }
+                        disabled={busy}
+                        onRespond={onApproval}
+                      />
+                    ) : (
+                      <ChatActivity
+                        part={part}
+                        active={streaming}
+                        toolAnchor={toolCallAnchor(message.id, part.toolCallId)}
+                      />
+                    )}
                   </div>
                 ) : (
                   <ChatActivity key={index} part={part} active={streaming} />
@@ -314,6 +352,15 @@ const ChatTurn = memo(function ChatTurn({
   return (
     <MessageGroup className="gap-5">
       {segments.map((segment) => {
+        if (
+          isGroup &&
+          !streaming &&
+          segment.parts.every(
+            ({ part }) =>
+              part.type === "step-start" || part.type === "reasoning"
+          )
+        )
+          return null
         const bot = bots.find((candidate) => candidate.id === segment.botId)
         const pastName =
           handoff && segment.botId === handoff.sourceId
@@ -321,24 +368,27 @@ const ChatTurn = memo(function ChatTurn({
             : handoff && segment.botId === handoff.targetId
               ? handoff.targetName
               : null
+        const name = bot?.name ?? pastName ?? "Assistant"
         return (
           <Message key={segment.key}>
             <MessageContent className="gap-2">
               <MessageHeader>
                 <SpeakerAvatar bot={bot} />
                 <BotName
-                  name={bot?.name ?? pastName ?? "Assistant"}
+                  name={name}
                   job={bot?.job}
                 />
               </MessageHeader>
               <AssistantParts
-                messageId={message.id}
+                message={message}
+                speaker={isGroup ? { id: segment.botId, name } : undefined}
                 parts={segment.parts}
                 bots={bots}
                 streaming={streaming}
                 busy={busy}
                 onApproval={onApproval}
               />
+              {!!(message.metadata as { workflowStep?: number } | undefined)?.workflowStep && <WorkflowEvidence message={message} />}
               {!streaming && (
                 <ChatMessageActions
                   text={segment.parts
@@ -377,6 +427,17 @@ export function ChatTranscript({
   onApproval?: RespondToApproval
 }) {
   const [draft, setDraft] = useState<MemoryDraft | null>(null)
+  const revisions = new Map<string, string>()
+  for (const message of messages) {
+    const meta = message.metadata as
+      { supersedesExecutionId?: string; workflowStep?: number } | undefined
+    if (
+      message.role === "assistant" &&
+      meta?.workflowStep === 2 &&
+      meta.supersedesExecutionId
+    )
+      revisions.set(meta.supersedesExecutionId, message.id)
+  }
   const last = messages.at(-1)
   const busy = status === "streaming" || status === "submitted"
   const pendingBot =
@@ -406,28 +467,45 @@ export function ChatTranscript({
             )}
             {messages
               .filter((message) => message.role !== "system")
-              .map((message) => (
-                <MessageScrollerItem
-                  key={message.id}
-                  messageId={message.id}
-                  data-evidence-message={message.id}
-                  scrollAnchor={message.role === "user"}
-                >
-                  <ChatTurn
-                    onRemember={directChatId && !isGroup ? setDraft : undefined}
-                    message={message}
-                    bots={bots}
-                    isGroup={isGroup}
-                    streaming={
-                      status === "streaming" && message.id === last?.id
-                    }
-                    busy={busy}
-                    onApproval={
-                      message.id === last?.id ? onApproval : undefined
-                    }
-                  />
-                </MessageScrollerItem>
-              ))}
+              .map((message) => {
+                const meta = message.metadata as
+                  { executionId?: string } | undefined
+                const revisionId =
+                  meta?.executionId && revisions.get(meta.executionId)
+                return (
+                  <MessageScrollerItem
+                    key={message.id}
+                    id={"chat-message-" + message.id}
+                    messageId={message.id}
+                    data-evidence-message={message.id}
+                    scrollAnchor={message.role === "user"}
+                  >
+                    {revisionId && (
+                      <a
+                        className="mb-2 inline-block text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                        href={"#chat-message-" + revisionId}
+                      >
+                        此评判已修订，查看修正结论与依据
+                      </a>
+                    )}
+                    <ChatTurn
+                      onRemember={
+                        directChatId && !isGroup ? setDraft : undefined
+                      }
+                      message={message}
+                      bots={bots}
+                      isGroup={isGroup}
+                      streaming={
+                        status === "streaming" && message.id === last?.id
+                      }
+                      busy={busy}
+                      onApproval={
+                        message.id === last?.id ? onApproval : undefined
+                      }
+                    />
+                  </MessageScrollerItem>
+                )
+              })}
             {waiting && (
               <MessageScrollerItem messageId="responding">
                 <Message>

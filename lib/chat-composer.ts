@@ -2,6 +2,7 @@ import { z } from "zod"
 import type { FileUIPart, TextUIPart, UIMessage } from "ai"
 import { chatAttachmentFormat } from "./chat-attachment-format"
 import { workspaceOpenPolicy } from "./workspace-open-policy"
+import { documentTargetSchema } from "./workspace-document"
 import {
   uploadWorkspaceFileSchema,
   MAX_UPLOAD_BYTES,
@@ -64,7 +65,11 @@ export const storedAttachmentSchema = z.object({
 export type StoredAttachment = z.infer<typeof storedAttachmentSchema>
 export function workspaceMentionMediaType(relativePath: string) {
   const policy = workspaceOpenPolicy(relativePath)
-  if (policy.kind === "blocked" || policy.kind === "unsupported")
+  if (
+    policy.kind === "blocked" ||
+    policy.kind === "unsupported" ||
+    policy.kind === "data-json-preview"
+  )
     return undefined
   const format = chatAttachmentFormat(relativePath)
   if (
@@ -73,6 +78,28 @@ export function workspaceMentionMediaType(relativePath: string) {
     format.reader !== "preview-image"
   )
     return format.mediaType
+}
+
+export const WORKSPACE_FILE_DRAG_TYPE = "application/x-scientistflow-workspace-file"
+
+export function droppedWorkspaceReference(
+  payload: string,
+  chatId: string | undefined
+): { path: string } | { error: string } {
+  let data: unknown
+  try {
+    data = JSON.parse(payload)
+  } catch {
+    return { error: "Invalid workspace file reference." }
+  }
+  const target = documentTargetSchema.safeParse(data)
+  if (!target.success) return { error: "Invalid workspace file reference." }
+  if (target.data.chatId !== chatId)
+    return { error: "Choose a file from this task’s workspace." }
+  const path = target.data.relativePath
+  if (!workspaceMentionMediaType(path))
+    return { error: "This workspace file type or location cannot be referenced." }
+  return { path }
 }
 export const messageAttachmentSchema = z.union([
   storedAttachmentSchema.extend({

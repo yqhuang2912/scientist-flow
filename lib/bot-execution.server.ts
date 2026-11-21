@@ -65,7 +65,7 @@ export async function claimExecution(
       .returning()
     if (!resumed)
       throw new Error("Could not reclaim the interrupted execution.")
-    return { row: resumed, claimed: true }
+    return { row: resumed, claimed: true, resumed: true }
   }
   return { row: existing, claimed: false }
 }
@@ -76,7 +76,7 @@ export async function finishExecution(
   delegation: Delegation | null,
   lease?: string
 ) {
-  await db
+  const result = await db
     .update(executions)
     .set({ status, message, delegation })
     .where(
@@ -88,6 +88,7 @@ export async function finishExecution(
           : undefined
       )
     )
+  return result.rowCount > 0
 }
 export async function hydrateExecutions(chatId: string, history: UIMessage[]) {
   const ids = history.filter((m) => m.role === "user").map((m) => m.id)

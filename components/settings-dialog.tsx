@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useState } from "react"
-import { BookOpenIcon, CableIcon, SettingsIcon, WrenchIcon, UsersIcon } from "lucide-react"
+import { BookOpenIcon, CableIcon, WorkflowIcon, SettingsIcon, WrenchIcon, UsersIcon } from "lucide-react"
 import { ModelConnectionsPanel } from "./model-connections-panel"
 
 import { BotsSettingsPanel } from "@/components/bots-settings-panel"
@@ -14,6 +14,7 @@ import {
 import { SkillsSettingsPanel } from "@/components/skills-settings-panel"
 import type { SettingsLeaveGuard } from "@/components/settings-form-guard"
 import { ToolsSettingsPanel } from "@/components/tools-settings-panel"
+import { TemplatesSettingsPanel } from "@/components/templates-settings-panel"
 import {
   Dialog,
   DialogDescription,
@@ -22,7 +23,7 @@ import {
 } from "@/components/ui/dialog"
 import type { BotSummary } from "@/queries/bots"
 
-type SettingsTab = "general" | "bots" | "skills" | "tools" | "connections"
+type SettingsTab = "general" | "bots" | "skills" | "tools" | "templates" | "connections"
 
 export function SettingsDialog({
   bots,
@@ -66,7 +67,7 @@ export function SettingsDialog({
         <DialogHeader className="justify-center border-b px-4 py-3 pr-12">
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription className="sr-only">
-            Manage appearance, bots, shared skills, tools and the workspace
+            Manage appearance, bots, shared skills, tools, templates and the workspace
             directory.
           </DialogDescription>
         </DialogHeader>
@@ -102,6 +103,13 @@ export function SettingsDialog({
                 Tools
               </SettingsNavItem>
               <SettingsNavItem active={tab==="connections"} icon={<CableIcon/>} onClick={()=>selectTab("connections")}>Models</SettingsNavItem>
+              <SettingsNavItem
+                active={tab === "templates"}
+                icon={<WorkflowIcon />}
+                onClick={() => selectTab("templates")}
+              >
+                Templates
+              </SettingsNavItem>
             </>
           }
         >
@@ -113,6 +121,8 @@ export function SettingsDialog({
             open && <SkillsSettingsPanel guard={leaveGuard} />
           ) : tab === "tools" ? (
             open && <ToolsSettingsPanel guard={leaveGuard} />
+          ) : tab === "templates" ? (
+            open && <TemplatesSettingsPanel guard={leaveGuard} />
           ) : (
             open && (
               <BotsSettingsPanel

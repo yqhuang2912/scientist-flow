@@ -17,6 +17,7 @@ const ack: ChatTurnAck = {
   turnId: "turn",
   state: "queued",
   acceptedAt: "2026-01-01T00:00:00.000Z",
+  lastMessagePreview: "notes.md",
   userMessage: {
     id: "turn",
     role: "user",

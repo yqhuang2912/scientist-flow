@@ -1,18 +1,15 @@
 ﻿"use client"
 
-import { useEffect, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useState, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
-import {
-  SettingsEditorPane,
-  SettingsPane,
-} from "@/components/settings-shell"
+import { SettingsEditorPane, SettingsPane } from "@/components/settings-shell"
 import { SettingsList, SettingsListHeader } from "@/components/settings-list"
 import { Spinner } from "@/components/ui/spinner"
 
 type Summary = {
   id: string
   name: string
-  displayName: string | null
+  displayName?: string | null
   description: string
 }
 type Result<T> = { success: true; data: T } | { success: false; error: string }
@@ -74,10 +71,11 @@ export function useLibraryRead<T>(
       current = false
     }
   }, [load, accept, attempt])
-  function retry() {
+  const retry = useCallback(() => {
+    setReady(false)
     setError("")
     setAttempt((previous) => previous + 1)
-  }
+  }, [])
   return { ready, error, retry }
 }
 

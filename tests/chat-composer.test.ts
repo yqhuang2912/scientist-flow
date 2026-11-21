@@ -5,6 +5,7 @@ import {
   attachmentMediaType,
   attachmentRejection,
   chatAttachmentParts,
+  droppedWorkspaceReference,
   legacyAttachmentReferences,
   storedAttachmentSchema,
   shouldSubmitChatMessage,
@@ -13,6 +14,21 @@ import {
   MAX_UPLOAD_BYTES,
   uploadWorkspaceFileSchema,
 } from "../lib/workspace-validation"
+
+test("a dropped reference is a mentionable relative file in the receiving task", () => {
+  const payload = (relativePath: string, chatId = "research") =>
+    JSON.stringify({ relativePath, chatId })
+  assert.deepEqual(droppedWorkspaceReference(payload("configs/test.config"), "research"), {
+    path: "configs/test.config",
+  })
+  for (const raw of [
+    payload("docs/notes.md", "another-task"),
+    payload("../docs/notes.md"),
+    payload("C:\\private.txt"),
+    payload("outputs/checkpoints/model.pt"),
+    "invalid",
+  ]) assert.ok("error" in droppedWorkspaceReference(raw, "research"))
+})
 
 test("common chat attachments are recognised by name when the OS omits the MIME type", () => {
   for (const name of [

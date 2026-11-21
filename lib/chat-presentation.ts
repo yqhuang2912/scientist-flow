@@ -108,11 +108,15 @@ export type PartBlock =
   | { kind: "content" | "approval"; key: number; part: ChatPart }
 
 // Keep order: text, files, step boundaries and approval prompts end a Trace run.
-export function groupChatParts(parts: IndexedChatPart[]): PartBlock[] {
+export function groupChatParts(
+  parts: IndexedChatPart[],
+  isGroup = false
+): PartBlock[] {
   const blocks: PartBlock[] = []
   let activity: Extract<PartBlock, { kind: "activity" }> | undefined
   for (const { part, index } of parts) {
-    if (isToolUIPart(part) && part.state === "approval-requested") {
+    if (isGroup && part.type === "reasoning") continue
+    if (!isGroup && isToolUIPart(part) && part.state === "approval-requested") {
       activity = undefined
       blocks.push({ kind: "approval", key: index, part })
     } else if (

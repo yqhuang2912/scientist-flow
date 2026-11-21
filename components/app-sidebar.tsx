@@ -12,7 +12,12 @@ import { TaskDialog } from "@/components/task-dialog"
 import { SettingsDialog } from "@/components/settings-dialog"
 import type { BotSummary, SidebarChat } from "@/queries/bots"
 import { cn } from "@/lib/utils"
-import { CHAT_ACCEPTED_EVENT, chatTimeLabels } from "@/lib/chat-recency"
+import {
+  CHAT_ACCEPTED_EVENT,
+  chatTimeLabels,
+  mergeChatAcceptance,
+  type ChatAcceptedDetail,
+} from "@/lib/chat-recency"
 import {
   Command,
   CommandDialog,
@@ -101,17 +106,13 @@ export function AppSidebar({
   const { setOpenMobile } = useSidebar()
   const [taskDialogOpen, setTaskDialogOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
-  const [accepted, setAccepted] = useState<Record<string, string>>({})
+  const [accepted, setAccepted] = useState<Record<string, ChatAcceptedDetail>>(
+    {}
+  )
   useEffect(() => {
     function onAccepted(event: Event) {
-      const { chatId, acceptedAt } = (
-        event as CustomEvent<{ chatId: string; acceptedAt: string }>
-      ).detail
-      setAccepted((previous) =>
-        previous[chatId] >= acceptedAt
-          ? previous
-          : { ...previous, [chatId]: acceptedAt }
-      )
+      const update = (event as CustomEvent<ChatAcceptedDetail>).detail
+      setAccepted((previous) => mergeChatAcceptance(previous, update))
     }
     window.addEventListener(CHAT_ACCEPTED_EVENT, onAccepted)
     return () => window.removeEventListener(CHAT_ACCEPTED_EVENT, onAccepted)
@@ -120,12 +121,20 @@ export function AppSidebar({
     () =>
       initialChats
         .map((chat) => {
-          const at = accepted[chat.id]
-          return at > chat.lastMessageAt
-            ? { ...chat, lastMessageAt: at, ...chatTimeLabels(new Date(at)) }
-            : chat
+          const update = accepted[chat.id]
+          if (!update || update.acceptedAt <= chat.lastMessageAt) return chat
+          return {
+            ...chat,
+            lastMessageAt: update.acceptedAt,
+            lastMessagePreview: update.lastMessagePreview,
+            ...chatTimeLabels(new Date(update.acceptedAt)),
+          }
         })
-        .sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt)),
+        .sort(
+          (a, b) =>
+            b.lastMessageAt.localeCompare(a.lastMessageAt) ||
+            a.id.localeCompare(b.id)
+        ),
     [initialChats, accepted]
   )
   const [settingsTab, setSettingsTab] = useState<
@@ -247,11 +256,8 @@ export function AppSidebar({
                       render={<button type="button" />}
                       isActive={pathname === `/chats/${chat.id}`}
                       className={cn(
-                        "h-auto min-h-7.5 text-sidebar-foreground group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:p-0!",
-                        "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground",
-                        chat.lastMessagePreview
-                          ? "items-start"
-                          : "min-h-7.5 items-center"
+                        "text-sidebar-foreground group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:p-0!",
+                        "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground"
                       )}
                       onClick={() => handleChatSelect(chat.id)}
                       tooltip={chat.name}
@@ -272,17 +278,8 @@ export function AppSidebar({
                           className={compactChatAvatarStyles}
                         />
                       )}
-                      <span className="flex min-w-0 flex-1 flex-col gap-0 group-data-[collapsible=icon]:hidden">
-                        <span className="w-full truncate text-[13px] leading-5 font-medium">
-                          {chat.name}
-                        </span>
-                        {chat.lastMessagePreview && (
-                          <span className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
-                            <span className="min-w-0 truncate">
-                              {chat.lastMessagePreview}
-                            </span>
-                          </span>
-                        )}
+                      <span className="min-w-0 flex-1 truncate text-[13px] leading-5 font-medium group-data-[collapsible=icon]:hidden">
+                        {chat.name}
                       </span>
                       <time
                         dateTime={chat.lastMessageAt}
@@ -384,11 +381,6 @@ export function AppSidebar({
                       name={chat.name}
                       job={chat.kind === "direct" ? chat.bot?.job : null}
                     />
-                    {chat.lastMessagePreview && (
-                      <span className="truncate text-xs text-muted-foreground">
-                        {chat.lastMessagePreview}
-                      </span>
-                    )}
                   </span>
                   <CommandShortcut className="shrink-0 whitespace-nowrap">
                     <time

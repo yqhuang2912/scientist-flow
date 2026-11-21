@@ -861,6 +861,7 @@ function ResearchWorkspaceInner({
               </div>
             )}
             <WorkspaceFileTree
+              chatId={chatId}
               nodes={tree}
               selectedRel={selectedRel}
               onSelect={setSelectedRel}

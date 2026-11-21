@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
 import { type WorkspaceTreeNode } from "@/lib/workspace-tree"
+import { WORKSPACE_FILE_DRAG_TYPE } from "@/lib/chat-composer"
 
 export type WorkspaceEntryAction =
   | "create"
@@ -54,6 +55,7 @@ export type WorkspaceEntryAction =
   | "rename"
 
 type TreeProps = {
+  chatId: string
   nodes: WorkspaceTreeNode[]
   selectedRel: string | null
   onSelect: (relative: string) => void
@@ -124,12 +126,14 @@ function EntryMenuItems({
 }
 
 function FileTreeRow({
+  chatId,
   node,
   selected,
   disabled,
   onSelect,
   onAction,
 }: {
+  chatId: string
   node: WorkspaceTreeNode
   selected: boolean
   disabled: boolean
@@ -147,6 +151,18 @@ function FileTreeRow({
       variant="ghost"
       size="row"
       data-workspace-path={node.entry.relPath}
+      draggable={node.entry.isFile === true && !disabled}
+      onDragStart={(event) => {
+        if (!node.entry.isFile || disabled) {
+          event.preventDefault()
+          return
+        }
+        event.dataTransfer.effectAllowed = "copy"
+        event.dataTransfer.setData(
+          WORKSPACE_FILE_DRAG_TYPE,
+          JSON.stringify({ chatId, relativePath: node.entry.relPath })
+        )
+      }}
       aria-label={node.entry.name}
       aria-current={selected ? "true" : undefined}
       aria-busy={node.loading || undefined}
@@ -257,6 +273,7 @@ function FileTreeRow({
 }
 
 function FileTreeNode({
+  chatId,
   node,
   selectedRel,
   onSelect,
@@ -266,6 +283,7 @@ function FileTreeNode({
   actionsDisabled,
   depth,
 }: {
+  chatId: string
   node: WorkspaceTreeNode
   selectedRel: string | null
   onSelect: (r: string) => void
@@ -277,6 +295,7 @@ function FileTreeNode({
 }) {
   const row = (
     <FileTreeRow
+      chatId={chatId}
       node={node}
       selected={selectedRel === node.entry.relPath}
       disabled={actionsDisabled}
@@ -313,6 +332,7 @@ function FileTreeNode({
           )}
           {node.children && (
             <WorkspaceFileTree
+              chatId={chatId}
               nodes={node.children}
               selectedRel={selectedRel}
               onSelect={onSelect}
@@ -335,6 +355,7 @@ function FileTreeNode({
 }
 
 export function WorkspaceFileTree({
+  chatId,
   nodes,
   selectedRel,
   onSelect,
@@ -354,6 +375,7 @@ export function WorkspaceFileTree({
       {nodes.map((node) => (
         <FileTreeNode
           key={node.entry.relPath}
+          chatId={chatId}
           node={node}
           selectedRel={selectedRel}
           onSelect={onSelect}

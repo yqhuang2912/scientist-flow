@@ -8,6 +8,7 @@ import {
   ModelConnectionError,
 } from "./model-credentials.server"
 import { chatAttachmentParts } from "./chat-composer"
+import { chatMessagePreview } from "./chat-preview"
 import {
   prepareSavedAttachments,
   workspaceAttachmentReference,
@@ -16,6 +17,7 @@ import { requireWorkspaceBinding } from "./workspace.server"
 import { chatMemberChoice, validateChoice } from "./model-connections.server"
 import type { ChatJobInput, ChatSnapshot, ChatTurnAck } from "./chat-job"
 import type { UIMessage } from "ai"
+import type { WorkflowInput } from "./workflow-run.server"
 
 const t = chatTurns
 export class TurnConflict extends Error {}
@@ -59,10 +61,14 @@ export async function chatSnapshot(chatId: string): Promise<ChatSnapshot> {
 
 export async function enqueueChatTurn(
   chatId: string,
-  input: ChatJobInput
+  input: ChatJobInput,
+  workflow?: WorkflowInput
 ): Promise<ChatTurnAck> {
   const owner = installationOwner()
-  const hash = createHash("sha256").update(JSON.stringify(input)).digest("hex")
+  const hash = createHash("sha256")
+    .update(JSON.stringify(workflow ? { input, workflow } : input))
+    .digest("hex")
+  const lastMessagePreview = chatMessagePreview(input)
   const key = and(eq(t.chatId, chatId), eq(t.id, input.id))
   async function alreadySubmitted() {
     const [row] = await db
@@ -83,15 +89,17 @@ export async function enqueueChatTurn(
         userMessage: row.userMessage,
         state: row.state,
         acceptedAt: row.createdAt.toISOString(),
+        lastMessagePreview,
       }
     )
   }
   const previous = await alreadySubmitted()
   if (previous) return previous
   await Promise.all(
-    (input.mentionedBotIds ?? [input.botId]).map(async (id) =>
-      validateChoice(await chatMemberChoice(chatId, id))
-    )
+    (input.mentionedBotIds ?? [input.botId]).map(async (id) => {
+      const member = await chatMemberChoice(chatId, id)
+      return validateChoice(workflow?.correction?.model ?? member)
+    })
   )
   const paths = input.workspacePaths ?? []
   const prepare = async () => {
@@ -111,6 +119,7 @@ export async function enqueueChatTurn(
       botId: input.botId,
       mentionedBotIds: input.mentionedBotIds,
       workspaceFiles,
+      ...(workflow && { workflow }),
     },
     parts,
   }
@@ -118,19 +127,31 @@ export async function enqueueChatTurn(
     throw new ModelConnectionError(
       "This message is too large. Send fewer attachments."
     )
-  const accepted = db
-    .$with("accepted")
-    .as(
-      db
-        .insert(t)
-        .values({ chatId, id: input.id, owner, inputHash: hash, userMessage })
-        .onConflictDoNothing()
-        .returning({ id: t.id })
-    )
+  const accepted = db.$with("accepted").as(
+    db
+      .insert(t)
+      .values({
+        chatId,
+        id: input.id,
+        owner,
+        inputHash: hash,
+        userMessage,
+        // The browser compares millisecond timestamps. Give every accepted
+        // turn a strictly later one; retries read that same persisted value.
+        createdAt: sql`(select greatest(date_trunc('milliseconds', now()),
+            date_trunc('milliseconds', ${chats.lastMessageAt}) + interval '1 millisecond')
+            from ${chats} where ${chats.id} = ${chatId} for update)`,
+      })
+      .onConflictDoNothing()
+      .returning({ createdAt: t.createdAt })
+  )
   const inserted = await db
     .with(accepted)
     .update(chats)
-    .set({ lastMessageAt: sql`now()` })
+    .set({
+      lastMessagePreview,
+      lastMessageAt: sql`(select ${accepted.createdAt} from ${accepted})`,
+    })
     .where(and(eq(chats.id, chatId), sql`exists (select 1 from ${accepted})`))
     .returning({ acceptedAt: chats.lastMessageAt })
   if (inserted.length)
@@ -139,6 +160,7 @@ export async function enqueueChatTurn(
       userMessage,
       state: "queued",
       acceptedAt: inserted[0].acceptedAt.toISOString(),
+      lastMessagePreview,
     }
   const replay = await alreadySubmitted()
   if (replay) return replay

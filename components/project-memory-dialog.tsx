@@ -185,9 +185,11 @@ function DecisionList({
 export function ProjectMemoryButton({
   chatId,
   recordId,
+  label,
 }: {
   chatId: string
   recordId?: string
+  label?: string
 }) {
   const [open, setOpen] = useState(false)
   const source = useRef<HTMLElement | null>(null)
@@ -226,8 +228,20 @@ export function ProjectMemoryButton({
       }}
     >
       {recordId ? (
-        <DialogTrigger render={<Button size="sm" variant="outline" />}>
-          <BookMarkedIcon /> Project decision · {recordId}
+        <DialogTrigger
+          render={
+            label ? (
+              <button type="button" className="underline underline-offset-2" />
+            ) : (
+              <Button size="sm" variant="outline" />
+            )
+          }
+        >
+          {label ?? (
+            <>
+              <BookMarkedIcon /> Project decision · {recordId}
+            </>
+          )}
         </DialogTrigger>
       ) : (
         <Tooltip>

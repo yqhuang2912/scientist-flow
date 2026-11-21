@@ -47,13 +47,22 @@ import {
   chatComposerSchema,
   attachmentRejection,
   attachmentMediaType,
+  droppedWorkspaceReference,
   formatAttachmentSize,
+  WORKSPACE_FILE_DRAG_TYPE,
   type ChatComposerInput,
   type ChatComposerDraft,
   type ChatComposerMessage,
 } from "@/lib/chat-composer"
 
 type ComposerBot = { id: string; name: string; avatar: string }
+
+function isFileDrag(transfer: DataTransfer | null): transfer is DataTransfer {
+  return !!transfer && (
+    transfer.types.includes(WORKSPACE_FILE_DRAG_TYPE) ||
+    transfer.types.includes("Files")
+  )
+}
 
 function DraftImagePreview({ file }: { file: File }) {
   const [url, setUrl] = useState("")
@@ -161,14 +170,54 @@ export function ChatComposer({
     )
   }
 
-  const acceptDrop = useEffectEvent((files: FileList) => addFiles(files))
+  const acceptDrop = useEffectEvent((transfer: DataTransfer) => {
+    if (!transfer.types.includes(WORKSPACE_FILE_DRAG_TYPE)) {
+      addFiles(transfer.files)
+      return
+    }
+    if (textOnly) {
+      form.setError("root", { message: "This chat supports text messages only." })
+      return
+    }
+    const result = droppedWorkspaceReference(
+      transfer.getData(WORKSPACE_FILE_DRAG_TYPE),
+      chatId
+    )
+    if ("error" in result) {
+      form.setError("root", { message: result.error })
+      return
+    }
+    form.clearErrors("root")
+    if (!mentions.some((m) => m.kind === "file" && m.value === result.path)) {
+      const draft = form.getValues("text")
+      const prefix = draft && !/\s$/u.test(draft) ? draft + " " : draft
+      const token = "@" + result.path
+      const reference: Mention = {
+        kind: "file",
+        value: result.path,
+        label: result.path,
+        start: prefix.length,
+        end: prefix.length + token.length,
+      }
+      form.setValue("text", prefix + token + " ", { shouldDirty: true })
+      setMentions([...mentions, reference])
+    }
+    requestAnimationFrame(() => {
+      const input = formElement.current?.elements.namedItem("text")
+      if (input instanceof HTMLTextAreaElement) {
+        input.focus({ preventScroll: true })
+        input.setSelectionRange(input.value.length, input.value.length)
+      }
+    })
+  })
   useEffect(() => {
     const area = dropArea?.current ?? formElement.current
     if (!area) return
     function dragOver(event: DragEvent) {
-      if (!event.dataTransfer?.types.includes("Files")) return
+      const transfer = event.dataTransfer
+      if (!isFileDrag(transfer)) return
       event.preventDefault()
-      event.dataTransfer.dropEffect = "copy"
+      transfer.dropEffect = "copy"
       setDragging(true)
     }
     function dragLeave(event: DragEvent) {
@@ -181,9 +230,10 @@ export function ChatComposer({
     }
     function drop(event: DragEvent) {
       setDragging(false)
-      if (!event.dataTransfer?.files.length) return
+      const transfer = event.dataTransfer
+      if (!isFileDrag(transfer)) return
       event.preventDefault()
-      acceptDrop(event.dataTransfer.files)
+      acceptDrop(transfer)
     }
     area.addEventListener("dragover", dragOver)
     area.addEventListener("dragleave", dragLeave)

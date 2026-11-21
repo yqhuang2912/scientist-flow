@@ -13,6 +13,7 @@ test("ordinary group turns stream a committed reply and quarantine candidates un
   for (const scenario of [
     "ordinary",
     "local",
+    "conflicting-summary",
     "quoted",
     "foreign",
     "withdrawn",
@@ -23,7 +24,10 @@ test("ordinary group turns stream a committed reply and quarantine candidates un
       const record = "D-1234567890abcdef"
       const stored = {
         id: record,
-        decision: "本轮实验采用阈值 0.42",
+        decision:
+          scenario === "conflicting-summary"
+            ? "本轮实验采用阈值 0.99"
+            : "本轮实验采用阈值 0.42",
         toolEvidence: {
           executionId: "execution",
           toolCallId: "measurement",
@@ -33,13 +37,16 @@ test("ordinary group turns stream a committed reply and quarantine candidates un
           fields: [
             { path: "/threshold", value: 0.42 },
             { path: "/unit", value: "mV" },
+            { path: "/period", value: "2026-10-01 至 2026-10-31" },
           ],
         },
         quote: "Original report\nwith a second line.",
       }
-      const usesLookup = ["local", "quoted", "foreign", "withdrawn"].includes(
+      const validCitation = ["local", "conflicting-summary", "quoted"].includes(
         scenario
       )
+      const usesLookup =
+        validCitation || scenario === "foreign" || scenario === "withdrawn"
       let active = true
       const verify = Promise.withResolvers<void>()
       const release = Promise.withResolvers<void>()
@@ -80,7 +87,7 @@ test("ordinary group turns stream a committed reply and quarantine candidates un
           await release.promise
           if (!active || id !== record) return
           return scenario === "quoted"
-            ? { ...stored, toolEvidence: null }
+            ? { ...stored, decision: "Recorded decision", toolEvidence: null }
             : stored
         },
       }).getReader()
@@ -139,7 +146,7 @@ test("ordinary group turns stream a committed reply and quarantine candidates un
           toolCallId: "lookup",
           input: JSON.stringify({
             recordId: scenario === "foreign" ? "D-0000000000000000" : record,
-            ...(scenario !== "quoted" && { answer: "本轮实验采用阈值 0.99" }),
+            ...(scenario !== "quoted" && { answer: "阈值为 0.99" }),
           }),
         })
       c.enqueue({
@@ -163,23 +170,23 @@ test("ordinary group turns stream a committed reply and quarantine candidates un
       }
       await done
       assert.equal(model.doStreamCalls.length, 1)
-      assert.deepEqual(
-        citations,
-        scenario === "local" || scenario === "quoted" ? [record] : []
-      )
+      assert.deepEqual(citations, validCitation ? [record] : [])
       assert.deepEqual(
         errors,
         scenario === "mixed" || scenario === "incomplete" ? ["Rejected"] : []
       )
       assert.equal(lookups, usesLookup ? 1 : 0)
       if (usesLookup) assert.equal(outputs.length, 1)
+      const observation =
+        "阈值为 0.42 · 单位为 mV · 报告期为 2026-10-01 至 2026-10-31"
       assert.equal(
         outputs.join(""),
         {
           ordinary: "第一段第二段",
-          local: "本轮实验采用阈值 0.42\n\n> /threshold = 0.42 · /unit = mV",
+          local: observation,
+          "conflicting-summary": observation,
           quoted:
-            "本轮实验采用阈值 0.42\n\n> Original report\n> with a second line.",
+            "Recorded decision\n\n> Original report\n> with a second line.",
           mixed: "第一段",
           incomplete: "",
           foreign: "No matching active decision was found in this project.",

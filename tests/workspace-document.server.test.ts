@@ -9,6 +9,7 @@ import {
 } from "../lib/workspace-text.server"
 import { workspaceOpenPolicy } from "../lib/workspace-open-policy"
 import { MAX_DOCUMENT_BYTES } from "../lib/workspace-document"
+import { formatDatasetJson } from "../lib/workspace-json-preview"
 import {
   replaceExistingWindowsFile,
   isLocalDesktopRequest,
@@ -78,6 +79,28 @@ test("central policy blocks dataset regions before otherwise supported extension
   for (const name of ["x.exe", "x.lnk", "x.url", "x.bin", "x.docm", "x.svg"])
     assert.equal(workspaceOpenPolicy(name).kind, "unsupported", name)
 })
+test("dataset JSON previews preserve numeric literals and disk bytes, even at a UTF-8 prefix boundary", async (t) => {
+  const root = await fixture(t)
+  const relative = "data/scan/subset.JSON"
+  await fs.mkdir(path.join(root, "data/scan"), { recursive: true })
+  const file = path.join(root, relative)
+  const source = '{"id":9007199254740993,"id":2.30e-7,"name":"含有\\\"逗号,括号[]"}'
+  await fs.writeFile(file, source)
+  const doc = await readTextInWorkspace(root, relative)
+  assert.equal(doc.content, source)
+  assert.equal(doc.truncated, false)
+  assert.equal(formatDatasetJson(doc.content), '{\n  "id": 9007199254740993,\n  "id": 2.30e-7,\n  "name": "含有\\\"逗号,括号[]"\n}')
+  assert.equal(workspaceOpenPolicy("outputs/checkpoints/subset.json").kind, "blocked")
+  assert.equal(workspaceOpenPolicy("docs/subset.json").kind, "internal-text")
+  await assert.rejects(saveTextInWorkspace(root, relative, "{}", doc.version), { code: "UNSUPPORTED" })
+  assert.equal(await fs.readFile(file, "utf8"), source)
+  const prefix = '"' + 'a'.repeat(MAX_DOCUMENT_BYTES - 2)
+  await fs.writeFile(file, prefix + '据"')
+  const large = await readTextInWorkspace(root, relative)
+  assert.equal(large.truncated, true)
+  assert.equal(large.content, prefix)
+})
+
 test("Chinese, empty text, BOM and CRLF survive read-save-reopen", async (t) => {
   const root = await fixture(t)
   const file = path.join(root, "研究 笔记.md")

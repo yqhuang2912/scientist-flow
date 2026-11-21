@@ -56,6 +56,14 @@ export function ChatHeader({
                 className={compactChatAvatarStyles}
               />
               <span className="truncate">{chat.name ?? "Untitled task"}</span>
+              {chat.template && (
+                <span
+                  className="truncate text-xs text-muted-foreground"
+                  title={chat.template.name}
+                >
+                  {chat.template.name} · v{chat.template.version}
+                </span>
+              )}
             </Button>
           ) : (
             <Button

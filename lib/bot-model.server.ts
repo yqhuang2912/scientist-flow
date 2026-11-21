@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm"
 import { nanoid } from "nanoid"
 import { modelRequests } from "../db/schema"
 import { db } from "./db"
+import type { ModelChoice } from "./model-catalog"
 
 import {
   chatMemberChoice,
@@ -20,9 +21,11 @@ export async function resolveBotModel(
   chatId: string,
   botId: string,
   runId: string,
-  executionId: string
+  executionId: string,
+  requestedChoice?: ModelChoice
 ) {
-  const choice = await chatMemberChoice(chatId, botId)
+  const memberChoice = await chatMemberChoice(chatId, botId)
+  const choice = requestedChoice ?? memberChoice
   const connection = await resolveConnection(choice)
   const modelForStep = (step: number) => {
     const common = {

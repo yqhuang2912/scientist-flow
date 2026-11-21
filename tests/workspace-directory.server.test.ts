@@ -3,6 +3,7 @@ import { test, type TestContext } from "node:test"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { ensureWorkspaceLayout } from "../lib/workspace-layout.server"
 import {
   createDirectoryInWorkspace,
   deleteDirectoryInWorkspace,
@@ -35,6 +36,19 @@ async function fixture(t: TestContext) {
   })
   return { root, outside }
 }
+
+test("new and existing task layouts keep inputs, reports and logs separate", async (t) => {
+  const { root, outside } = await fixture(t)
+  await ensureWorkspaceLayout(root)
+  for (const dir of ["src", "data", "docs", "configs", "logs", "outputs/docs", "outputs/figures", "outputs/checkpoints"])
+    assert.ok((await fs.stat(path.join(root, dir))).isDirectory(), dir)
+  assert.ok(!(await fs.readdir(path.join(root, "outputs"))).includes("metrics"))
+  await fs.writeFile(path.join(root, "outputs/docs/report.md"), "existing")
+  await ensureWorkspaceLayout(root, true)
+  assert.equal(await fs.readFile(path.join(root, "outputs/docs/report.md"), "utf8"), "existing")
+  await fs.symlink(root, path.join(outside, "logs"), "junction")
+  await assert.rejects(ensureWorkspaceLayout(outside, true), { code: "LINK" })
+})
 
 for (const name of [
   "中文实验",

@@ -6,6 +6,16 @@ export type Mention = {
   end: number
 }
 
+export function mentionPattern(labels: string[]) {
+  const alternatives = [...labels]
+    .sort((a, b) => b.length - a.length)
+    .map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  return new RegExp(
+    String.raw`(?<![\w.+@/\\-])@(${alternatives.join("|")})(?![\p{L}\p{N}_/@\\-]|\.[\p{L}\p{N}])`,
+    "gu"
+  )
+}
+
 export function mentionQuery(text: string, caret: number, mentions: Mention[]) {
   const match = /(?:^|[^A-Za-z0-9_.+@-])@([^@\r\n]*)$/u.exec(
     text.slice(0, caret)

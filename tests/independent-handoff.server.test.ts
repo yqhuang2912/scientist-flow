@@ -754,7 +754,7 @@ test(
             assert.deepEqual(observerReply.parts, [
               {
                 type: "text",
-                text: stored.decision + "\n\n> /value = " + observation,
+                text: "/value = " + observation,
                 state: "done",
               },
               {

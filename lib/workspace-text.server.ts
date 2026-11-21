@@ -34,12 +34,16 @@ function assertCharacters(text: string) {
       fail("BINARY", "This file is not supported UTF-8 text.")
   }
 }
-function decode(bytes: Buffer): Omit<TextDocument, "version"> {
+function decode(
+  bytes: Buffer,
+  truncated = false
+): Omit<TextDocument, "version"> {
   const bom = bytes.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf]))
   let content: string
   try {
     content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
-      bom ? bytes.subarray(3) : bytes
+      bom ? bytes.subarray(3) : bytes,
+      { stream: truncated }
     )
   } catch {
     return fail("ENCODING", "Only valid UTF-8 text is supported.")
@@ -76,6 +80,24 @@ export async function readTextInWorkspace(
   taskDir: string,
   relative: string
 ): Promise<TextDocument> {
+  if (workspaceOpenPolicy(relative).kind === "data-json-preview") {
+    const { target, raw } = await readWorkspaceFileBytes(
+      taskDir,
+      relative,
+      Number.MAX_SAFE_INTEGER,
+      "Dataset file is too large.",
+      MAX_DOCUMENT_BYTES
+    )
+    const truncated = target.stat.size > BigInt(raw.length)
+    return {
+      ...decode(raw, truncated),
+      version: createHash("sha256")
+        .update(target.identity)
+        .update(raw)
+        .digest("hex"),
+      truncated,
+    }
+  }
   return (await readSnapshot(taskDir, relative)).document
 }
 

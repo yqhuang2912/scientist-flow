@@ -7,7 +7,7 @@ export type ChatJobState =
   "queued" | "running" | "completed" | "failed" | "cancelled"
 export const chatJobInput = z
   .strictObject({
-    id: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
+    id: z.string().regex(/^(?!workflow_)[a-zA-Z0-9_-]{1,128}$/),
     botId: z.nanoid(),
     mentionedBotIds: z.array(z.nanoid()).min(1).optional(),
     workspacePaths: z.array(workspaceFileTargetSchema).max(32).optional(),
@@ -55,6 +55,7 @@ export type ChatTurnAck = {
   userMessage: UIMessage
   state: ChatJobState
   acceptedAt: string
+  lastMessagePreview: string
 }
 
 export function isActiveTurn(state: ChatJobState) {

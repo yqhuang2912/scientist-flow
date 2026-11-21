@@ -3,7 +3,14 @@
 import { and, eq, inArray } from "drizzle-orm"
 import { nanoid } from "nanoid"
 
-import { taskFormSchema, bots, chatMembers, chats } from "@/db/schema"
+import {
+  taskFormSchema,
+  bots,
+  chatMembers,
+  chats,
+  taskTemplateVersions as versions,
+} from "@/db/schema"
+import { assertInstallationRequest } from "@/lib/installation-request.server"
 import { db } from "@/lib/db"
 type CreateTaskResult =
   | { success: true; chat: typeof chats.$inferSelect }
@@ -25,23 +32,47 @@ export async function createTask(input: unknown): Promise<CreateTaskResult> {
     }
   }
 
-  const botIds = [...new Set(parsed.data.botIds)]
-
   try {
+    const { templateVersionId, researchBrief } = parsed.data
+    let botIds = [...new Set(parsed.data.botIds)]
+    if (templateVersionId) {
+      await assertInstallationRequest()
+      const [release] = await db
+        .select({ workflow: versions.workflow })
+        .from(versions)
+        .where(eq(versions.id, templateVersionId))
+      if (!release)
+        return {
+          success: false,
+          error: "This published version is no longer available.",
+        }
+      botIds = [...new Set(release.workflow.nodes.map((node) => node.botId))]
+    }
     const selectedBots = await db
       .select({ id: bots.id })
       .from(bots)
       .where(inArray(bots.id, botIds))
 
     if (selectedBots.length !== botIds.length) {
-      return { success: false, error: "Select only available bots." }
+      return {
+        success: false,
+        error: templateVersionId
+          ? "A bot in this version is no longer available."
+          : "Select only available bots.",
+      }
     }
 
     const chatId = nanoid()
     const [chatRows] = await db.batch([
       db
         .insert(chats)
-        .values({ id: chatId, kind: "group", name: parsed.data.name.trim() })
+        .values({
+          id: chatId,
+          kind: "group",
+          name: parsed.data.name.trim(),
+          templateVersionId,
+          researchBrief: templateVersionId ? researchBrief : null,
+        })
         .returning(),
       db
         .insert(chatMembers)
@@ -82,13 +113,37 @@ export async function updateTask(
 
   try {
     const existingChat = await db
-      .select({ kind: chats.kind })
+      .select({ kind: chats.kind, templateVersionId: chats.templateVersionId })
       .from(chats)
       .where(eq(chats.id, chatId))
       .limit(1)
 
     if (existingChat[0]?.kind !== "group") {
       return { success: false, error: "The task could not be updated." }
+    }
+
+    if (
+      existingChat[0].templateVersionId !==
+      (parsed.data.templateVersionId ?? null)
+    ) {
+      return {
+        success: false,
+        error: "The template version is fixed when the task is created.",
+      }
+    }
+    if (existingChat[0].templateVersionId) {
+      await assertInstallationRequest()
+      const [chat] = await db
+        .update(chats)
+        .set({
+          name: parsed.data.name,
+          researchBrief: parsed.data.researchBrief,
+        })
+        .where(eq(chats.id, chatId))
+        .returning()
+      return chat
+        ? { success: true, chat }
+        : { success: false, error: "The task could not be updated." }
     }
 
     const selectedBots = await db

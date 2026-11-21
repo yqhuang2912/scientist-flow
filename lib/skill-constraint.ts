@@ -14,3 +14,8 @@ export const isSkillReferenceError = (error: unknown) =>
   isReferenceError(error, "bot_skills_skill_id_skills_id_fk")
 export const isToolReferenceError = (error: unknown) =>
   isReferenceError(error, "bot_tools_tool_id_tools_id_fk")
+export const isTemplateVersionInUse = (error: unknown) =>
+  isReferenceError(
+    error,
+    "chats_template_version_id_task_template_versions_id_fk"
+  )

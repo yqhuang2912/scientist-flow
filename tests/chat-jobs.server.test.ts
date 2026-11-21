@@ -88,26 +88,31 @@ test(
     process.env.SCIENTISTFLOW_INSTALLATION_ID = owner
     try {
       await db.batch([
-        db.insert(chats).values({ id: chatId, lastMessageAt: later }),
         db
-          .insert(chatTurns)
+          .insert(chats)
           .values({
-            chatId,
-            id: input.id,
-            owner,
-            userMessage,
-            state: "completed",
-            createdAt: accepted,
-            inputHash: createHash("sha256")
-              .update(JSON.stringify(input))
-              .digest("hex"),
+            id: chatId,
+            lastMessageAt: later,
+            lastMessagePreview: "Later message",
           }),
+        db.insert(chatTurns).values({
+          chatId,
+          id: input.id,
+          owner,
+          userMessage,
+          state: "completed",
+          createdAt: accepted,
+          inputHash: createHash("sha256")
+            .update(JSON.stringify(input))
+            .digest("hex"),
+        }),
       ])
       assert.deepEqual(await enqueueChatTurn(chatId, input), {
         turnId: input.id,
         userMessage,
         state: "completed",
         acceptedAt: accepted.toISOString(),
+        lastMessagePreview: "a.txt 等 2 个文件",
       })
       await assert.rejects(
         enqueueChatTurn(chatId, { ...input, text: "Different input" }),
@@ -115,6 +120,7 @@ test(
       )
       const [chat] = await db.select().from(chats).where(eq(chats.id, chatId))
       assert.equal(chat.lastMessageAt.toISOString(), later.toISOString())
+      assert.equal(chat.lastMessagePreview, "Later message")
     } finally {
       if (previousOwner === undefined)
         delete process.env.SCIENTISTFLOW_INSTALLATION_ID

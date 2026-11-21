@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -43,6 +44,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { DocumentEditor } from "@/components/document-editor"
+import { formatDatasetJson } from "@/lib/workspace-json-preview"
 import { DocumentMarkdown } from "@/components/document-markdown"
 import { workspaceOpenPolicy } from "@/lib/workspace-open-policy"
 import {
@@ -92,6 +94,12 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
     session.getSnapshot
   )
   const doc = state.document
+  const buffer = doc?.buffer ?? ""
+  const formatJson = doc?.readOnly && !doc.truncated
+  const displayed = useMemo(
+    () => (formatJson ? formatDatasetJson(buffer) : buffer),
+    [formatJson, buffer]
+  )
   const dirty = isDocumentDirty(doc)
   const [viewport, setViewport] = useState<Viewport>({
     width: 1200,
@@ -236,7 +244,9 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
               ? "Unsaved changes"
               : doc.saved
                 ? "Saved"
-                : "No changes"))
+                : doc.readOnly
+                  ? (doc.truncated ? "Read-only preview · First 256 KiB" : "Read-only preview")
+                  : "No changes"))
 
   return (
     <>
@@ -404,20 +414,22 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
             >
               <RefreshCwIcon />
             </WindowButton>
-            <Button
-              size={compact ? "icon-sm" : "sm"}
-              aria-label="Save"
-              title="Save"
-              disabled={!canSave || locked}
-              onClick={() => void session.save()}
-            >
-              {doc.saving ? (
-                <Spinner data-icon="inline-start" />
-              ) : (
-                <SaveIcon data-icon="inline-start" />
-              )}
-              {!compact && "Save"}
-            </Button>
+            {!doc.readOnly && (
+              <Button
+                size={compact ? "icon-sm" : "sm"}
+                aria-label="Save"
+                title="Save"
+                disabled={!canSave || locked}
+                onClick={() => void session.save()}
+              >
+                {doc.saving ? (
+                  <Spinner data-icon="inline-start" />
+                ) : (
+                  <SaveIcon data-icon="inline-start" />
+                )}
+                {!compact && "Save"}
+              </Button>
+            )}
           </div>
           <div className="flex shrink-0 gap-0.5">
             <WindowButton
@@ -461,9 +473,9 @@ export function DocumentWindow({ session }: { session: DocumentSessionStore }) {
           <div hidden={doc.loading || preview} className="h-full">
             <DocumentEditor
               key={`${doc.chatId}/${doc.relativePath}`}
-              value={doc.buffer}
+              value={displayed}
               language={language}
-              readOnly={locked || !doc.version}
+              readOnly={!!doc.readOnly || locked || !doc.version}
               label={`Contents of ${name}`}
               onChange={session.edit}
               onSave={() => {

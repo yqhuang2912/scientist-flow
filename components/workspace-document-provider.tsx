@@ -47,7 +47,10 @@ export function WorkspaceDocumentProvider({
         if (!parsed.success) return
         const target = parsed.data
         const policy = workspaceOpenPolicy(target.relativePath)
-        if (policy.kind === "internal-text") {
+        if (
+          policy.kind === "internal-text" ||
+          policy.kind === "data-json-preview"
+        ) {
           await session.open(target)
           return
         }

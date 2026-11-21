@@ -79,6 +79,7 @@ export default function WorkspaceFileTreeFixture() {
         className={cn("w-full max-w-96", narrow && "max-w-64")}
       >
         <WorkspaceFileTree
+          chatId="fixture"
           nodes={nodes}
           selectedRel={selected}
           onSelect={setSelected}

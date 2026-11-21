@@ -31,6 +31,8 @@ export type TextDocument = {
   version: string
   bom: boolean
   newline: "LF" | "CRLF" | "CR" | "mixed"
+  /** Only set for the read-only prefix of a larger dataset JSON. */
+  truncated?: boolean
 }
 export type DocumentFailure = { success: false; code: string; error: string }
 export type DocumentResult<T> = { success: true; data: T } | DocumentFailure
